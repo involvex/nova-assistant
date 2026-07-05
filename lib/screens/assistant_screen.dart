@@ -24,13 +24,22 @@ class _AssistantScreenState extends State<AssistantScreen> {
   bool _isGenerating = false;
   bool _thinkingMode = false;
   Uint8List? _currentScreenshot;
-  final String _status = 'Ready';
+  String _status = 'Ready';
 
   @override
   void initState() {
     super.initState();
     _loadInitialScreenshot();
     _inputController.addListener(() => setState(() {}));
+    _listenToModelStatus();
+  }
+
+  void _listenToModelStatus() {
+    ModelOrchestrator.instance.statusStream.listen((status) {
+      if (mounted) {
+        setState(() => _status = status);
+      }
+    });
   }
 
   @override

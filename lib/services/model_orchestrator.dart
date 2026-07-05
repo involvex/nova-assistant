@@ -77,36 +77,40 @@ class ModelOrchestrator {
       _activeChat = null;
     }
 
-    // Try to get the active model
+    // Try to get the active model with timeout
     if (FlutterGemma.hasActiveModel()) {
       try {
         _statusController.add('Loading ${model.displayName}...');
         _activeModel = await FlutterGemma.getActiveModel(
           maxTokens: _tokenLimitFor(model),
           preferredBackend: PreferredBackend.gpu,
-        );
+        ).timeout(const Duration(seconds: 30));
         _activeModelType = model;
         _isInitialized = true;
         _statusController.add('${model.displayName} ready');
         return _activeModel!;
       } catch (e) {
         debugPrint('getActiveModel failed: $e');
-        _statusController.add('Model load failed, will try reinstall...');
+        _statusController.add('Model load failed, trying reinstall...');
         _activeModel = null;
       }
     }
 
     // No active model or load failed — try to install
-    _statusController.add('Installing ${model.displayName}...');
+    _statusController.add('Downloading ${model.displayName}...');
     try {
       final url = ModelHuggingFaceURLs.urlFor(model);
-      final installed = await ModelManager.instance.installFromNetwork(
-        url: url,
-        modelType: model.modelType,
-        onProgress: (progress) {
-          _statusController.add('Downloading ${model.displayName}: $progress%');
-        },
-      );
+      final installed = await ModelManager.instance
+          .installFromNetwork(
+            url: url,
+            modelType: model.modelType,
+            onProgress: (progress) {
+              _statusController.add(
+                'Downloading ${model.displayName}: $progress%',
+              );
+            },
+          )
+          .timeout(const Duration(seconds: 300));
 
       if (installed == null) {
         throw Exception('Model installation returned null');
@@ -117,13 +121,13 @@ class ModelOrchestrator {
       _activeModel = await FlutterGemma.getActiveModel(
         maxTokens: _tokenLimitFor(model),
         preferredBackend: PreferredBackend.gpu,
-      );
+      ).timeout(const Duration(seconds: 30));
       _activeModelType = model;
       _isInitialized = true;
       _statusController.add('${model.displayName} ready');
       return _activeModel!;
     } catch (e) {
-      _statusController.add('Failed to install ${model.displayName}: $e');
+      _statusController.add('Failed to load ${model.displayName}: $e');
       rethrow;
     }
   }
@@ -265,5 +269,13 @@ class ModelOrchestrator {
     _activeModel = null;
     _activeChat = null;
     _isInitialized = false;
+  }
+
+  Future<void> initializeDefaultModel() async {
+    try {
+      await _getOrCreateModel(selector.fastModel);
+    } catch (e) {
+      debugPrint('Default model init failed (will retry on first use): $e');
+    }
   }
 }

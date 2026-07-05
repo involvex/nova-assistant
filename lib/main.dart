@@ -25,16 +25,17 @@ void main() async {
   // Initialize RAG memory
   await MemoryService.initialize();
 
-  // Pre-download models in background
+  // Pre-download and initialize models in background
   _prefetchModels();
 
   runApp(const NovaApp());
 }
 
 Future<void> _prefetchModels() async {
-  // Kick off model downloads in background — doesn't block UI
-  // Actual model selection is deferred to first use for speed
-  ModelOrchestrator.instance.prefetchModels();
+  // Download models in background
+  await ModelOrchestrator.instance.prefetchModels();
+  // Initialize the default model after download completes
+  ModelOrchestrator.instance.initializeDefaultModel();
 }
 
 class NovaApp extends StatelessWidget {

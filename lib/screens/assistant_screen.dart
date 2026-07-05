@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/chat_message.dart';
+import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
@@ -329,6 +330,87 @@ class _AssistantScreenState extends State<AssistantScreen> {
             ),
           ),
 
+          // Model picker
+          Tooltip(
+            message: 'Select model',
+            child: PopupMenuButton<NovaModel>(
+              initialValue: ModelOrchestrator.instance.preferredModelType,
+              onSelected: (model) {
+                ModelOrchestrator.instance.preferredModelType = model;
+              },
+              itemBuilder: (context) => NovaModel.values.map((model) {
+                return PopupMenuItem<NovaModel>(
+                  value: model,
+                  child: Row(
+                    children: [
+                      Icon(
+                        model.hasThinking
+                            ? Icons.psychology
+                            : (model.hasVision
+                                  ? Icons.image
+                                  : Icons.chat_bubble_outline),
+                        size: 18,
+                        color: const Color(0xFF6C63FF),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              model.displayName,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            Text(
+                              '${model.sizeMB}MB',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.account_tree,
+                      size: 16,
+                      color: Color(0xFF6C63FF),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      ModelOrchestrator
+                              .instance
+                              .preferredModelType
+                              ?.displayName ??
+                          'Auto',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
           // Screenshot capture
           Tooltip(
             message: 'Capture screen',
@@ -566,9 +648,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
           // Voice input
           VoiceInputButton(
-            onAudioRecorded: (path) {
-              // TODO: Send audio to transcription service, then send transcribed text
-              debugPrint('Audio recorded: $path');
+            onTranscription: (text) {
+              if (text.isNotEmpty) {
+                _inputController.text = text;
+                _sendMessage();
+              }
             },
           ),
 

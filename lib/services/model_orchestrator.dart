@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/platform/tool_executor_service.dart';
@@ -31,6 +35,8 @@ class ModelOrchestrator {
   InferenceModel? _activeModel;
   InferenceChat? _activeChat;
   NovaModel? _activeModelType;
+  NovaModel? _preferredModelOverride;
+  bool _modelOverrideDirty = false;
   bool _isInitialized = false;
 
   final _statusController = StreamController<String>.broadcast();
@@ -41,27 +47,80 @@ class ModelOrchestrator {
 
   bool get isInitialized => _isInitialized;
 
+  NovaModel? get preferredModelType => _preferredModelOverride;
+
+  set preferredModelType(NovaModel? model) {
+    if (_preferredModelOverride == model) return;
+    _preferredModelOverride = model;
+    _modelOverrideDirty = true;
+    _activeChat = null;
+    if (_activeModel != null &&
+        (_activeModelType == null ||
+            model == null ||
+            model != _activeModelType)) {
+      _activeModel!.close().catchError((_) {});
+      _activeModel = null;
+    }
+  }
+
+  void clearModelOverride() {
+    _preferredModelOverride = null;
+    _modelOverrideDirty = false;
+  }
+
   Future<void> prefetchModels() async {
     _statusController.add('Checking models...');
     try {
-      // Always go through the install pipeline for each model.
-      // FlutterGemma.installModel().install() is idempotent — it skips
-      // download if the file is already on disk, but ALWAYS calls
-      // setActiveModel(spec) with the correct fileType, which is critical
-      // for engine routing.
-      await ModelManager.instance.installFromNetwork(
-        url: ModelHuggingFaceURLs.smollm,
-        modelType: NovaModel.smollm.modelType,
-        fileType: NovaModel.smollm.fileType,
-      );
-      await ModelManager.instance.installFromNetwork(
-        url: ModelHuggingFaceURLs.gemma4E2b,
-        modelType: NovaModel.gemma4E2b.modelType,
-        fileType: NovaModel.gemma4E2b.fileType,
-      );
+      // NEVER download in prefetch — only register models already on disk.
+      // Downloads happen lazily in _getOrCreateModel() when actually needed.
+      await _registerInstalledModels();
       _statusController.add('Models ready');
     } catch (e) {
-      _statusController.add('Model download failed: $e');
+      _statusController.add('Model check failed: $e');
+    }
+  }
+
+  /// Scan disk for model files and register them without downloading.
+  Future<void> _registerInstalledModels() async {
+    final dir = await getApplicationDocumentsDirectory();
+
+    for (final model in NovaModel.values) {
+      final fileName = ModelHuggingFaceURLs.fileNameFor(model);
+
+      // Already tracked?
+      if (ModelManager.instance.isModelInstalled(fileName)) continue;
+
+      // Check disk directly
+      File? foundFile;
+      final file = File('${dir.path}/$fileName');
+      if (await file.exists()) {
+        foundFile = file;
+      } else {
+        final modelsDir = Directory('${dir.path}/models');
+        if (await modelsDir.exists()) {
+          await for (final entity in modelsDir.list()) {
+            if (entity is File) {
+              final baseName = p.basename(entity.path);
+              if (baseName.contains(
+                fileName.replaceAll('.litertlm', '').replaceAll('.task', ''),
+              )) {
+                foundFile = entity;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (foundFile != null) {
+        await ModelManager.instance.registerDiskModel(
+          filePath: foundFile.path,
+          fileName: fileName,
+          modelType: model.modelType,
+          fileType: model.fileType,
+          fileSizeBytes: await foundFile.length(),
+        );
+      }
     }
   }
 
@@ -171,11 +230,17 @@ class ModelOrchestrator {
     bool thinkingMode = false,
     List<Tool> tools = const [],
   }) async* {
-    final model = _selectModel(
-      query: query,
-      screenshot: screenshot,
-      thinkingMode: thinkingMode,
-    );
+    final model = _modelOverrideDirty && _preferredModelOverride != null
+        ? _preferredModelOverride!
+        : _selectModel(
+            query: query,
+            screenshot: screenshot,
+            thinkingMode: thinkingMode,
+          );
+
+    if (_modelOverrideDirty) {
+      _modelOverrideDirty = false;
+    }
 
     _statusController.add('Using ${model.displayName}');
 
@@ -212,6 +277,7 @@ class ModelOrchestrator {
 
     String fullResponse = '';
     String? currentThinking;
+    final textBuffer = StringBuffer();
 
     // Tool call loop: after executing a tool, re-generate so the model
     // can incorporate the tool result into its response.
@@ -223,13 +289,38 @@ class ModelOrchestrator {
 
       await for (final event in _activeChat!.generateChatResponseAsync()) {
         if (event is TextResponse) {
-          fullResponse += event.token;
-          yield InferenceResult(
-            text: fullResponse,
-            model: model,
-            isStreaming: true,
-            thinking: thinkingMode ? currentThinking : null,
-          );
+          final token = event.token;
+          fullResponse += token;
+          textBuffer.write(token);
+
+          // Try to parse a function call from the accumulated buffer
+          final parsed = _tryParseFunctionCall(textBuffer.toString());
+          if (parsed != null) {
+            // Clear the buffer and handle the function call
+            textBuffer.clear();
+            _statusController.add('Executing ${parsed['name']}...');
+
+            final toolResult = await ToolExecutorService.instance.executeTool(
+              parsed['name'] as String,
+              Map<String, dynamic>.from(parsed['args'] as Map),
+            );
+
+            final toolResponseMessage = Message.toolResponse(
+              toolName: parsed['name'] as String,
+              response: Map<String, dynamic>.from(toolResult),
+            );
+
+            await _activeChat!.addQuery(toolResponseMessage);
+            hasPendingToolCalls = true;
+            // Don't yield here — wait for the next generation pass
+          } else {
+            yield InferenceResult(
+              text: fullResponse,
+              model: model,
+              isStreaming: true,
+              thinking: thinkingMode ? currentThinking : null,
+            );
+          }
         } else if (event is ThinkingResponse) {
           currentThinking = event.content;
           yield InferenceResult(
@@ -239,6 +330,7 @@ class ModelOrchestrator {
             thinking: currentThinking,
           );
         } else if (event is FunctionCallResponse) {
+          // Plugin-level function call detected
           _statusController.add('Executing ${event.name}...');
 
           final toolResult = await ToolExecutorService.instance.executeTool(
@@ -252,8 +344,6 @@ class ModelOrchestrator {
           );
 
           await _activeChat!.addQuery(toolResponseMessage);
-
-          // Signal that another generation pass is needed
           hasPendingToolCalls = true;
         }
       }
@@ -275,6 +365,65 @@ class ModelOrchestrator {
       isStreaming: false,
       thinking: thinkingMode ? currentThinking : null,
     );
+  }
+
+  /// Try to extract a function call from accumulated text.
+  /// Handles both flat {"name":"X","arguments":{...}} and
+  /// wrapped {"role":"assistant","tool_calls":[{...}]} formats.
+  Map<String, dynamic>? _tryParseFunctionCall(String text) {
+    // Try wrapped format first: {"role":"assistant","tool_calls":[...]}
+    try {
+      final wrapped = _parseJsonSafely(text);
+      if (wrapped != null && wrapped['tool_calls'] is List) {
+        final calls = wrapped['tool_calls'] as List;
+        if (calls.isNotEmpty && calls.first is Map) {
+          final fn = calls.first['function'] as Map?;
+          if (fn != null && fn['name'] != null) {
+            return {
+              'name': fn['name'],
+              'args':
+                  (fn['arguments'] as Map?)?.cast<String, dynamic>() ??
+                  <String, dynamic>{},
+            };
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Try flat format: {"name":"X","arguments":{...}}
+    try {
+      final flat = _parseJsonSafely(text);
+      if (flat != null && flat['name'] is String && flat['arguments'] is Map) {
+        return {'name': flat['name'], 'args': flat['arguments']};
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  Map<String, dynamic>? _parseJsonSafely(String text) {
+    try {
+      final trimmed = text.trim();
+      // Only try if it looks like JSON
+      if (!trimmed.startsWith('{')) return null;
+      // Find the last complete JSON object
+      final lastBrace = trimmed.lastIndexOf('}');
+      if (lastBrace == -1) return null;
+      final candidate = trimmed.substring(0, lastBrace + 1);
+      if (!candidate.startsWith('{')) return null;
+      // Remove any leading text (e.g. role prefix)
+      final jsonStart = candidate.indexOf('{');
+      if (jsonStart > 0) {
+        final possible = candidate.substring(jsonStart);
+        if (possible.startsWith('{')) {
+          final decoded = jsonDecode(possible);
+          if (decoded is Map<String, dynamic>) return decoded;
+        }
+      }
+      final decoded = jsonDecode(candidate);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {}
+    return null;
   }
 
   String _systemPromptFor(NovaModel model) {

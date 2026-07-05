@@ -279,4 +279,38 @@ class ModelManager {
   bool isModelInstalled(String fileName) {
     return _installedModels.any((m) => m.fileName == fileName);
   }
+
+  /// Register a model already on disk (no download). Used by prefetch to
+  /// register existing files without triggering network requests.
+  Future<void> registerDiskModel({
+    required String filePath,
+    required String fileName,
+    required ModelType modelType,
+    required ModelFileType fileType,
+    required int fileSizeBytes,
+  }) async {
+    final existing = _installedModels.where((m) => m.fileName == fileName);
+    if (existing.isNotEmpty) return;
+
+    // Register with FlutterGemma so the engine knows about it
+    try {
+      await FlutterGemma.installModel(
+        modelType: modelType,
+        fileType: fileType,
+      ).fromFile(filePath).install();
+
+      final model = InstalledModel(
+        id: fileName,
+        fileName: fileName,
+        modelType: modelType,
+        installedAt: DateTime.now(),
+        fileSizeBytes: fileSizeBytes,
+      );
+      _installedModels.add(model);
+      await _saveToPrefs();
+      _statusController.add('Registered: $fileName');
+    } catch (e) {
+      debugPrint('registerDiskModel failed: $e');
+    }
+  }
 }

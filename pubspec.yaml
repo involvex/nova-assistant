@@ -22,6 +22,7 @@ dependencies:
   # Audio (voice input)
   record: ^7.1.1
   just_audio: ^0.10.6
+  speech_to_text: ^7.0.0
 
   # Storage
   path_provider: ^2.1.5

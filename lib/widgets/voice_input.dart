@@ -1,12 +1,10 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
 class VoiceInputButton extends StatefulWidget {
-  final void Function(String audioPath) onAudioRecorded;
+  final void Function(String transcription) onTranscription;
 
-  const VoiceInputButton({super.key, required this.onAudioRecorded});
+  const VoiceInputButton({super.key, required this.onTranscription});
 
   @override
   State<VoiceInputButton> createState() => _VoiceInputButtonState();
@@ -15,8 +13,10 @@ class VoiceInputButton extends StatefulWidget {
 class _VoiceInputButtonState extends State<VoiceInputButton>
     with SingleTickerProviderStateMixin {
   late AnimationController _animController;
-  final AudioRecorder _recorder = AudioRecorder();
-  bool _isRecording = false;
+  final SpeechToText _speech = SpeechToText();
+  bool _isListening = false;
+  bool _speechAvailable = false;
+  String _lastWords = '';
   bool _isPressed = false;
 
   @override
@@ -26,51 +26,62 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
       vsync: this,
       duration: const Duration(milliseconds: 600),
     )..repeat(reverse: true);
+    _initSpeech();
+  }
+
+  Future<void> _initSpeech() async {
+    try {
+      _speechAvailable = await _speech.initialize();
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('Speech init failed: $e');
+    }
   }
 
   @override
   void dispose() {
     _animController.dispose();
-    _recorder.dispose();
+    _speech.stop();
     super.dispose();
   }
 
-  Future<void> _toggleRecording() async {
-    if (_isRecording) {
-      await _stopRecording();
+  Future<void> _toggleListening() async {
+    if (_isListening) {
+      await _speech.stop();
+      if (mounted) setState(() => _isListening = false);
+      if (_lastWords.isNotEmpty) {
+        widget.onTranscription(_lastWords);
+        _lastWords = '';
+      }
     } else {
-      await _startRecording();
+      await _startListening();
     }
   }
 
-  Future<void> _startRecording() async {
-    if (!await _recorder.hasPermission()) {
-      debugPrint('VoiceInputButton: no microphone permission');
+  Future<void> _startListening() async {
+    if (!_speechAvailable) {
+      debugPrint('Speech not available on this device');
       return;
     }
 
-    final dir = await getTemporaryDirectory();
-    final path =
-        '${dir.path}/nova_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    setState(() => _isListening = true);
 
-    await _recorder.start(const RecordConfig(), path: path);
-    if (mounted) {
-      setState(() => _isRecording = true);
-    }
-  }
-
-  Future<void> _stopRecording() async {
-    final path = await _recorder.stop();
-    if (mounted) {
-      setState(() => _isRecording = false);
-    }
-
-    if (path != null && path.isNotEmpty) {
-      final file = File(path);
-      if (await file.exists()) {
-        widget.onAudioRecorded(path);
-      }
-    }
+    _speech.listen(
+      onResult: (result) {
+        _lastWords = result.recognizedWords;
+        if (result.finalResult && _lastWords.isNotEmpty) {
+          widget.onTranscription(_lastWords);
+          _lastWords = '';
+        }
+      },
+      listenOptions: SpeechListenOptions(
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
+        partialResults: true,
+        cancelOnError: false,
+        listenMode: ListenMode.dictation,
+      ),
+    );
   }
 
   @override
@@ -79,7 +90,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
       onTapDown: (_) => setState(() => _isPressed = true),
       onTapUp: (_) {
         setState(() => _isPressed = false);
-        _toggleRecording();
+        _toggleListening();
       },
       onTapCancel: () => setState(() => _isPressed = false),
       child: AnimatedBuilder(
@@ -95,10 +106,14 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
               height: 48,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _isRecording ? Colors.red[600] : const Color(0xFF6C63FF),
+                color: _isListening
+                    ? Colors.red[600]
+                    : (_speechAvailable
+                          ? const Color(0xFF6C63FF)
+                          : Colors.grey),
                 boxShadow: [
                   BoxShadow(
-                    color: (_isRecording ? Colors.red : const Color(0xFF6C63FF))
+                    color: (_isListening ? Colors.red : const Color(0xFF6C63FF))
                         .withValues(alpha: 0.4 + (_animController.value * 0.2)),
                     blurRadius: 8 + (_animController.value * 8),
                     spreadRadius: _animController.value * 2,
@@ -106,7 +121,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
                 ],
               ),
               child: Icon(
-                _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+                _isListening ? Icons.stop_rounded : Icons.mic_rounded,
                 color: Colors.white,
                 size: 24,
               ),

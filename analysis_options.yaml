@@ -16,6 +16,14 @@ analyzer:
     prefer_is_empty: warning
     prefer_is_not_empty: warning
     avoid_print: warning
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 
 dart_code_linter:
   metrics:

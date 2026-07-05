@@ -3,14 +3,12 @@ package dev.nova.assistant
 import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.PixelFormat
 import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
-import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -21,7 +19,7 @@ import java.io.ByteArrayOutputStream
 
 /**
  * Handles MediaProjection-based screen capture.
- * Provides the latest frame as a ByteArray (PNG) via a Flutter MethodChannel.
+ * Uses RGBA_8888 for reliable direct pixel access on all GPU vendors.
  */
 object ScreenCaptureHelper {
     private const val TAG = "NovaScreenCapture"
@@ -34,13 +32,11 @@ object ScreenCaptureHelper {
     private var captureThread: HandlerThread? = null
     private var captureHandler: Handler? = null
     private var isCapturing = false
-    private var activityRef: Activity? = null
 
     private var _latestFrame: ByteArray? = null
     val latestFrame: ByteArray? get() = _latestFrame
 
     fun registerWith(messenger: BinaryMessenger, activity: Activity) {
-        activityRef = activity
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getLatestScreenshot" -> {
@@ -73,8 +69,8 @@ object ScreenCaptureHelper {
             val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             mediaProjection = projectionManager.getMediaProjection(Activity.RESULT_OK, resultData)
 
-            // Use JPEG format — universally readable across GPU vendors
-            imageReader = ImageReader.newInstance(WIDTH, HEIGHT, ImageFormat.JPEG, 2)
+            // RGBA_8888 has directly readable pixel planes on all GPU vendors
+            imageReader = ImageReader.newInstance(WIDTH, HEIGHT, PixelFormat.RGBA_8888, 2)
 
             val surface: Surface = imageReader!!.surface
 
@@ -100,7 +96,7 @@ object ScreenCaptureHelper {
 
             isCapturing = true
 
-            // Single capture after permission grant — not continuous polling
+            // Capture a single frame after permission is granted
             captureHandler?.postDelayed({
                 captureFrame()
             }, 500)
@@ -116,22 +112,37 @@ object ScreenCaptureHelper {
         val reader = imageReader ?: return
         var image: Image? = null
         try {
-            image = reader.acquireLatestImage() ?: return
+            image = reader.acquireLatestImage()
+            if (image == null) {
+                Log.w(TAG, "No image available in ImageReader")
+                return
+            }
 
-            // JPEG format: planes[0] contains the compressed JPEG data
+            // RGBA_8888: planes[0] contains raw RGBA bytes directly
             val buffer = image.planes[0].buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
+            val pixelStride = image.planes[0].pixelStride
+            val rowStride = image.planes[0].rowStride
 
-            _latestFrame = bytes
-            AssistantActivity.latestScreenshot = bytes
+            // Convert RGBA to Bitmap
+            val bitmap = Bitmap.createBitmap(
+                WIDTH, HEIGHT, Bitmap.Config.ARGB_8888
+            )
+            bitmap.copyPixelsFromBuffer(buffer)
+
+            // Compress to PNG for Flutter
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 70, stream)
+            _latestFrame = stream.toByteArray()
+
+            AssistantActivity.latestScreenshot = _latestFrame
             AssistantActivity.latestTimestamp = System.currentTimeMillis()
 
-            Log.d(TAG, "Captured frame: ${bytes.size} bytes")
+            bitmap.recycle()
+            Log.d(TAG, "Captured frame: ${_latestFrame!!.size} bytes")
         } catch (e: Exception) {
             Log.e(TAG, "Error capturing frame: ${e.message}")
         } finally {
-            image?.close()
+            try { image?.close() } catch (_: Exception) {}
         }
     }
 
@@ -146,13 +157,9 @@ object ScreenCaptureHelper {
 
     fun stopCapture() {
         isCapturing = false
-        try {
-            mediaProjection?.stop()
-        } catch (_: Exception) {}
+        try { mediaProjection?.stop() } catch (_: Exception) {}
         mediaProjection = null
-        try {
-            imageReader?.close()
-        } catch (_: Exception) {}
+        try { imageReader?.close() } catch (_: Exception) {}
         imageReader = null
         captureThread?.quitSafely()
         captureThread = null

@@ -155,11 +155,14 @@ object ToolExecutor {
     }
 
     private fun takeScreenshot(): Map<String, Any> {
-        val frame = ScreenCaptureHelper.latestFrame
-        return mapOf(
-            "success" to (frame != null),
-            "hasScreenshot" to (frame != null),
-            "bytes" to (frame?.size ?: 0)
-        )
+        val frame = AssistantActivity.latestScreenshot
+        return buildMap {
+            put("success", frame != null)
+            put("hasScreenshot", frame != null)
+            put("bytes", frame?.size ?: 0)
+            if (frame != null) {
+                put("data", frame)
+            }
+        }
     }
 }

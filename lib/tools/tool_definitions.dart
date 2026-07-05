@@ -121,8 +121,8 @@ class NovaTools {
   static final Tool takeScreenshot = Tool(
     name: 'take_screenshot',
     description:
-        'Capture the current screen and return its size. '
-        'Use this before asking about what is on screen.',
+        'Capture the current screen and return the image bytes as base64. '
+        'Use this to see what is on the screen.',
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},

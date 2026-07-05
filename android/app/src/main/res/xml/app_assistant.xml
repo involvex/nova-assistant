@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assistant xmlns:android="http://schemas.android.com/apk/res/android"
+    android:activity="dev.nova.assistant.AssistantActivity"
+    android:settingsActivity="dev.nova.assistant.MainActivity" />

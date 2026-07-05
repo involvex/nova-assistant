@@ -16,7 +16,9 @@ class ToolExecutorService {
     try {
       final result = await _channel.invokeMethod(toolName, args);
       if (result is Map) {
-        return Map<String, dynamic>.from(result);
+        return _convertResultDyanmicToListInt(
+          Map<String, dynamic>.from(result),
+        );
       }
       return {"success": true, "result": result};
     } on PlatformException catch (e) {
@@ -24,6 +26,22 @@ class ToolExecutorService {
     } catch (e) {
       return {"success": false, "error": e.toString()};
     }
+  }
+
+  Map<String, dynamic> _convertResultDyanmicToListInt(
+    Map<String, dynamic> map,
+  ) {
+    return map.map((key, value) {
+      if (value is List<dynamic>) {
+        final converted = value.map((e) {
+          if (e is int) return e;
+          if (e is double) return e.toInt();
+          return e;
+        }).toList();
+        return MapEntry(key, converted);
+      }
+      return MapEntry(key, value);
+    });
   }
 
   Future<Map<String, dynamic>> getTime() async {
@@ -64,8 +82,8 @@ class ToolExecutorService {
 
   Future<Uint8List?> takeScreenshot() async {
     final result = await executeTool("take_screenshot", {});
-    if (result['success'] == true && result['data'] != null) {
-      final data = result['data'];
+    final data = result['data'];
+    if (data != null) {
       if (data is Uint8List) return data;
       if (data is List<int>) return Uint8List.fromList(data);
     }

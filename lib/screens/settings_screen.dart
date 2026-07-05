@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/platform/assistant_role_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,15 +22,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _thinkingMode = false;
   bool _voiceInput = true;
   bool _ragMemory = false;
+  bool _isAssistantRoleHeld = false;
   String _installStatus = '';
+  StreamSubscription<Map<String, dynamic>>? _assistantRoleSub;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _checkAssistantRole();
+    _assistantRoleSub = AssistantRoleService.instance.onAssistantRoleChanged
+        .listen((event) {
+          if (event['event'] == 'assistantRoleChanged' && mounted) {
+            setState(() => _isAssistantRoleHeld = event['held'] as bool);
+          }
+        });
     ModelManager.instance.statusStream.listen((status) {
       if (mounted) setState(() => _installStatus = status);
     });
+  }
+
+  @override
+  void dispose() {
+    _assistantRoleSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _checkAssistantRole() async {
+    final held = await AssistantRoleService.instance.isAssistantRoleHeld();
+    if (mounted) setState(() => _isAssistantRoleHeld = held);
   }
 
   Future<void> _loadSettings() async {
@@ -142,6 +164,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) {
               setState(() => _ragMemory = v);
               _saveSetting('settings_rag_memory', v);
+            },
+          ),
+          _actionTile(
+            icon: Icons.assistant_outlined,
+            title: 'Default assistant',
+            subtitle: _isAssistantRoleHeld
+                ? 'Nova is your default assistant'
+                : 'Tap to set Nova as system assistant',
+            onTap: () async {
+              await AssistantRoleService.instance.requestAssistantRole();
             },
           ),
           const SizedBox(height: 24),

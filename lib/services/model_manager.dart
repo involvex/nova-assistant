@@ -87,17 +87,52 @@ class ModelManager {
     void Function(int progress)? onProgress,
   }) async {
     try {
-      _statusController.add('Preparing download...');
-
       final uri = Uri.parse(url);
       final fileName = p.basename(uri.path);
 
-      // ALWAYS go through FlutterGemma's install pipeline.
-      // install() is idempotent — if the model is already on disk it skips
-      // download but STILL calls setActiveModel(spec) with the correct
-      // fileType, which is critical for engine routing (.litertlm →
-      // LiteRtLmEngine, .task → MediaPipeEngine).
-      _statusController.add('Installing model...');
+      // Check if already in our tracked list — skip download
+      final existing = _installedModels.where((m) => m.fileName == fileName);
+      if (existing.isNotEmpty) {
+        _statusController.add('Model already installed: $fileName');
+        return existing.first;
+      }
+
+      // Check if file exists on disk but not in prefs (e.g. after prefs corruption)
+      final dir = await getApplicationDocumentsDirectory();
+      final fileOnDisk = File('${dir.path}/$fileName');
+      final modelsDir = Directory('${dir.path}/models');
+      bool foundOnDisk = await fileOnDisk.exists();
+      if (!foundOnDisk && await modelsDir.exists()) {
+        await for (final entity in modelsDir.list()) {
+          if (entity is File &&
+              entity.path.contains(
+                fileName.replaceAll('.litertlm', '').replaceAll('.task', ''),
+              )) {
+            foundOnDisk = true;
+            break;
+          }
+        }
+      }
+
+      if (foundOnDisk) {
+        // File exists on disk but wasn't in prefs — just track it, no download
+        final specName = fileName;
+        final model = InstalledModel(
+          id: specName,
+          fileName: specName,
+          modelType: modelType,
+          installedAt: DateTime.now(),
+          fileSizeBytes: await _getFileSize(dir.path, fileName),
+        );
+        _installedModels.removeWhere((m) => m.id == specName);
+        _installedModels.add(model);
+        await _saveToPrefs();
+        _statusController.add('Model found on disk: $fileName');
+        return model;
+      }
+
+      // Not installed — download it
+      _statusController.add('Downloading $fileName...');
       final builder = FlutterGemma.installModel(
         modelType: modelType,
         fileType: fileType,
@@ -105,11 +140,8 @@ class ModelManager {
       if (onProgress != null) {
         builder.withProgress(onProgress);
       }
-      _statusController.add('Starting download...');
       await builder.install();
 
-      // Find the installed file
-      final dir = await getApplicationDocumentsDirectory();
       final spec = await _findInstalledSpec(fileName, modelType);
       final specName = spec?['name'] as String? ?? fileName;
 
@@ -121,7 +153,6 @@ class ModelManager {
         fileSizeBytes: await _getFileSize(dir.path, fileName),
       );
 
-      // Dedup: remove any existing entry with the same id before adding
       _installedModels.removeWhere((m) => m.id == specName);
       _installedModels.add(model);
       await _saveToPrefs();

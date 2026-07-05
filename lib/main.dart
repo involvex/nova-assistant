@@ -6,9 +6,13 @@ import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/services/memory_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Ensure SharedPreferences is initialized before any usage
+  await SharedPreferences.getInstance();
 
   // Initialize Flutter Gemma with all available inference engines
   await FlutterGemma.initialize(
@@ -16,16 +20,10 @@ void main() async {
       LiteRtLmEngine(), // .litertlm models (Gemma 4, Qwen3, FastVLM, etc.)
       MediaPipeEngine(), // .task models (Gemma3n, Gemma 3, DeepSeek, etc.)
     ],
-    maxDownloadRetries: 10,
+    maxDownloadRetries: 3,
   );
 
-  // Clear any stale active model identity from previous runs.
-  // This forces the install pipeline to re-register with the correct
-  // fileType (e.g. .litertlm → LiteRtLmEngine, .task → MediaPipeEngine).
-  // Safe to call even if nothing is persisted (no-op).
-  await FlutterGemma.clearActiveInferenceIdentity();
-
-  // Initialize model manager
+  // Initialize model manager (restores installed models list from prefs)
   await ModelManager.instance.initialize();
 
   // Initialize RAG memory
@@ -38,9 +36,7 @@ void main() async {
 }
 
 Future<void> _prefetchModels() async {
-  // Download models in background
   await ModelOrchestrator.instance.prefetchModels();
-  // Initialize the default model after download completes
   ModelOrchestrator.instance.initializeDefaultModel();
 }
 

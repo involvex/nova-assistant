@@ -46,6 +46,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveSetting(String key, bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(key, value);
+    // Ensure data is written to disk immediately
+    await prefs.reload();
   }
 
   @override

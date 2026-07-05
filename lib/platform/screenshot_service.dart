@@ -1,0 +1,55 @@
+import 'package:flutter/services.dart';
+
+class ScreenshotService {
+  static const _channel = MethodChannel('dev.nova.assistant/screenshot');
+
+  static ScreenshotService? _instance;
+  static ScreenshotService get instance => _instance ??= ScreenshotService._();
+
+  ScreenshotService._();
+
+  Uint8List? _cachedScreenshot;
+  DateTime? _lastCapture;
+
+  Uint8List? get cachedScreenshot => _cachedScreenshot;
+
+  Future<Uint8List?> getLatestScreenshot() async {
+    try {
+      final result = await _channel.invokeMethod<Uint8List>(
+        'getLatestScreenshot',
+      );
+      if (result != null && result.isNotEmpty) {
+        _cachedScreenshot = result;
+        _lastCapture = DateTime.now();
+      }
+      return result;
+    } on PlatformException catch (e) {
+      print('ScreenshotService: failed to get screenshot — ${e.message}');
+      return null;
+    }
+  }
+
+  Future<bool> isCapturing() async {
+    try {
+      return await _channel.invokeMethod<bool>('isCapturing') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> requestCapture() async {
+    try {
+      await _channel.invokeMethod<void>('requestCapture');
+    } catch (_) {}
+  }
+
+  bool get hasRecentCapture {
+    if (_cachedScreenshot == null || _lastCapture == null) return false;
+    return DateTime.now().difference(_lastCapture!).inSeconds < 5;
+  }
+
+  void clearCache() {
+    _cachedScreenshot = null;
+    _lastCapture = null;
+  }
+}

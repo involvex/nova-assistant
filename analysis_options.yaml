@@ -1,0 +1,7 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_final_fields: false
+    non_constant_identifier_names: false
+    avoid_print: false

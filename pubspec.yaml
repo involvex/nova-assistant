@@ -1,0 +1,41 @@
+name: nova_assistant
+description: "Nova — an on-device AI assistant powered by Gemma, with assistant button integration and screen awareness."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: '>=3.44.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # AI Inference — core + engines
+  flutter_gemma: ^1.2.0
+  flutter_gemma_litertlm: 1.0.2
+  flutter_gemma_mediapipe: 1.0.3
+
+  # Permissions
+  permission_handler: ^12.0.3
+
+  # Audio (voice input)
+  record: ^7.1.1
+  just_audio: ^0.10.6
+
+  # Storage
+  path_provider: ^2.1.5
+  shared_preferences: ^2.3.4
+  sqflite: ^2.4.1
+
+  # UI
+  flutter_markdown: ^0.7.6
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

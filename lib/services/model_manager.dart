@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:background_downloader/background_downloader.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
@@ -89,23 +90,71 @@ class ModelManager {
     void Function(int progress)? onProgress,
   }) async {
     try {
-      _statusController.add('Downloading model...');
+      _statusController.add('Preparing download...');
+
+      // Extract filename from URL
+      final uri = Uri.parse(url);
+      final fileName = p.basename(uri.path);
+      final dir = await getApplicationDocumentsDirectory();
+      final filePath = '${dir.path}/$fileName';
+      final file = File(filePath);
+
+      // Check if already downloaded
+      if (await file.exists()) {
+        _statusController.add('Model already downloaded, installing...');
+      } else {
+        // Download the file using background_downloader
+        _statusController.add('Downloading model...');
+        final task = DownloadTask(
+          url: url,
+          filename: fileName,
+          directory: dir.path,
+          updates: Updates.statusAndProgress,
+          requiresWiFi: false,
+        );
+
+        // Listen for progress updates
+        final progressSubscription = FileDownloader().updates.listen((update) {
+          if (update.task.taskId == task.taskId &&
+              update is TaskProgressUpdate) {
+            final progress = (update.progress * 100).round();
+            onProgress?.call(progress);
+            _statusController.add('Downloading: $progress%');
+          }
+        });
+
+        // Start download with retry
+        _statusController.add('Starting download...');
+        final result = await FileDownloader().download(
+          task,
+          onProgress: (progress) {
+            final percent = (progress * 100).round();
+            onProgress?.call(percent);
+            _statusController.add('Downloading: $percent%');
+          },
+        );
+
+        await progressSubscription.cancel();
+
+        if (result.status != TaskStatus.complete) {
+          throw Exception('Download failed: ${result.status}');
+        }
+      }
+
+      // Install the downloaded file
+      _statusController.add('Installing model...');
       final builder = FlutterGemma.installModel(
         modelType: modelType,
-      ).fromNetwork(url);
-      if (onProgress != null) {
-        builder.withProgress(onProgress);
-      }
-      final result = await builder.install();
-      final spec = result.spec;
+      ).fromFile(filePath);
+      final installResult = await builder.install();
+      final spec = installResult.spec;
 
-      final file = await _findInstalledFile(spec.name);
       final model = InstalledModel(
         id: spec.name,
         fileName: spec.name,
         modelType: modelType,
         installedAt: DateTime.now(),
-        fileSizeBytes: file != null ? await file.length() : 0,
+        fileSizeBytes: await file.length(),
       );
 
       _installedModels.add(model);
@@ -199,23 +248,5 @@ class ModelManager {
 
   bool isModelInstalled(String fileName) {
     return _installedModels.any((m) => m.fileName == fileName);
-  }
-
-  Future<File?> _findInstalledFile(String name) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/$name');
-      if (await file.exists()) return file;
-      // Check subdirectories
-      final modelsDir = Directory('${dir.path}/models');
-      if (await modelsDir.exists()) {
-        await for (final entity in modelsDir.list()) {
-          if (entity is File && entity.path.contains(name)) {
-            return entity;
-          }
-        }
-      }
-    } catch (_) {}
-    return null;
   }
 }

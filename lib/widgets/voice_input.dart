@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class VoiceInputButton extends StatefulWidget {
-  final Function(String audioPath) onAudioRecorded;
+  final void Function(String audioPath) onAudioRecorded;
   final bool isRecording;
 
   const VoiceInputButton({

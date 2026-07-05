@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class ScreenshotService {
@@ -24,7 +25,7 @@ class ScreenshotService {
       }
       return result;
     } on PlatformException catch (e) {
-      print('ScreenshotService: failed to get screenshot — ${e.message}');
+      debugPrint('ScreenshotService: failed to get screenshot — ${e.message}');
       return null;
     }
   }

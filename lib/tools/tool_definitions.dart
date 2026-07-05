@@ -16,7 +16,10 @@ class NovaTools {
   static final Tool getTime = Tool(
     name: 'get_time',
     description: 'Get the current time, date, and day of the week',
-    parameters: {'type': 'object', 'properties': {}},
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{},
+    },
   );
 
   static final Tool setAlarm = Tool(
@@ -109,7 +112,10 @@ class NovaTools {
   static final Tool openSettings = Tool(
     name: 'open_settings',
     description: 'Open the device Settings app',
-    parameters: {'type': 'object', 'properties': {}},
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{},
+    },
   );
 
   static final Tool takeScreenshot = Tool(
@@ -117,6 +123,9 @@ class NovaTools {
     description:
         'Capture the current screen and return its size. '
         'Use this before asking about what is on screen.',
-    parameters: {'type': 'object', 'properties': {}},
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{},
+    },
   );
 }

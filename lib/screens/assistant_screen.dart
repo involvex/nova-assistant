@@ -24,7 +24,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   bool _isGenerating = false;
   bool _thinkingMode = false;
   Uint8List? _currentScreenshot;
-  String _status = 'Ready';
+  final String _status = 'Ready';
 
   @override
   void initState() {
@@ -140,7 +140,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   Future<void> _captureAndAttachScreenshot() async {
     await ScreenshotService.instance.requestCapture();
-    await Future.delayed(const Duration(milliseconds: 800));
+    await Future<void>.delayed(const Duration(milliseconds: 800));
     final screenshot = await ScreenshotService.instance.getLatestScreenshot();
     if (screenshot != null && mounted) {
       setState(() => _currentScreenshot = screenshot);
@@ -279,7 +279,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
           IconButton(
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
             ),
             icon: const Icon(Icons.settings_outlined, color: Colors.grey),
           ),
@@ -517,7 +517,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 
   void _showFullScreenshot(Uint8List data) {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,

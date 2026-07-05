@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/platform/tool_executor_service.dart';
 
 class InferenceResult {
@@ -38,62 +39,93 @@ class ModelOrchestrator {
   bool get isInitialized => _isInitialized;
 
   Future<void> prefetchModels() async {
-    // Pre-download all three models in background
-    _statusController.add('Downloading models...');
-
+    _statusController.add('Checking models...');
     try {
-      // Download in parallel — all run in background
-      await Future.wait([
-        _downloadModel(NovaModel.smollm),
-        _downloadModel(NovaModel.gemma4E2b),
-      ], eagerError: false);
+      // Only download if not already installed
+      if (!ModelManager.instance.isModelInstalled('SmolLM-135M-Instruct')) {
+        await ModelManager.instance.installFromNetwork(
+          url: ModelHuggingFaceURLs.smollm,
+          modelType: NovaModel.smollm.modelType,
+        );
+      }
+      if (!ModelManager.instance.isModelInstalled('gemma-4-E2B-it-int4')) {
+        await ModelManager.instance.installFromNetwork(
+          url: ModelHuggingFaceURLs.gemma4E2b,
+          modelType: NovaModel.gemma4E2b.modelType,
+        );
+      }
       _statusController.add('Models ready');
     } catch (e) {
       _statusController.add('Model download failed: $e');
     }
   }
 
-  Future<void> _downloadModel(NovaModel model) async {
-    final url = ModelHuggingFaceURLs.urlFor(model);
-    _statusController.add('Downloading ${model.displayName}...');
-    try {
-      await FlutterGemma.installModel(
-        modelType: model.modelType,
-      ).fromNetwork(url).install();
-      print('Model downloaded: ${model.displayName}');
-    } catch (e) {
-      print('Failed to download ${model.displayName}: $e');
-    }
-  }
-
   Future<InferenceModel> _getOrCreateModel(NovaModel model) async {
+    // Return cached model if same type
     if (_activeModel != null && _activeModelType == model) {
       return _activeModel!;
     }
 
     // Close previous model if switching
     if (_activeModel != null && _activeModelType != model) {
-      await _activeModel!.close();
+      try {
+        await _activeModel!.close();
+      } catch (e) {
+        debugPrint('Error closing previous model: $e');
+      }
       _activeModel = null;
       _activeChat = null;
     }
 
-    // Ensure model is installed before calling getActiveModel()
-    if (!FlutterGemma.hasActiveModel()) {
-      _statusController.add('Installing ${model.displayName}...');
-      await _downloadModel(model);
+    // Try to get the active model
+    if (FlutterGemma.hasActiveModel()) {
+      try {
+        _statusController.add('Loading ${model.displayName}...');
+        _activeModel = await FlutterGemma.getActiveModel(
+          maxTokens: _tokenLimitFor(model),
+          preferredBackend: PreferredBackend.gpu,
+        );
+        _activeModelType = model;
+        _isInitialized = true;
+        _statusController.add('${model.displayName} ready');
+        return _activeModel!;
+      } catch (e) {
+        debugPrint('getActiveModel failed: $e');
+        _statusController.add('Model load failed, will try reinstall...');
+        _activeModel = null;
+      }
     }
 
-    _statusController.add('Loading ${model.displayName}...');
-    _activeModel = await FlutterGemma.getActiveModel(
-      maxTokens: _tokenLimitFor(model),
-      preferredBackend: PreferredBackend.gpu,
-    );
-    _activeModelType = model;
-    _isInitialized = true;
-    _statusController.add('${model.displayName} ready');
+    // No active model or load failed — try to install
+    _statusController.add('Installing ${model.displayName}...');
+    try {
+      final url = ModelHuggingFaceURLs.urlFor(model);
+      final installed = await ModelManager.instance.installFromNetwork(
+        url: url,
+        modelType: model.modelType,
+        onProgress: (progress) {
+          _statusController.add('Downloading ${model.displayName}: $progress%');
+        },
+      );
 
-    return _activeModel!;
+      if (installed == null) {
+        throw Exception('Model installation returned null');
+      }
+
+      // Now get the model after install
+      _statusController.add('Loading ${model.displayName}...');
+      _activeModel = await FlutterGemma.getActiveModel(
+        maxTokens: _tokenLimitFor(model),
+        preferredBackend: PreferredBackend.gpu,
+      );
+      _activeModelType = model;
+      _isInitialized = true;
+      _statusController.add('${model.displayName} ready');
+      return _activeModel!;
+    } catch (e) {
+      _statusController.add('Failed to install ${model.displayName}: $e');
+      rethrow;
+    }
   }
 
   int _tokenLimitFor(NovaModel model) {
@@ -135,7 +167,18 @@ class ModelOrchestrator {
 
     _statusController.add('Using ${model.displayName}');
 
-    final inferenceModel = await _getOrCreateModel(model);
+    InferenceModel inferenceModel;
+    try {
+      inferenceModel = await _getOrCreateModel(model);
+    } catch (e) {
+      _statusController.add('Error: $e');
+      yield InferenceResult(
+        text: 'Failed to load model: $e\n\nPlease check Settings > AI Models.',
+        model: model,
+        isStreaming: false,
+      );
+      return;
+    }
 
     _activeChat ??= await inferenceModel.createChat(
       systemInstruction: _systemPromptFor(model),
@@ -190,7 +233,6 @@ class ModelOrchestrator {
       }
     }
 
-    // Final non-streaming result
     yield InferenceResult(
       text: fullResponse,
       model: model,
@@ -214,11 +256,12 @@ class ModelOrchestrator {
 
   Future<void> clearHistory() async {
     _activeChat = null;
-    // Keep model loaded, just clear conversation
   }
 
   Future<void> close() async {
-    await _activeModel?.close();
+    try {
+      await _activeModel?.close();
+    } catch (_) {}
     _activeModel = null;
     _activeChat = null;
     _isInitialized = false;

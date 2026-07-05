@@ -3,6 +3,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_gemma_litertlm/flutter_gemma_litertlm.dart';
 import 'package:flutter_gemma_mediapipe/flutter_gemma_mediapipe.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/services/memory_service.dart';
 
@@ -17,6 +18,9 @@ void main() async {
     ],
     maxDownloadRetries: 10,
   );
+
+  // Initialize model manager
+  await ModelManager.instance.initialize();
 
   // Initialize RAG memory
   await MemoryService.initialize();

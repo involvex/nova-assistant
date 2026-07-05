@@ -20,11 +20,12 @@ class ToolExecutorService {
       }
       return {"success": true, "result": result};
     } on PlatformException catch (e) {
-      return {"success": false, "error": e.message};
+      return {"success": false, "error": e.message ?? 'Platform error'};
+    } catch (e) {
+      return {"success": false, "error": e.toString()};
     }
   }
 
-  // Convenience methods for specific tools
   Future<Map<String, dynamic>> getTime() async {
     return executeTool("get_time", {});
   }
@@ -62,7 +63,12 @@ class ToolExecutorService {
   }
 
   Future<Uint8List?> takeScreenshot() async {
-    await executeTool("take_screenshot", {});
+    final result = await executeTool("take_screenshot", {});
+    if (result['success'] == true && result['data'] != null) {
+      final data = result['data'];
+      if (data is Uint8List) return data;
+      if (data is List<int>) return Uint8List.fromList(data);
+    }
     return null;
   }
 }

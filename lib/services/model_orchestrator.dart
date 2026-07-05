@@ -163,6 +163,8 @@ class ModelOrchestrator {
     );
   }
 
+  static const _maxToolRounds = 5;
+
   Stream<InferenceResult> processMessage({
     required String query,
     Uint8List? screenshot,
@@ -214,8 +216,10 @@ class ModelOrchestrator {
     // Tool call loop: after executing a tool, re-generate so the model
     // can incorporate the tool result into its response.
     bool hasPendingToolCalls = true;
-    while (hasPendingToolCalls) {
+    int toolRounds = 0;
+    while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
       hasPendingToolCalls = false;
+      toolRounds++;
 
       await for (final event in _activeChat!.generateChatResponseAsync()) {
         if (event is TextResponse) {
@@ -253,6 +257,16 @@ class ModelOrchestrator {
           hasPendingToolCalls = true;
         }
       }
+    }
+
+    if (toolRounds >= _maxToolRounds && hasPendingToolCalls) {
+      yield InferenceResult(
+        text: '$fullResponse\n\n[Tool call limit reached]',
+        model: model,
+        isStreaming: false,
+        thinking: thinkingMode ? currentThinking : null,
+      );
+      return;
     }
 
     yield InferenceResult(

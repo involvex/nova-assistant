@@ -2,8 +2,10 @@ package dev.nova.assistant
 
 import android.app.Activity
 import android.content.Intent
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import java.io.File
 
 /**
  * MainActivity — the primary Flutter activity for Nova.
@@ -18,7 +20,6 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Wire up native services so Flutter can access them
         ToolExecutor.registerWith(
             flutterEngine.dartExecutor.binaryMessenger,
             applicationContext
@@ -33,16 +34,24 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Check if launched from AssistantActivity
-        val screenshot = intent.getByteArrayExtra(AssistantActivity.EXTRA_SCREENSHOT)
+        // Read screenshot from file path (avoids Binder transaction limit)
+        val screenshotPath = intent.getStringExtra(AssistantActivity.EXTRA_SCREENSHOT_PATH)
         val screenText = intent.getStringExtra(AssistantActivity.EXTRA_SCREEN_TEXT)
         val timestamp = intent.getLongExtra(AssistantActivity.EXTRA_TIMESTAMP, 0L)
 
-        if (screenshot != null) {
-            AssistantActivity.latestScreenshot = screenshot
-            AssistantActivity.latestScreenText = screenText
-            AssistantActivity.latestTimestamp = timestamp
-            android.util.Log.d("NovaMain", "Received screenshot from assistant: ${screenshot.size} bytes")
+        if (screenshotPath != null) {
+            val file = File(screenshotPath)
+            if (file.exists()) {
+                val bytes = file.readBytes()
+                AssistantActivity.latestScreenshot = bytes
+                AssistantActivity.latestScreenText = screenText
+                AssistantActivity.latestTimestamp = timestamp
+                Log.d("NovaMain", "Received screenshot from assistant: ${bytes.size} bytes (file: $screenshotPath)")
+                // Clean up temp file after reading
+                file.delete()
+            } else {
+                Log.w("NovaMain", "Screenshot file not found: $screenshotPath")
+            }
         }
     }
 

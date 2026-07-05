@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
@@ -8,6 +9,7 @@ import 'package:nova_assistant/tools/tool_definitions.dart';
 import 'package:nova_assistant/widgets/chat_bubble.dart';
 import 'package:nova_assistant/widgets/voice_input.dart';
 import 'package:nova_assistant/screens/settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AssistantScreen extends StatefulWidget {
   const AssistantScreen({super.key});
@@ -30,9 +32,24 @@ class _AssistantScreenState extends State<AssistantScreen> {
   @override
   void initState() {
     super.initState();
+    _loadThinkingMode();
     _loadInitialScreenshot();
+    _requestPermissions();
     _inputController.addListener(() => setState(() {}));
     _listenToModelStatus();
+  }
+
+  Future<void> _loadThinkingMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _thinkingMode = prefs.getBool('settings_thinking_mode') ?? false;
+      });
+    }
+  }
+
+  Future<void> _requestPermissions() async {
+    await [Permission.microphone, Permission.photos].request();
   }
 
   void _listenToModelStatus() {
@@ -300,7 +317,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
           Tooltip(
             message: 'Thinking mode (show reasoning)',
             child: IconButton(
-              onPressed: () => setState(() => _thinkingMode = !_thinkingMode),
+              onPressed: () async {
+                setState(() => _thinkingMode = !_thinkingMode);
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('settings_thinking_mode', _thinkingMode);
+              },
               icon: Icon(
                 Icons.psychology_outlined,
                 color: _thinkingMode ? const Color(0xFF6C63FF) : Colors.grey,

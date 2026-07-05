@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
@@ -64,9 +65,7 @@ class ModelManager {
       _installedModels.clear();
       for (final json in jsonList) {
         try {
-          final map = Map<String, dynamic>.from(
-            Map<String, dynamic>.from(json as Map<dynamic, dynamic>),
-          );
+          final map = jsonDecode(json) as Map<String, dynamic>;
           _installedModels.add(InstalledModel.fromJson(map));
         } catch (_) {}
       }
@@ -76,7 +75,7 @@ class ModelManager {
   Future<void> _saveToPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     final jsonList = _installedModels
-        .map((m) => m.toJson().toString())
+        .map((m) => jsonEncode(m.toJson()))
         .toList();
     await prefs.setStringList(_prefsKey, jsonList);
   }

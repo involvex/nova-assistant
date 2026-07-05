@@ -181,7 +181,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.refresh,
             title: 'Reload models',
             subtitle: 'Refresh installed model list',
-            onTap: () => setState(() {}),
+            onTap: () async {
+              setState(() => _installStatus = 'Reloading models...');
+              await ModelManager.instance.initialize();
+              if (mounted) {
+                setState(() => _installStatus = '');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Model list refreshed'),
+                    backgroundColor: Color(0xFF6C63FF),
+                  ),
+                );
+              }
+            },
           ),
         ],
       ),

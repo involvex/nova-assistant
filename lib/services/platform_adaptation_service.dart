@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
 
 /// Platform-specific feature capabilities

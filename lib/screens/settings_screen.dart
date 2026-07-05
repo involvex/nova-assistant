@@ -313,102 +313,148 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _fileNameFor(model),
     );
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A2E),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: installed
-              ? Colors.green.withValues(alpha: 0.3)
-              : Colors.white.withValues(alpha: 0.06),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: model.hasVision
-                    ? [const Color(0xFF6C63FF), const Color(0xFF9D4EDD)]
-                    : [Colors.grey[700]!, Colors.grey[600]!],
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              model.hasVision ? Icons.image_outlined : Icons.text_fields,
-              color: Colors.white,
-              size: 22,
-            ),
+    return GestureDetector(
+      onTap: installed ? null : () => _downloadModel(context, model),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A2E),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: installed
+                ? Colors.green.withValues(alpha: 0.3)
+                : Colors.white.withValues(alpha: 0.06),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      model.displayName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: model.hasVision
+                      ? [const Color(0xFF6C63FF), const Color(0xFF9D4EDD)]
+                      : [Colors.grey[700]!, Colors.grey[600]!],
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                model.hasVision ? Icons.image_outlined : Icons.text_fields,
+                color: Colors.white,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        model.displayName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${model.sizeMB}MB',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-                    ),
-                    if (model.hasThinking) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'THINK',
-                          style: TextStyle(
-                            fontSize: 9,
-                            color: Colors.orange,
-                            fontWeight: FontWeight.bold,
+                      const SizedBox(width: 8),
+                      Text(
+                        '${model.sizeMB}MB',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                      if (model.hasThinking) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'THINK',
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: Colors.orange,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  installed ? 'Installed' : 'Not installed',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: installed ? Colors.green[400] : Colors.grey[500],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    installed ? 'Installed' : 'Tap to install',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: installed ? Colors.green[400] : Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          if (installed)
-            Icon(Icons.check_circle, color: Colors.green[400], size: 20)
-          else
-            Icon(
-              Icons.cloud_download_outlined,
-              color: Colors.grey[600],
-              size: 20,
-            ),
-        ],
+            if (installed)
+              Icon(Icons.check_circle, color: Colors.green[400], size: 20)
+            else
+              Icon(
+                Icons.cloud_download_outlined,
+                color: Colors.grey[600],
+                size: 20,
+              ),
+          ],
+        ),
       ),
     );
+  }
+
+  Future<void> _downloadModel(BuildContext context, NovaModel model) async {
+    final url = ModelHuggingFaceURLs.urlFor(model);
+    setState(() => _installStatus = 'Downloading ${model.displayName}...');
+
+    try {
+      final installed = await ModelManager.instance.installFromNetwork(
+        url: url,
+        modelType: model.modelType,
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() => _installStatus = 'Downloading: $progress%');
+          }
+        },
+      );
+
+      if (mounted) {
+        setState(() => _installStatus = '');
+        if (installed != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Model installed: ${installed.fileName}'),
+              backgroundColor: Colors.green[700],
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to download model'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _installStatus = '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   String _fileNameFor(NovaModel model) {

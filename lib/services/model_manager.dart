@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path/path.dart' as p;
 import 'dart:io';
 
 class InstalledModel {
@@ -125,22 +126,41 @@ class ModelManager {
   }) async {
     try {
       _statusController.add('Installing model from file...');
+
+      // Copy file to temp directory first (FilePicker uses content URIs on Android)
+      final sourceFile = File(filePath);
+      if (!await sourceFile.exists()) {
+        _statusController.add('File not found: $filePath');
+        return null;
+      }
+
+      final tempDir = await getTemporaryDirectory();
+      final fileName = p.basename(filePath);
+      final tempFile = File('${tempDir.path}/$fileName');
+
+      _statusController.add('Copying model file...');
+      await sourceFile.copy(tempFile.path);
+
       final builder = FlutterGemma.installModel(
         modelType: modelType,
-      ).fromFile(filePath);
+      ).fromFile(tempFile.path);
       if (onProgress != null) {
         builder.withProgress(onProgress);
       }
       final result = await builder.install();
       final spec = result.spec;
 
-      final file = File(filePath);
+      // Clean up temp file
+      try {
+        await tempFile.delete();
+      } catch (_) {}
+
       final model = InstalledModel(
         id: spec.name,
         fileName: spec.name,
         modelType: modelType,
         installedAt: DateTime.now(),
-        fileSizeBytes: await file.length(),
+        fileSizeBytes: await sourceFile.length(),
       );
 
       _installedModels.add(model);

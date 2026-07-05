@@ -1,13 +1,42 @@
 import 'package:flutter_gemma/flutter_gemma.dart';
 
 enum NovaModel {
-  smollm("SmolLM-135M", ModelType.general, 135, false, false),
-  fastvlm("FastVLM-0.5B", ModelType.general, 500, true, false),
-  gemma3_1b("Gemma 3 1B", ModelType.gemmaIt, 500, false, false),
-  gemma4E2b("Gemma 4 E2B", ModelType.gemma4, 2400, true, true);
+  smollm(
+    "SmolLM-135M",
+    ModelType.general,
+    ModelFileType.task,
+    135,
+    false,
+    false,
+  ),
+  fastvlm(
+    "FastVLM-0.5B",
+    ModelType.general,
+    ModelFileType.litertlm,
+    500,
+    true,
+    false,
+  ),
+  gemma3_1b(
+    "Gemma 3 1B",
+    ModelType.gemmaIt,
+    ModelFileType.litertlm,
+    500,
+    false,
+    false,
+  ),
+  gemma4E2b(
+    "Gemma 4 E2B",
+    ModelType.gemma4,
+    ModelFileType.litertlm,
+    2400,
+    true,
+    true,
+  );
 
   final String displayName;
   final ModelType modelType;
+  final ModelFileType fileType;
   final int sizeMB;
   final bool hasVision;
   final bool hasThinking;
@@ -15,6 +44,7 @@ enum NovaModel {
   const NovaModel(
     this.displayName,
     this.modelType,
+    this.fileType,
     this.sizeMB,
     this.hasVision,
     this.hasThinking,

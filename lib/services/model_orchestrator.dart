@@ -41,22 +41,21 @@ class ModelOrchestrator {
   Future<void> prefetchModels() async {
     _statusController.add('Checking models...');
     try {
-      if (!ModelManager.instance.isModelInstalled(
-        ModelHuggingFaceURLs.fileNameFor(NovaModel.smollm),
-      )) {
-        await ModelManager.instance.installFromNetwork(
-          url: ModelHuggingFaceURLs.smollm,
-          modelType: NovaModel.smollm.modelType,
-        );
-      }
-      if (!ModelManager.instance.isModelInstalled(
-        ModelHuggingFaceURLs.fileNameFor(NovaModel.gemma4E2b),
-      )) {
-        await ModelManager.instance.installFromNetwork(
-          url: ModelHuggingFaceURLs.gemma4E2b,
-          modelType: NovaModel.gemma4E2b.modelType,
-        );
-      }
+      // Always go through the install pipeline for each model.
+      // FlutterGemma.installModel().install() is idempotent — it skips
+      // download if the file is already on disk, but ALWAYS calls
+      // setActiveModel(spec) with the correct fileType, which is critical
+      // for engine routing.
+      await ModelManager.instance.installFromNetwork(
+        url: ModelHuggingFaceURLs.smollm,
+        modelType: NovaModel.smollm.modelType,
+        fileType: NovaModel.smollm.fileType,
+      );
+      await ModelManager.instance.installFromNetwork(
+        url: ModelHuggingFaceURLs.gemma4E2b,
+        modelType: NovaModel.gemma4E2b.modelType,
+        fileType: NovaModel.gemma4E2b.fileType,
+      );
       _statusController.add('Models ready');
     } catch (e) {
       _statusController.add('Model download failed: $e');
@@ -107,6 +106,7 @@ class ModelOrchestrator {
           .installFromNetwork(
             url: url,
             modelType: model.modelType,
+            fileType: model.fileType,
             onProgress: (progress) {
               _statusController.add(
                 'Downloading ${model.displayName}: $progress%',

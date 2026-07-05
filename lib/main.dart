@@ -19,6 +19,12 @@ void main() async {
     maxDownloadRetries: 10,
   );
 
+  // Clear any stale active model identity from previous runs.
+  // This forces the install pipeline to re-register with the correct
+  // fileType (e.g. .litertlm → LiteRtLmEngine, .task → MediaPipeEngine).
+  // Safe to call even if nothing is persisted (no-op).
+  await FlutterGemma.clearActiveInferenceIdentity();
+
   // Initialize model manager
   await ModelManager.instance.initialize();
 

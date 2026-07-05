@@ -140,6 +140,7 @@ class ModelUpdateService {
       final installed = await ModelManager.instance.installFromNetwork(
         url: update.downloadUrl,
         modelType: update.model.modelType,
+        fileType: update.model.fileType,
         onProgress: onProgress,
       );
 

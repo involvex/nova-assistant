@@ -146,8 +146,8 @@ void main() {
       );
     });
 
-    test('all URLs point to .litertlm files', () {
-      expect(ModelHuggingFaceURLs.smollm, endsWith('.litertlm'));
+    test('URLs match their expected file extensions', () {
+      expect(ModelHuggingFaceURLs.smollm, endsWith('.task'));
       expect(ModelHuggingFaceURLs.fastvlm, endsWith('.litertlm'));
       expect(ModelHuggingFaceURLs.gemma3_1b, endsWith('.litertlm'));
       expect(ModelHuggingFaceURLs.gemma4E2b, endsWith('.litertlm'));

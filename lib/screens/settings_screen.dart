@@ -177,6 +177,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
 
+      // Auto-detect fileType from extension
+      final ext = file.name.split('.').last.toLowerCase();
+      final fileType = switch (ext) {
+        'litertlm' => ModelFileType.litertlm,
+        'task' => ModelFileType.task,
+        'bin' => ModelFileType.binary,
+        _ => ModelFileType.task,
+      };
+
       // Show model type picker
       if (!context.mounted) return;
       final modelType = await _showModelTypePicker(context);
@@ -187,6 +196,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final installed = await ModelManager.instance.installFromFile(
         filePath: file.path!,
         modelType: modelType,
+        fileType: fileType,
         onProgress: (progress) {
           if (mounted) {
             setState(() => _installStatus = 'Installing: $progress%');
@@ -422,6 +432,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final installed = await ModelManager.instance.installFromNetwork(
         url: url,
         modelType: model.modelType,
+        fileType: model.fileType,
         onProgress: (progress) {
           if (mounted) {
             setState(() => _installStatus = 'Downloading: $progress%');

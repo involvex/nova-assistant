@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
 import 'package:nova_assistant/models/model_info.dart';

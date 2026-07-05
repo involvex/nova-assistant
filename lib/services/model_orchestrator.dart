@@ -36,6 +36,9 @@ class ModelOrchestrator {
   final _statusController = StreamController<String>.broadcast();
   Stream<String> get statusStream => _statusController.stream;
 
+  final _historyClearedController = StreamController<void>.broadcast();
+  Stream<void> get historyClearedStream => _historyClearedController.stream;
+
   bool get isInitialized => _isInitialized;
 
   Future<void> prefetchModels() async {
@@ -208,35 +211,47 @@ class ModelOrchestrator {
     String fullResponse = '';
     String? currentThinking;
 
-    await for (final event in _activeChat!.generateChatResponseAsync()) {
-      if (event is TextResponse) {
-        fullResponse += event.token;
-        yield InferenceResult(
-          text: fullResponse,
-          model: model,
-          isStreaming: true,
-          thinking: thinkingMode ? currentThinking : null,
-        );
-      } else if (event is ThinkingResponse) {
-        currentThinking = event.content;
-        yield InferenceResult(
-          text: fullResponse,
-          model: model,
-          isStreaming: true,
-          thinking: currentThinking,
-        );
-      } else if (event is FunctionCallResponse) {
-        final toolResult = await ToolExecutorService.instance.executeTool(
-          event.name,
-          Map<String, dynamic>.from(event.args),
-        );
+    // Tool call loop: after executing a tool, re-generate so the model
+    // can incorporate the tool result into its response.
+    bool hasPendingToolCalls = true;
+    while (hasPendingToolCalls) {
+      hasPendingToolCalls = false;
 
-        final toolResponseMessage = Message.toolResponse(
-          toolName: event.name,
-          response: Map<String, dynamic>.from(toolResult),
-        );
+      await for (final event in _activeChat!.generateChatResponseAsync()) {
+        if (event is TextResponse) {
+          fullResponse += event.token;
+          yield InferenceResult(
+            text: fullResponse,
+            model: model,
+            isStreaming: true,
+            thinking: thinkingMode ? currentThinking : null,
+          );
+        } else if (event is ThinkingResponse) {
+          currentThinking = event.content;
+          yield InferenceResult(
+            text: fullResponse,
+            model: model,
+            isStreaming: true,
+            thinking: currentThinking,
+          );
+        } else if (event is FunctionCallResponse) {
+          _statusController.add('Executing ${event.name}...');
 
-        await _activeChat!.addQuery(toolResponseMessage);
+          final toolResult = await ToolExecutorService.instance.executeTool(
+            event.name,
+            Map<String, dynamic>.from(event.args),
+          );
+
+          final toolResponseMessage = Message.toolResponse(
+            toolName: event.name,
+            response: Map<String, dynamic>.from(toolResult),
+          );
+
+          await _activeChat!.addQuery(toolResponseMessage);
+
+          // Signal that another generation pass is needed
+          hasPendingToolCalls = true;
+        }
       }
     }
 
@@ -263,6 +278,7 @@ class ModelOrchestrator {
 
   Future<void> clearHistory() async {
     _activeChat = null;
+    _historyClearedController.add(null);
   }
 
   Future<void> close() async {
@@ -272,6 +288,7 @@ class ModelOrchestrator {
     _activeModel = null;
     _activeChat = null;
     _isInitialized = false;
+    await _historyClearedController.close();
   }
 
   Future<void> initializeDefaultModel() async {

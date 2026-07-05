@@ -41,6 +41,7 @@ dependencies:
   flutter_markdown: ^0.7.6
   cupertino_icons: ^1.0.8
   file_picker: ^11.0.2
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:

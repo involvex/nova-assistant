@@ -1,5 +1,7 @@
 package dev.nova.assistant
 
+import android.app.Activity
+import android.content.Intent
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
@@ -8,6 +10,10 @@ import io.flutter.embedding.engine.FlutterEngine
  * Also handles launching from the assistant button via Intent extras.
  */
 class MainActivity : FlutterActivity() {
+
+    companion object {
+        private const val REQUEST_SCREEN_CAPTURE = 1001
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -37,6 +43,13 @@ class MainActivity : FlutterActivity() {
             AssistantActivity.latestScreenText = screenText
             AssistantActivity.latestTimestamp = timestamp
             android.util.Log.d("NovaMain", "Received screenshot from assistant: ${screenshot.size} bytes")
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_SCREEN_CAPTURE && resultCode == Activity.RESULT_OK && data != null) {
+            ScreenCaptureHelper.startCapture(this, data)
         }
     }
 }

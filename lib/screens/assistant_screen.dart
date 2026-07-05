@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
@@ -38,6 +39,12 @@ class _AssistantScreenState extends State<AssistantScreen> {
     ModelOrchestrator.instance.statusStream.listen((status) {
       if (mounted) {
         setState(() => _status = status);
+      }
+    });
+
+    ModelOrchestrator.instance.historyClearedStream.listen((_) {
+      if (mounted) {
+        setState(() => _messages.clear());
       }
     });
   }
@@ -160,6 +167,35 @@ class _AssistantScreenState extends State<AssistantScreen> {
           backgroundColor: Color(0xFF6C63FF),
         ),
       );
+    }
+  }
+
+  Future<void> _pickImageFromGallery() async {
+    try {
+      final picker = ImagePicker();
+      final image = await picker.pickImage(source: ImageSource.gallery);
+      if (image != null) {
+        final bytes = await image.readAsBytes();
+        if (mounted) {
+          setState(() => _currentScreenshot = bytes);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Image attached!'),
+              duration: Duration(seconds: 1),
+              backgroundColor: Color(0xFF6C63FF),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to pick image: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -456,15 +492,28 @@ class _AssistantScreenState extends State<AssistantScreen> {
       ),
       child: Row(
         children: [
-          // Screenshot attach button
+          // Attach buttons
           if (_currentScreenshot == null)
-            IconButton(
-              onPressed: _captureAndAttachScreenshot,
-              icon: const Icon(
-                Icons.add_photo_alternate_outlined,
-                color: Colors.grey,
-              ),
-              tooltip: 'Attach screenshot',
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  onPressed: _captureAndAttachScreenshot,
+                  icon: const Icon(
+                    Icons.screenshot_monitor_outlined,
+                    color: Colors.grey,
+                  ),
+                  tooltip: 'Attach screenshot',
+                ),
+                IconButton(
+                  onPressed: _pickImageFromGallery,
+                  icon: const Icon(
+                    Icons.photo_library_outlined,
+                    color: Colors.grey,
+                  ),
+                  tooltip: 'Attach from gallery',
+                ),
+              ],
             ),
 
           // Text input
@@ -496,9 +545,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
           // Voice input
           VoiceInputButton(
-            isRecording: false,
             onAudioRecorded: (path) {
-              // Audio recording → transcription → send
+              // TODO: Send audio to transcription service, then send transcribed text
+              debugPrint('Audio recorded: $path');
             },
           ),
 

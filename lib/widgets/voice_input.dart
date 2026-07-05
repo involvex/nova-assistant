@@ -1,14 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 
 class VoiceInputButton extends StatefulWidget {
   final void Function(String audioPath) onAudioRecorded;
-  final bool isRecording;
 
-  const VoiceInputButton({
-    super.key,
-    required this.onAudioRecorded,
-    this.isRecording = false,
-  });
+  const VoiceInputButton({super.key, required this.onAudioRecorded});
 
   @override
   State<VoiceInputButton> createState() => _VoiceInputButtonState();
@@ -17,6 +15,8 @@ class VoiceInputButton extends StatefulWidget {
 class _VoiceInputButtonState extends State<VoiceInputButton>
     with SingleTickerProviderStateMixin {
   late AnimationController _animController;
+  final AudioRecorder _recorder = AudioRecorder();
+  bool _isRecording = false;
   bool _isPressed = false;
 
   @override
@@ -31,7 +31,46 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
   @override
   void dispose() {
     _animController.dispose();
+    _recorder.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      await _stopRecording();
+    } else {
+      await _startRecording();
+    }
+  }
+
+  Future<void> _startRecording() async {
+    if (!await _recorder.hasPermission()) {
+      debugPrint('VoiceInputButton: no microphone permission');
+      return;
+    }
+
+    final dir = await getTemporaryDirectory();
+    final path =
+        '${dir.path}/nova_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+    await _recorder.start(const RecordConfig(), path: path);
+    if (mounted) {
+      setState(() => _isRecording = true);
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    final path = await _recorder.stop();
+    if (mounted) {
+      setState(() => _isRecording = false);
+    }
+
+    if (path != null && path.isNotEmpty) {
+      final file = File(path);
+      if (await file.exists()) {
+        widget.onAudioRecorded(path);
+      }
+    }
   }
 
   @override
@@ -40,7 +79,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
       onTapDown: (_) => setState(() => _isPressed = true),
       onTapUp: (_) {
         setState(() => _isPressed = false);
-        // Trigger audio recording
+        _toggleRecording();
       },
       onTapCancel: () => setState(() => _isPressed = false),
       child: AnimatedBuilder(
@@ -56,25 +95,18 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
               height: 48,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: widget.isRecording
-                    ? Colors.red[600]
-                    : const Color(0xFF6C63FF),
+                color: _isRecording ? Colors.red[600] : const Color(0xFF6C63FF),
                 boxShadow: [
                   BoxShadow(
-                    color:
-                        (widget.isRecording
-                                ? Colors.red
-                                : const Color(0xFF6C63FF))
-                            .withValues(
-                              alpha: 0.4 + (_animController.value * 0.2),
-                            ),
+                    color: (_isRecording ? Colors.red : const Color(0xFF6C63FF))
+                        .withValues(alpha: 0.4 + (_animController.value * 0.2)),
                     blurRadius: 8 + (_animController.value * 8),
                     spreadRadius: _animController.value * 2,
                   ),
                 ],
               ),
               child: Icon(
-                widget.isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+                _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
                 color: Colors.white,
                 size: 24,
               ),

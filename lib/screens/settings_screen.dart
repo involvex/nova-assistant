@@ -4,6 +4,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ignore_for_file: use_build_context_synchronously
 
@@ -24,9 +25,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _loadSettings();
     ModelManager.instance.statusStream.listen((status) {
       if (mounted) setState(() => _installStatus = status);
     });
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _autoCapture = prefs.getBool('settings_auto_capture') ?? true;
+        _thinkingMode = prefs.getBool('settings_thinking_mode') ?? false;
+        _voiceInput = prefs.getBool('settings_voice_input') ?? true;
+        _ragMemory = prefs.getBool('settings_rag_memory') ?? false;
+      });
+    }
+  }
+
+  Future<void> _saveSetting(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
   }
 
   @override
@@ -88,28 +107,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Auto-capture screen',
             subtitle: 'Automatically capture screen when assistant is invoked',
             value: _autoCapture,
-            onChanged: (v) => setState(() => _autoCapture = v),
+            onChanged: (v) {
+              setState(() => _autoCapture = v);
+              _saveSetting('settings_auto_capture', v);
+            },
           ),
           _toggleTile(
             icon: Icons.psychology_outlined,
             title: 'Thinking mode',
             subtitle: 'Show model reasoning before answering',
             value: _thinkingMode,
-            onChanged: (v) => setState(() => _thinkingMode = v),
+            onChanged: (v) {
+              setState(() => _thinkingMode = v);
+              _saveSetting('settings_thinking_mode', v);
+            },
           ),
           _toggleTile(
             icon: Icons.record_voice_over_outlined,
             title: 'Voice input',
             subtitle: 'Enable microphone for voice queries',
             value: _voiceInput,
-            onChanged: (v) => setState(() => _voiceInput = v),
+            onChanged: (v) {
+              setState(() => _voiceInput = v);
+              _saveSetting('settings_voice_input', v);
+            },
           ),
           _toggleTile(
             icon: Icons.auto_awesome,
             title: 'RAG Memory',
             subtitle: 'Remember conversations for contextual answers',
             value: _ragMemory,
-            onChanged: (v) => setState(() => _ragMemory = v),
+            onChanged: (v) {
+              setState(() => _ragMemory = v);
+              _saveSetting('settings_rag_memory', v);
+            },
           ),
           const SizedBox(height: 24),
 

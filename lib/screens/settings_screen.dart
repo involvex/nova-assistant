@@ -310,7 +310,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _modelCard(BuildContext context, {required NovaModel model}) {
     final installed = ModelManager.instance.isModelInstalled(
-      _fileNameFor(model),
+      ModelHuggingFaceURLs.fileNameFor(model),
     );
 
     return GestureDetector(
@@ -454,19 +454,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
-    }
-  }
-
-  String _fileNameFor(NovaModel model) {
-    switch (model) {
-      case NovaModel.smollm:
-        return 'SmolLM-135M-Instruct';
-      case NovaModel.fastvlm:
-        return 'FastVLM-0.5B';
-      case NovaModel.gemma3_1b:
-        return 'Gemma3-1B-IT';
-      case NovaModel.gemma4E2b:
-        return 'gemma-4-E2B-it-int4';
     }
   }
 

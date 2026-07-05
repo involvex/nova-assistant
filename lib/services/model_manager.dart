@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:background_downloader/background_downloader.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
@@ -69,9 +68,7 @@ class ModelManager {
             Map<String, dynamic>.from(json as Map<dynamic, dynamic>),
           );
           _installedModels.add(InstalledModel.fromJson(map));
-        } catch (_) {
-          // Skip corrupted entries
-        }
+        } catch (_) {}
       }
     }
   }
@@ -92,80 +89,103 @@ class ModelManager {
     try {
       _statusController.add('Preparing download...');
 
-      // Extract filename from URL
       final uri = Uri.parse(url);
       final fileName = p.basename(uri.path);
+
+      // Check if already downloaded locally
       final dir = await getApplicationDocumentsDirectory();
-      final filePath = '${dir.path}/$fileName';
-      final file = File(filePath);
+      final localFile = File('${dir.path}/$fileName');
+      final modelsDir = Directory('${dir.path}/models');
+      bool alreadyDownloaded = await localFile.exists();
 
-      // Check if already downloaded
-      if (await file.exists()) {
-        _statusController.add('Model already downloaded, installing...');
-      } else {
-        // Download the file using background_downloader
-        _statusController.add('Downloading model...');
-        final task = DownloadTask(
-          url: url,
-          filename: fileName,
-          directory: dir.path,
-          updates: Updates.statusAndProgress,
-          requiresWiFi: false,
-        );
-
-        // Listen for progress updates
-        final progressSubscription = FileDownloader().updates.listen((update) {
-          if (update.task.taskId == task.taskId &&
-              update is TaskProgressUpdate) {
-            final progress = (update.progress * 100).round();
-            onProgress?.call(progress);
-            _statusController.add('Downloading: $progress%');
+      if (!alreadyDownloaded && await modelsDir.exists()) {
+        await for (final entity in modelsDir.list()) {
+          if (entity is File && entity.path.contains(fileName)) {
+            alreadyDownloaded = true;
+            break;
           }
-        });
-
-        // Start download with retry
-        _statusController.add('Starting download...');
-        final result = await FileDownloader().download(
-          task,
-          onProgress: (progress) {
-            final percent = (progress * 100).round();
-            onProgress?.call(percent);
-            _statusController.add('Downloading: $percent%');
-          },
-        );
-
-        await progressSubscription.cancel();
-
-        if (result.status != TaskStatus.complete) {
-          throw Exception('Download failed: ${result.status}');
         }
       }
 
-      // Install the downloaded file
-      _statusController.add('Installing model...');
-      final builder = FlutterGemma.installModel(
-        modelType: modelType,
-      ).fromFile(filePath);
-      final installResult = await builder.install();
-      final spec = installResult.spec;
+      if (alreadyDownloaded) {
+        _statusController.add('Model already downloaded, installing...');
+      } else {
+        // Use FlutterGemma's built-in download
+        _statusController.add('Downloading model...');
+        final builder = FlutterGemma.installModel(
+          modelType: modelType,
+        ).fromNetwork(url);
+        if (onProgress != null) {
+          builder.withProgress(onProgress);
+        }
+        _statusController.add('Starting download...');
+        await builder.install();
+      }
+
+      // Find the installed file
+      final spec = await _findInstalledSpec(fileName, modelType);
+      final specName = spec?['name'] as String? ?? fileName;
 
       final model = InstalledModel(
-        id: spec.name,
-        fileName: spec.name,
+        id: specName,
+        fileName: specName,
         modelType: modelType,
         installedAt: DateTime.now(),
-        fileSizeBytes: await file.length(),
+        fileSizeBytes: await _getFileSize(dir.path, fileName),
       );
 
       _installedModels.add(model);
       await _saveToPrefs();
-      _statusController.add('Model installed: ${spec.name}');
+      _statusController.add('Model installed: ${model.fileName}');
       return model;
     } catch (e) {
       _statusController.add('Install failed: $e');
       debugPrint('ModelManager: installFromNetwork failed: $e');
       return null;
     }
+  }
+
+  Future<Map<String, dynamic>?> _findInstalledSpec(
+    String fileName,
+    ModelType modelType,
+  ) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      // Check direct path
+      final file = File('${dir.path}/$fileName');
+      if (await file.exists()) {
+        return {'name': fileName};
+      }
+      // Check models subdirectory
+      final modelsDir = Directory('${dir.path}/models');
+      if (await modelsDir.exists()) {
+        await for (final entity in modelsDir.list()) {
+          if (entity is File &&
+              entity.path.contains(
+                fileName.replaceAll('.litertlm', '').replaceAll('.task', ''),
+              )) {
+            return {'name': p.basename(entity.path)};
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<int> _getFileSize(String dirPath, String fileName) async {
+    try {
+      final file = File('$dirPath/$fileName');
+      if (await file.exists()) return await file.length();
+      final modelsDir = Directory('$dirPath/models');
+      if (await modelsDir.exists()) {
+        await for (final entity in modelsDir.list()) {
+          if (entity is File && entity.path.contains(fileName)) {
+            return await entity.length();
+          }
+        }
+      }
+    } catch (_) {}
+    return 0;
   }
 
   Future<InstalledModel?> installFromFile({
@@ -176,7 +196,6 @@ class ModelManager {
     try {
       _statusController.add('Installing model from file...');
 
-      // Copy file to temp directory first (FilePicker uses content URIs on Android)
       final sourceFile = File(filePath);
       if (!await sourceFile.exists()) {
         _statusController.add('File not found: $filePath');
@@ -199,7 +218,6 @@ class ModelManager {
       final result = await builder.install();
       final spec = result.spec;
 
-      // Clean up temp file
       try {
         await tempFile.delete();
       } catch (_) {}
@@ -234,16 +252,6 @@ class ModelManager {
       debugPrint('ModelManager: uninstallModel failed: $e');
       return false;
     }
-  }
-
-  Future<void> setActiveModel(String modelId) async {
-    final model = _installedModels.where((m) => m.id == modelId).firstOrNull;
-    if (model == null) {
-      _statusController.add('Model not found: $modelId');
-      return;
-    }
-    // The model is set as active during install, but we can re-trigger it
-    _statusController.add('Active model: ${model.fileName}');
   }
 
   bool isModelInstalled(String fileName) {

@@ -35,31 +35,27 @@ class ModelSelector {
     required bool hasVisionContext,
     required bool requestedThinking,
   }) {
-    // If vision input (screenshot), need a vision-capable model
     if (hasVisionContext) {
       if (primaryHeavy.hasVision) return primaryHeavy;
       if (fastModel.hasVision) return fastModel;
     }
 
-    // Short simple query → fast model
     if (query.split(' ').length <= 8 && !requestedThinking) {
       return fastModel;
     }
 
-    // Thinking requested → Gemma 4 E2B only
     if (requestedThinking && primaryHeavy.hasThinking) {
       return primaryHeavy;
     }
 
-    // Default: heavy model for anything complex
     return primaryHeavy;
   }
 }
 
 class ModelHuggingFaceURLs {
-  // SmolLM 135M — ultra-fast, text only
+  // SmolLM 135M — .task format (no .litertlm available)
   static const smollm =
-      'https://huggingface.co/litert-community/SmolLM-135M-Instruct/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.litertlm';
+      'https://huggingface.co/litert-community/SmolLM-135M-Instruct/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task';
 
   // FastVLM 0.5B — fast vision model
   static const fastvlm =
@@ -67,11 +63,11 @@ class ModelHuggingFaceURLs {
 
   // Gemma 3 1B — balanced text
   static const gemma3_1b =
-      'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm';
+      'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.litertlm';
 
   // Gemma 4 E2B — full power, vision + thinking + function calling
   static const gemma4E2b =
-      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-int4.litertlm';
+      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
 
   static String urlFor(NovaModel model) {
     switch (model) {
@@ -83,6 +79,19 @@ class ModelHuggingFaceURLs {
         return gemma3_1b;
       case NovaModel.gemma4E2b:
         return gemma4E2b;
+    }
+  }
+
+  static String fileNameFor(NovaModel model) {
+    switch (model) {
+      case NovaModel.smollm:
+        return 'SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task';
+      case NovaModel.fastvlm:
+        return 'FastVLM-0.5B.litertlm';
+      case NovaModel.gemma3_1b:
+        return 'gemma3-1b-it-int4.litertlm';
+      case NovaModel.gemma4E2b:
+        return 'gemma-4-E2B-it.litertlm';
     }
   }
 }

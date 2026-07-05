@@ -41,14 +41,17 @@ class ModelOrchestrator {
   Future<void> prefetchModels() async {
     _statusController.add('Checking models...');
     try {
-      // Only download if not already installed
-      if (!ModelManager.instance.isModelInstalled('SmolLM-135M-Instruct')) {
+      if (!ModelManager.instance.isModelInstalled(
+        ModelHuggingFaceURLs.fileNameFor(NovaModel.smollm),
+      )) {
         await ModelManager.instance.installFromNetwork(
           url: ModelHuggingFaceURLs.smollm,
           modelType: NovaModel.smollm.modelType,
         );
       }
-      if (!ModelManager.instance.isModelInstalled('gemma-4-E2B-it-int4')) {
+      if (!ModelManager.instance.isModelInstalled(
+        ModelHuggingFaceURLs.fileNameFor(NovaModel.gemma4E2b),
+      )) {
         await ModelManager.instance.installFromNetwork(
           url: ModelHuggingFaceURLs.gemma4E2b,
           modelType: NovaModel.gemma4E2b.modelType,

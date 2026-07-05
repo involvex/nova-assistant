@@ -67,50 +67,31 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun isAssistantRoleHeld(): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val roleManager = getSystemService(ROLE_MANAGER_SERVICE) as RoleManager
-            return roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val roleManager = getSystemService(RoleManager::class.java)
+                return roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+            } catch (_: Exception) {}
         }
         return false
     }
 
     private fun requestAssistantRole() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val roleManager = getSystemService(ROLE_MANAGER_SERVICE) as RoleManager
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (roleManager.isRoleAvailable(RoleManager.ROLE_ASSISTANT) &&
-                    !roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)
-                ) {
-                    try {
-                        val pendingIntent = roleManager.createRequestRoleHolderTransitionIntent(
-                            RoleManager.ROLE_ASSISTANT
-                        )
-                        startIntentSenderForResult(
-                            pendingIntent.intentSender,
-                            REQUEST_ASSISTANT_ROLE,
-                            null, 0, 0, 0, null
-                        )
-                        return
-                    } catch (e: Exception) {
-                        Log.e("NovaMain", "Failed role transition intent: ${e.message}")
-                    }
-                } else {
-                    Log.d("NovaMain", "Assistant role already held or not available")
-                }
-            }
-        }
-
+        // Open voice input settings where user can select Nova as assistant.
+        // On Android 14+, the ASSISTANT role is restricted to system apps,
+        // so we rely on the ASSIST intent filter for assistant functionality.
         try {
             val intent = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
         } catch (e: Exception) {
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = android.net.Uri.parse("package:$packageName")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            startActivity(intent)
+            try {
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = android.net.Uri.parse("package:$packageName")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+            } catch (_: Exception) {}
         }
     }
 
@@ -138,8 +119,12 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
             REQUEST_SCREEN_CAPTURE -> {
-                if (resultCode == Activity.RESULT_OK && data != null) {
+                val granted = resultCode == Activity.RESULT_OK && data != null
+                if (granted && data != null) {
                     ScreenCaptureHelper.startCapture(this, data)
+                    ScreenCaptureHelper.onScreenCapturePermissionResult(true)
+                } else {
+                    ScreenCaptureHelper.onScreenCapturePermissionResult(false)
                 }
             }
             REQUEST_ASSISTANT_ROLE -> {

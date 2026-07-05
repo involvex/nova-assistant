@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/memory_service.dart';
+import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/platform/tool_executor_service.dart';
 
 class InferenceResult {
@@ -230,6 +232,8 @@ class ModelOrchestrator {
     bool thinkingMode = false,
     List<Tool> tools = const [],
   }) async* {
+    final ragContext = await MemoryService.retrieveContext(query);
+
     final model = _modelOverrideDirty && _preferredModelOverride != null
         ? _preferredModelOverride!
         : _selectModel(
@@ -258,9 +262,20 @@ class ModelOrchestrator {
     }
 
     _activeChat ??= await inferenceModel.createChat(
-      systemInstruction: _systemPromptFor(model),
+      systemInstruction: _systemPromptFor(model, ragContext),
       tools: tools,
     );
+
+    // If this message has an image but the chat was created with a
+    // non-vision model (e.g. smollm from a prior text message), reset
+    // the chat so it uses the correct vision-capable model.
+    if (screenshot != null && _activeChat != null) {
+      await _activeChat!.close();
+      _activeChat = await inferenceModel.createChat(
+        systemInstruction: _systemPromptFor(model, ragContext),
+        tools: tools,
+      );
+    }
 
     final Message message;
     if (screenshot != null) {
@@ -356,6 +371,7 @@ class ModelOrchestrator {
         isStreaming: false,
         thinking: thinkingMode ? currentThinking : null,
       );
+      await MemoryService.storeConversation(query, fullResponse);
       return;
     }
 
@@ -365,6 +381,8 @@ class ModelOrchestrator {
       isStreaming: false,
       thinking: thinkingMode ? currentThinking : null,
     );
+
+    await MemoryService.storeConversation(query, fullResponse);
   }
 
   /// Try to extract a function call from accumulated text.
@@ -426,21 +444,25 @@ class ModelOrchestrator {
     return null;
   }
 
-  String _systemPromptFor(NovaModel model) {
+  String _systemPromptFor(NovaModel model, [String? ragContext]) {
     final base =
         'You are Nova, a helpful on-device AI assistant powered by Gemma. '
         'You run entirely on the device — no data is sent to servers. '
         'Be concise, helpful, and friendly. ';
 
-    if (model.hasThinking) {
-      return '$base When asked to think step by step, show your reasoning in <thinking> tags '
-          'before your final answer.';
-    }
-    return base;
+    final thinkingSuffix = model.hasThinking
+        ? ' When asked to think step by step, show your reasoning in <thinking> tags '
+              'before your final answer.'
+        : '';
+
+    final contextSuffix = ragContext != null ? '\n\n$ragContext' : '';
+
+    return '$base$thinkingSuffix$contextSuffix';
   }
 
   Future<void> clearHistory() async {
     _activeChat = null;
+    await ChatHistoryService.clear();
     _historyClearedController.add(null);
   }
 

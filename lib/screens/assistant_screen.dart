@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
@@ -35,9 +36,18 @@ class _AssistantScreenState extends State<AssistantScreen> {
     super.initState();
     _loadThinkingMode();
     _loadInitialScreenshot();
+    _loadHistory();
     _requestPermissions();
     _inputController.addListener(() => setState(() {}));
     _listenToModelStatus();
+  }
+
+  Future<void> _loadHistory() async {
+    final history = await ChatHistoryService.load();
+    if (mounted && history.isNotEmpty) {
+      setState(() => _messages.addAll(history));
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    }
   }
 
   Future<void> _loadThinkingMode() async {
@@ -115,6 +125,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
       _isGenerating = true;
     });
 
+    ChatHistoryService.save(_messages); // Persist immediately
+
     _scrollToBottom();
 
     // Add placeholder assistant message
@@ -173,8 +185,18 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 
   Future<void> _captureAndAttachScreenshot() async {
-    await ScreenshotService.instance.requestCapture();
-    await Future<void>.delayed(const Duration(milliseconds: 800));
+    final granted = await ScreenshotService.instance.requestCapture();
+    if (!granted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Screen capture denied. Enable in Settings.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
     final screenshot = await ScreenshotService.instance.getLatestScreenshot();
     if (screenshot != null && mounted) {
       setState(() => _currentScreenshot = screenshot);
@@ -189,6 +211,29 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 
   Future<void> _pickImageFromGallery() async {
+    final status = await Permission.photos.request();
+    if (status.isDenied || status.isPermanentlyDenied) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              status.isPermanentlyDenied
+                  ? 'Photo access denied. Enable it in Settings.'
+                  : 'Photo access is required to attach images.',
+            ),
+            backgroundColor: Colors.red,
+            action: status.isPermanentlyDenied
+                ? SnackBarAction(
+                    label: 'Settings',
+                    onPressed: () => openAppSettings(),
+                  )
+                : null,
+          ),
+        );
+      }
+      return;
+    }
+
     try {
       final picker = ImagePicker();
       final image = await picker.pickImage(source: ImageSource.gallery);

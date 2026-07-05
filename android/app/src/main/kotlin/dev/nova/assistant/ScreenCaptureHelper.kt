@@ -36,6 +36,8 @@ object ScreenCaptureHelper {
     private var _latestFrame: ByteArray? = null
     val latestFrame: ByteArray? get() = _latestFrame
 
+    private var _captureCompletionCallback: ((Boolean) -> Unit)? = null
+
     fun registerWith(messenger: BinaryMessenger, activity: Activity) {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -50,11 +52,21 @@ object ScreenCaptureHelper {
                 }
                 "isCapturing" -> result.success(isCapturing)
                 "requestCapture" -> {
-                    if (mediaProjection == null) {
-                        requestScreenCapture(activity)
-                        result.success(false)
-                    } else {
+                    if (mediaProjection != null) {
+                        captureHandler?.post { captureFrame() }
                         result.success(true)
+                    } else {
+                        _captureCompletionCallback = { granted ->
+                            if (granted) {
+                                captureHandler?.postDelayed({
+                                    captureFrame()
+                                    result.success(true)
+                                }, 600)
+                            } else {
+                                result.success(false)
+                            }
+                        }
+                        requestScreenCapture(activity)
                     }
                 }
                 else -> result.notImplemented()
@@ -165,5 +177,16 @@ object ScreenCaptureHelper {
         captureThread = null
         captureHandler = null
         Log.d(TAG, "Screen capture stopped")
+    }
+
+    fun onScreenCapturePermissionResult(granted: Boolean) {
+        if (granted) {
+            // Callback is invoked in registerWith's requestCapture handler
+            // after startCapture completes captureFrame
+        } else {
+            // Permission denied — invoke pending callback with false
+            _captureCompletionCallback?.invoke(false)
+            _captureCompletionCallback = null
+        }
     }
 }

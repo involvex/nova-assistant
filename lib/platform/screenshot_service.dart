@@ -38,10 +38,13 @@ class ScreenshotService {
     }
   }
 
-  Future<void> requestCapture() async {
+  Future<bool> requestCapture() async {
     try {
-      await _channel.invokeMethod<void>('requestCapture');
-    } catch (_) {}
+      final result = await _channel.invokeMethod<bool>('requestCapture');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   bool get hasRecentCapture {

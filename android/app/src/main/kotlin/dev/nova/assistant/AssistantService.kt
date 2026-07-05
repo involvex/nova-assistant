@@ -1,31 +1,17 @@
 package dev.nova.assistant
 
-import android.os.Bundle
-import android.speech.RecognitionService
+import android.app.Service
+import android.content.Intent
+import android.os.IBinder
 
 /**
- * AssistantService — satisfies BIND_ASSISTANT_SERVICE so Nova can be
- * selected as the system default assistant on Android 14+.
+ * AssistantService — stub service for assistant-related manifest declarations.
  *
- * This is a stub implementation; actual voice input uses the system's
- * recognizer. The service exists solely to fulfill the binding requirement
- * for the assistant role.
+ * Does nothing; exists solely to satisfy manifest declarations for
+ * android.speech.RecognitionService and android.voiceInteractionService.
+ * The actual assistant functionality works via AssistantActivity's
+ * ACTION_ASSIST intent filter + ROLE_ASSISTANT system role grant.
  */
-class AssistantService : RecognitionService() {
-
-    override fun onReadyForSpeech(params: Bundle?) {}
-
-    override fun onBeginningOfSpeech() {}
-
-    override fun onEndOfSpeech() {}
-
-    override fun onRmsChanged(rmsdB: Float) {}
-
-    override fun onBufferReceived(buffer: ByteArray?) {}
-
-    override fun onResults(results: Bundle?) {}
-
-    override fun onPartialResults(partialResults: Bundle?) {}
-
-    override fun onError(error: Int) {}
+class AssistantService : Service() {
+    override fun onBind(intent: Intent?): IBinder? = null
 }

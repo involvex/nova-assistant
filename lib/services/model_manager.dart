@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import 'dart:io';
+import 'package:nova_assistant/models/model_info.dart';
 
 class InstalledModel {
   final String id;
@@ -118,17 +119,26 @@ class ModelManager {
         // File exists on disk — find actual spec name and track it
         final spec = await _findInstalledSpec(fileName, modelType);
         final actualName = spec?['name'] as String? ?? fileName;
+        // Prefer canonical name over spec name for consistency
+        final canonicalName =
+            _findCanonicalName(actualName, modelType) ?? actualName;
         final model = InstalledModel(
-          id: actualName,
-          fileName: actualName,
+          id: canonicalName,
+          fileName: canonicalName,
           modelType: modelType,
           installedAt: DateTime.now(),
           fileSizeBytes: await _getFileSize(dir.path, fileName),
         );
-        _installedModels.removeWhere((m) => m.id == actualName);
+        // Clean up any duplicate entries (by canonical name, spec name, or URL name)
+        _installedModels.removeWhere(
+          (m) =>
+              m.fileName == canonicalName ||
+              m.fileName == actualName ||
+              m.fileName == fileName,
+        );
         _installedModels.add(model);
         await _saveToPrefs();
-        _statusController.add('Model found on disk: $actualName');
+        _statusController.add('Model found on disk: $canonicalName');
         return model;
       }
 
@@ -145,16 +155,22 @@ class ModelManager {
 
       final spec = await _findInstalledSpec(fileName, modelType);
       final specName = spec?['name'] as String? ?? fileName;
+      final canonicalName = _findCanonicalName(specName, modelType) ?? specName;
 
       final model = InstalledModel(
-        id: specName,
-        fileName: specName,
+        id: canonicalName,
+        fileName: canonicalName,
         modelType: modelType,
         installedAt: DateTime.now(),
         fileSizeBytes: await _getFileSize(dir.path, fileName),
       );
 
-      _installedModels.removeWhere((m) => m.id == specName);
+      _installedModels.removeWhere(
+        (m) =>
+            m.fileName == canonicalName ||
+            m.fileName == specName ||
+            m.fileName == fileName,
+      );
       _installedModels.add(model);
       await _saveToPrefs();
       _statusController.add('Model installed: ${model.fileName}');
@@ -244,24 +260,61 @@ class ModelManager {
       final result = await builder.install();
       final spec = result.spec;
 
+      // Use the canonical filename from ModelHuggingFaceURLs instead of
+      // spec.name to stay consistent with all other checks in the codebase.
+      final canonicalName =
+          _findCanonicalName(spec.name, modelType) ?? fileName;
+
       final model = InstalledModel(
-        id: spec.name,
-        fileName: spec.name,
+        id: canonicalName,
+        fileName: canonicalName,
         modelType: modelType,
         installedAt: DateTime.now(),
         fileSizeBytes: await sourceFile.length(),
       );
 
-      _installedModels.removeWhere((m) => m.id == spec.name);
+      // Remove any entries matching this model (by canonical name, spec name,
+      // or source filename) to prevent duplicates in prefs.
+      _installedModels.removeWhere(
+        (m) =>
+            m.fileName == canonicalName ||
+            m.fileName == spec.name ||
+            m.fileName == fileName,
+      );
       _installedModels.add(model);
       await _saveToPrefs();
-      _statusController.add('Model installed: ${spec.name}');
+      _statusController.add('Model installed: $canonicalName');
       return model;
     } catch (e) {
       _statusController.add('Install failed: $e');
       debugPrint('ModelManager: installFromFile failed: $e');
       return null;
     }
+  }
+
+  /// Find the canonical filename for a model given its flutter_gemma spec name
+  /// and model type. Returns null if no match is found.
+  String? _findCanonicalName(String specName, ModelType modelType) {
+    for (final model in NovaModel.values) {
+      if (model.modelType == modelType) {
+        final canonical = ModelHuggingFaceURLs.fileNameFor(model);
+        // Match by comparing normalized names (strip extensions and compare)
+        final normalizedSpec = specName
+            .replaceAll('.litertlm', '')
+            .replaceAll('.task', '')
+            .toLowerCase();
+        final normalizedCanonical = canonical
+            .replaceAll('.litertlm', '')
+            .replaceAll('.task', '')
+            .toLowerCase();
+        if (normalizedSpec == normalizedCanonical ||
+            normalizedSpec.contains(normalizedCanonical) ||
+            normalizedCanonical.contains(normalizedSpec)) {
+          return canonical;
+        }
+      }
+    }
+    return null;
   }
 
   Future<bool> uninstallModel(String modelId) async {

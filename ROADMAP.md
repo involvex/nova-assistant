@@ -18,6 +18,8 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [x] Assistant roles (helpful, coder, creative, student, analyst)
 - [x] Model download and management
 - [x] Dark theme UI
+- [x] Fix model re-download bug (canonical filename consistency)
+- [x] Fix tool call truncation (fullResponse cleanup, multi-call support, string args)
 
 ---
 
@@ -25,7 +27,8 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### High Priority
 
-- [ ] **Fix refreshSettings method** - Resolve the missing `refreshSettings` method in ModelOrchestrator
+- [x] **Fix model re-download** - Canonical filename consistency across install/detection paths
+- [x] **Fix tool call truncation** - Clean fullResponse, multi-call support, string args
 - [ ] **Error handling improvements** - Better error messages and recovery for model loading failures
 - [ ] **Memory management** - Optimize RAG memory retrieval and reduce memory usage
 - [ ] **Battery optimization** - Reduce power consumption during inference
@@ -33,6 +36,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### Medium Priority
 
+- [ ] **File/URL attachment** - Attach files and URLs as custom context for queries
 - [ ] **Conversation export** - Export chat history as JSON or text
 - [ ] **Search in history** - Search through past conversations
 - [ ] **Message timestamps** - Show full timestamps (not just time)
@@ -50,6 +54,8 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [ ] **Tool call visualization** - Show tool calls and results in the UI
 - [ ] **Streaming tool results** - Real-time updates during tool execution
 - [ ] **Model performance metrics** - Track inference time and token usage
+- [ ] **MCP-like integration** - Connect to external data sources and tools
+- [ ] **Auto-model selection** - Choose model based on content type (text, image, code)
 
 ### Medium Priority
 
@@ -58,6 +64,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [ ] **Proactive suggestions** - AI-suggested quick actions based on context
 - [ ] **Multi-language support** - Detect and respond in user's language
 - [ ] **Code syntax highlighting** - Enhanced code block rendering
+- [ ] **Custom knowledge bases** - Load and query custom document collections
 
 ---
 
@@ -65,17 +72,17 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### High Priority
 
-- [ ] **iOS support** - Native iOS implementation
-- [ ] **macOS support** - Desktop application
 - [ ] **Windows support** - Native Windows application
 - [ ] **Linux support** - Native Linux application
+- [ ] **Watch companion** - Basic query/response on smartwatches
+- [ ] **Widget support** - Home screen widgets for quick queries
+- [ ] **Notification actions** - Respond to queries from notifications
 
 ### Medium Priority
 
-- [ ] **Watch companion** - Basic query/response on smartwatches
-- [ ] **Car integration** - Android Auto / Apple CarPlay support
-- [ ] **Widget support** - Home screen widgets for quick queries
-- [ ] **Notification actions** - Respond to queries from notifications
+- [ ] **Voice synthesis** - Text-to-speech for responses
+- [ ] **Wake word detection** - "Hey Nova" voice activation
+- [ ] **Real-time translation** - Live translation during conversations
 
 ---
 
@@ -84,16 +91,15 @@ This document outlines the planned features and improvements for Nova Assistant.
 ### High Priority
 
 - [ ] **Multi-modal input** - Support for audio, video, and document input
-- [ ] **Real-time translation** - Live translation during conversations
-- [ ] **Voice synthesis** - Text-to-speech for responses
-- [ ] **Wake word detection** - "Hey Nova" voice activation
+- [ ] **Plugin system** - User-created tools and integrations
+- [ ] **Cloud sync** - Optional encrypted sync across devices
+- [ ] **MCP client** - Full Model Context Protocol client for external tool servers
 
 ### Medium Priority
 
-- [ ] **Plugin system** - User-created tools and integrations
-- [ ] **Cloud sync** - Optional encrypted sync across devices
 - [ ] **Collaboration** - Share conversations with other Nova users
 - [ ] **Learning mode** - Teach Nova custom responses and behaviors
+- [ ] **Custom tool creation** - UI for defining new tools without code
 
 ---
 
@@ -135,7 +141,6 @@ This document outlines the planned features and improvements for Nova Assistant.
 ### Build and CI/CD
 
 - [ ] **GitHub Actions** - Automated testing and builds
-- [ ] **Code signing** - Proper release signing setup
 - [ ] **Automated releases** - Streamlined release process
 - [ ] **Crash reporting** - Optional crash analytics (opt-in)
 
@@ -166,28 +171,31 @@ This document outlines the planned features and improvements for Nova Assistant.
 ## Release Schedule
 
 ### v0.2.0 (Next Release)
-- Fix refreshSettings method
+- Fix model re-download bug (canonical filename)
+- Fix tool call truncation (fullResponse cleanup, multi-call)
 - Error handling improvements
 - Battery optimization
-- Conversation export
+- File/URL attachment support
 
 ### v0.3.0
+- MCP-like data source integration
+- Auto-model selection based on content type
 - Tool call visualization
 - Context window management
-- Multi-turn tool calls
 - Model performance metrics
 
 ### v0.4.0
-- iOS support
-- macOS support
+- Windows support
+- Linux support
 - Voice synthesis
 - Wake word detection
+- Plugin system
 
 ### v1.0.0
-- Stable release across all platforms
+- Stable release with comprehensive features
 - Complete documentation
-- Plugin system
 - Cloud sync
+- MCP client
 
 ---
 
@@ -197,7 +205,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 
 ### Priority Areas
 
-1. **iOS/macOS development** - Help bring Nova to Apple platforms
+1. **Windows/Linux development** - Help bring Nova to desktop platforms
 2. **Testing** - Write unit, widget, and integration tests
 3. **Documentation** - Improve guides and API documentation
 4. **Localization** - Help translate Nova into other languages

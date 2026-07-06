@@ -6,6 +6,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/agent_identity.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/model_info.dart';
@@ -189,26 +190,29 @@ class ModelOrchestrator {
         'Found ${model.displayName} on disk, registering...',
       );
       try {
-        // Find the actual file path and use installFromFile to re-register
+        // Find the actual file path and re-register with flutter_gemma.
+        // Use registerDiskModel (not installFromFile) to avoid redundant file
+        // copy and ensure canonical filename is used.
         final modelPath = await _findModelPath(fileName);
         if (modelPath != null) {
-          final installed = await ModelManager.instance.installFromFile(
+          final fileSize = await File(modelPath).length();
+          await ModelManager.instance.registerDiskModel(
             filePath: modelPath,
+            fileName: fileName,
             modelType: model.modelType,
             fileType: model.fileType,
+            fileSizeBytes: fileSize,
           );
-          if (installed != null) {
-            _activeModel = await FlutterGemma.getActiveModel(
-              maxTokens: _tokenLimitFor(model),
-              preferredBackend: PreferredBackend.gpu,
-              supportImage: supportImage,
-            ).timeout(const Duration(seconds: 30));
-            _activeModelType = model;
-            _activeModelSupportsImage = supportImage;
-            _isInitialized = true;
-            _statusController.add('${model.displayName} ready');
-            return _activeModel!;
-          }
+          _activeModel = await FlutterGemma.getActiveModel(
+            maxTokens: _tokenLimitFor(model),
+            preferredBackend: PreferredBackend.gpu,
+            supportImage: supportImage,
+          ).timeout(const Duration(seconds: 30));
+          _activeModelType = model;
+          _activeModelSupportsImage = supportImage;
+          _isInitialized = true;
+          _statusController.add('${model.displayName} ready');
+          return _activeModel!;
         }
       } catch (e) {
         debugPrint('Failed to load local model: $e');
@@ -294,7 +298,18 @@ class ModelOrchestrator {
     Uint8List? screenshot,
     bool thinkingMode = false,
     List<Tool> tools = const [],
+    List<AttachedData> attachments = const [],
   }) async* {
+    // Build attachment context if any
+    String attachmentContext = '';
+    if (attachments.isNotEmpty) {
+      final buffers = <String>[];
+      for (final att in attachments) {
+        buffers.add(await att.buildContextString());
+      }
+      attachmentContext = buffers.join('\n\n');
+    }
+
     final ragContext = await MemoryService.retrieveContext(query);
 
     NovaModel model;
@@ -336,7 +351,7 @@ class ModelOrchestrator {
     }
 
     _activeChat ??= await inferenceModel.createChat(
-      systemInstruction: _systemPromptFor(model, ragContext),
+      systemInstruction: _systemPromptFor(model, ragContext, attachmentContext),
       tools: tools,
       supportImage: model.hasVision,
     );
@@ -372,25 +387,39 @@ class ModelOrchestrator {
           fullResponse += token;
           textBuffer.write(token);
 
-          // Try to parse a function call from the accumulated buffer
-          final parsed = _tryParseFunctionCall(textBuffer.toString());
-          if (parsed != null) {
-            // Clear the buffer and handle the function call
+          // Try to parse function calls from the accumulated buffer.
+          // Returns null if JSON is incomplete/truncated, or a non-empty
+          // list if one or more complete tool calls were found.
+          final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
+          if (parsedCalls != null && parsedCalls.isNotEmpty) {
+            // Remove the raw JSON tool call text from fullResponse so it
+            // doesn't leak into the final user-visible response.
+            final toolText = textBuffer.toString();
+            final idx = fullResponse.lastIndexOf(toolText);
+            if (idx >= 0) {
+              fullResponse =
+                  fullResponse.substring(0, idx) +
+                  fullResponse.substring(idx + toolText.length);
+            }
             textBuffer.clear();
-            _statusController.add('Executing ${parsed['name']}...');
 
-            final toolResult = await ToolExecutorService.instance.executeTool(
-              parsed['name'] as String,
-              Map<String, dynamic>.from(parsed['args'] as Map),
-            );
+            // Execute all tool calls found in this response
+            for (final parsed in parsedCalls) {
+              _statusController.add('Executing ${parsed['name']}...');
 
-            final toolResponseMessage = Message.toolResponse(
-              toolName: parsed['name'] as String,
-              response: Map<String, dynamic>.from(toolResult),
-            );
+              final toolResult = await ToolExecutorService.instance.executeTool(
+                parsed['name'] as String,
+                Map<String, dynamic>.from(parsed['args'] as Map),
+              );
 
-            await _activeChat!.addQuery(toolResponseMessage);
-            hasPendingToolCalls = true;
+              final toolResponseMessage = Message.toolResponse(
+                toolName: parsed['name'] as String,
+                response: Map<String, dynamic>.from(toolResult),
+              );
+
+              await _activeChat!.addQuery(toolResponseMessage);
+              hasPendingToolCalls = true;
+            }
             // Don't yield here — wait for the next generation pass
           } else {
             yield InferenceResult(
@@ -449,50 +478,67 @@ class ModelOrchestrator {
     await MemoryService.storeConversation(query, fullResponse);
   }
 
-  /// Try to extract a function call from accumulated text.
-  /// Handles both flat {"name":"X","arguments":{...}} and
-  /// wrapped {"role":"assistant","tool_calls":[{...}]} formats.
-  Map<String, dynamic>? _tryParseFunctionCall(String text) {
-    // Try wrapped format first: {"role":"assistant","tool_calls":[...]}
-    try {
-      final wrapped = _parseJsonSafely(text);
-      if (wrapped != null && wrapped['tool_calls'] is List) {
-        final calls = wrapped['tool_calls'] as List;
-        if (calls.isNotEmpty && calls.first is Map) {
-          final fn = calls.first['function'] as Map?;
+  /// Try to extract function calls from accumulated text.
+  /// Returns a list of tool calls (may be multiple in a single response).
+  /// Handles wrapped {"tool_calls":[...]}, flat {"name":"X","arguments":{...}},
+  /// and string-typed arguments.
+  List<Map<String, dynamic>>? _tryParseFunctionCalls(String text) {
+    final parsed = _parseJsonSafely(text);
+    if (parsed == null) return null;
+
+    final results = <Map<String, dynamic>>[];
+
+    // Try wrapped format: {"role":"assistant","tool_calls":[{...}]}
+    if (parsed['tool_calls'] is List) {
+      final calls = parsed['tool_calls'] as List;
+      for (final call in calls) {
+        if (call is Map) {
+          final fn = call['function'] as Map?;
           if (fn != null && fn['name'] != null) {
-            return {
-              'name': fn['name'],
-              'args':
-                  (fn['arguments'] as Map?)?.cast<String, dynamic>() ??
-                  <String, dynamic>{},
-            };
+            final args = _coerceArguments(fn['arguments']);
+            results.add({'name': fn['name'], 'args': args});
           }
         }
       }
-    } catch (_) {}
+      if (results.isNotEmpty) return results;
+    }
 
     // Try flat format: {"name":"X","arguments":{...}}
-    try {
-      final flat = _parseJsonSafely(text);
-      if (flat != null && flat['name'] is String && flat['arguments'] is Map) {
-        return {'name': flat['name'], 'args': flat['arguments']};
-      }
-    } catch (_) {}
+    if (parsed['name'] is String) {
+      final args = _coerceArguments(parsed['arguments']);
+      results.add({'name': parsed['name'], 'args': args});
+      return results;
+    }
 
-    return null;
+    return results.isEmpty ? null : results;
   }
 
+  /// Coerce arguments into a Map<String, dynamic>. Handles both Map and
+  /// String-typed arguments (some models emit "arguments": "{}" as a string).
+  Map<String, dynamic> _coerceArguments(dynamic raw) {
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is String) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    return <String, dynamic>{};
+  }
+
+  /// Parse JSON safely from text that may contain leading/trailing noise.
+  /// Returns null if the JSON is incomplete or invalid.
   Map<String, dynamic>? _parseJsonSafely(String text) {
     try {
       final trimmed = text.trim();
-      // Only try if it looks like JSON
       if (!trimmed.startsWith('{')) return null;
+
       // Find the last complete JSON object
       final lastBrace = trimmed.lastIndexOf('}');
       if (lastBrace == -1) return null;
       final candidate = trimmed.substring(0, lastBrace + 1);
       if (!candidate.startsWith('{')) return null;
+
       // Remove any leading text (e.g. role prefix)
       final jsonStart = candidate.indexOf('{');
       if (jsonStart > 0) {
@@ -508,7 +554,11 @@ class ModelOrchestrator {
     return null;
   }
 
-  String _systemPromptFor(NovaModel model, [String? ragContext]) {
+  String _systemPromptFor(
+    NovaModel model, [
+    String? ragContext,
+    String? attachmentContext,
+  ]) {
     final identity = _getCachedIdentity();
 
     String base;
@@ -523,9 +573,17 @@ class ModelOrchestrator {
               'before your final answer.'
         : '';
 
-    final contextSuffix = ragContext != null ? '\n\n$ragContext' : '';
+    final buffer = StringBuffer('$base$thinkingSuffix');
 
-    return '$base$thinkingSuffix$contextSuffix';
+    if (ragContext != null && ragContext.isNotEmpty) {
+      buffer.write('\n\n$ragContext');
+    }
+
+    if (attachmentContext != null && attachmentContext.isNotEmpty) {
+      buffer.write('\n\n--- Attached Data ---\n$attachmentContext');
+    }
+
+    return buffer.toString();
   }
 
   static AgentIdentity? _cachedIdentity;

@@ -1,7 +1,9 @@
 import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
@@ -30,6 +32,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   bool _thinkingMode = false;
   Uint8List? _currentScreenshot;
   String _status = 'Ready';
+  final AttachmentManager _attachmentManager = AttachmentManager.instance;
 
   @override
   void initState() {
@@ -150,6 +153,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
         screenshot: _currentScreenshot,
         thinkingMode: _thinkingMode,
         tools: NovaTools.all,
+        attachments: _attachmentManager.attachments,
       )) {
         if (!mounted) break;
 
@@ -179,8 +183,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
         });
       }
     } finally {
-      setState(() => _isGenerating = false);
-      _currentScreenshot = null; // Clear screenshot after use
+      setState(() {
+        _isGenerating = false;
+        _currentScreenshot = null;
+      });
+      _attachmentManager.clear();
     }
   }
 
@@ -262,6 +269,147 @@ class _AssistantScreenState extends State<AssistantScreen> {
     }
   }
 
+  Future<void> _pickFile() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      for (final file in result.files) {
+        if (file.path == null) continue;
+
+        final attachment = AttachedData(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          name: file.name,
+          type: AttachedDataType.file,
+          filePath: file.path,
+          attachedAt: DateTime.now(),
+          fileSizeBytes: file.size,
+        );
+
+        _attachmentManager.add(attachment);
+      }
+
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${result.files.length} file(s) attached'),
+            duration: const Duration(seconds: 1),
+            backgroundColor: const Color(0xFF6C63FF),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to pick file: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showUrlDialog() {
+    final urlController = TextEditingController();
+    final nameController = TextEditingController();
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('Attach URL', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: urlController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'https://example.com',
+                hintStyle: TextStyle(color: Colors.grey[600]),
+                labelText: 'URL',
+                labelStyle: TextStyle(color: Colors.grey[400]),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.grey[700]!),
+                ),
+              ),
+              keyboardType: TextInputType.url,
+              autofocus: true,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nameController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Optional label',
+                hintStyle: TextStyle(color: Colors.grey[600]),
+                labelText: 'Name (optional)',
+                labelStyle: TextStyle(color: Colors.grey[400]),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.grey[700]!),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey[400])),
+          ),
+          TextButton(
+            onPressed: () {
+              final url = urlController.text.trim();
+              if (url.isEmpty) return;
+
+              final name = nameController.text.trim().isEmpty
+                  ? Uri.tryParse(url)?.host ?? url
+                  : nameController.text.trim();
+
+              final attachment = AttachedData(
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                name: name,
+                type: AttachedDataType.url,
+                url: url,
+                attachedAt: DateTime.now(),
+              );
+
+              _attachmentManager.add(attachment);
+              Navigator.pop(ctx);
+              setState(() {});
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('URL attached!'),
+                  duration: Duration(seconds: 1),
+                  backgroundColor: Color(0xFF6C63FF),
+                ),
+              );
+            },
+            child: const Text(
+              'Attach',
+              style: TextStyle(color: Color(0xFF6C63FF)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -272,8 +420,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
             // App Bar
             _buildAppBar(),
 
-            // Screenshot indicator
+            // Screenshot and attachment indicators
             if (_currentScreenshot != null) _buildScreenshotIndicator(),
+            if (_attachmentManager.hasAttachments) _buildAttachmentIndicator(),
 
             // Messages
             Expanded(
@@ -511,6 +660,65 @@ class _AssistantScreenState extends State<AssistantScreen> {
     );
   }
 
+  Widget _buildAttachmentIndicator() {
+    return Container(
+      height: 40,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _attachmentManager.attachments.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (context, index) {
+          final att = _attachmentManager.attachments[index];
+          final icon = switch (att.type) {
+            AttachedDataType.file => Icons.insert_drive_file_outlined,
+            AttachedDataType.url => Icons.link,
+            AttachedDataType.text => Icons.text_snippet_outlined,
+          };
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6C63FF).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFF6C63FF).withValues(alpha: 0.3),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: const Color(0xFF6C63FF)),
+                const SizedBox(width: 6),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 120),
+                  child: Text(
+                    att.name,
+                    style: const TextStyle(
+                      color: Color(0xFF6C63FF),
+                      fontSize: 12,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: () {
+                    setState(() => _attachmentManager.remove(att.id));
+                  },
+                  child: const Icon(
+                    Icons.close,
+                    size: 14,
+                    color: Color(0xFF6C63FF),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -660,6 +868,16 @@ class _AssistantScreenState extends State<AssistantScreen> {
                     color: Colors.grey,
                   ),
                   tooltip: 'Attach from gallery',
+                ),
+                IconButton(
+                  onPressed: _pickFile,
+                  icon: const Icon(Icons.attach_file, color: Colors.grey),
+                  tooltip: 'Attach file',
+                ),
+                IconButton(
+                  onPressed: _showUrlDialog,
+                  icon: const Icon(Icons.link, color: Colors.grey),
+                  tooltip: 'Attach URL',
                 ),
               ],
             ),

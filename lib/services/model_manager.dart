@@ -241,6 +241,17 @@ class ModelManager {
       }
 
       final fileName = p.basename(filePath);
+      final ext = p.extension(fileName).toLowerCase();
+
+      // Validate file extension — only .litertlm and .task are supported.
+      // .gguf/.bin/.tflite files will crash the native engine.
+      if (ext != '.litertlm' && ext != '.task') {
+        _statusController.add(
+          'Unsupported format: $ext — only .litertlm and .task are supported',
+        );
+        return null;
+      }
+
       final docsDir = await getApplicationDocumentsDirectory();
       final targetPath = '${docsDir.path}/$fileName';
 
@@ -265,12 +276,27 @@ class ModelManager {
       final canonicalName =
           _findCanonicalName(spec.name, modelType) ?? fileName;
 
+      // Rename file to canonical name so isInstalledOnDisk() and
+      // _findModelPath() can find it after app restart.
+      final canonicalPath = '${docsDir.path}/$canonicalName';
+      if (targetPath != canonicalPath) {
+        final canonicalFile = File(canonicalPath);
+        if (!await canonicalFile.exists()) {
+          await File(targetPath).rename(canonicalPath);
+        } else {
+          // Canonical name already exists — clean up the temp copy
+          try {
+            await File(targetPath).delete();
+          } catch (_) {}
+        }
+      }
+
       final model = InstalledModel(
         id: canonicalName,
         fileName: canonicalName,
         modelType: modelType,
         installedAt: DateTime.now(),
-        fileSizeBytes: await sourceFile.length(),
+        fileSizeBytes: await File(canonicalPath).length(),
       );
 
       // Remove any entries matching this model (by canonical name, spec name,

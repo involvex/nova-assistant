@@ -298,7 +298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['litertlm', 'task', 'bin'],
+        allowedExtensions: ['litertlm', 'task'],
         dialogTitle: 'Select a model file',
       );
 
@@ -319,7 +319,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final fileType = switch (ext) {
         'litertlm' => ModelFileType.litertlm,
         'task' => ModelFileType.task,
-        'bin' => ModelFileType.binary,
         _ => ModelFileType.task,
       };
 

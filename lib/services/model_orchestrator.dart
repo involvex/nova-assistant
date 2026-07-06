@@ -430,12 +430,7 @@ class ModelOrchestrator {
                 );
               }
 
-              final toolResponseMessage = Message.toolResponse(
-                toolName: parsed['name'] as String,
-                response: Map<String, dynamic>.from(toolResult),
-              );
-
-              await _activeChat!.addQuery(toolResponseMessage);
+              await _sendToolResponse(toolName, toolResult);
               hasPendingToolCalls = true;
             }
             // Don't yield here — wait for the next generation pass
@@ -464,12 +459,7 @@ class ModelOrchestrator {
             Map<String, dynamic>.from(event.args),
           );
 
-          final toolResponseMessage = Message.toolResponse(
-            toolName: event.name,
-            response: Map<String, dynamic>.from(toolResult),
-          );
-
-          await _activeChat!.addQuery(toolResponseMessage);
+          await _sendToolResponse(event.name, toolResult);
           hasPendingToolCalls = true;
         }
       }
@@ -570,6 +560,53 @@ class ModelOrchestrator {
       if (decoded is Map<String, dynamic>) return decoded;
     } catch (_) {}
     return null;
+  }
+
+  /// Send a tool response to the model. For [take_screenshot], the image
+  /// bytes are injected as a [Message.withImage] so the vision model can
+  /// actually see the screenshot — raw bytes in a text tool response are
+  /// invisible to the model.
+  Future<void> _sendToolResponse(
+    String toolName,
+    Map<String, dynamic> toolResult,
+  ) async {
+    if (toolName == 'take_screenshot') {
+      final data = toolResult['data'];
+      Uint8List? imageBytes;
+      if (data is Uint8List) {
+        imageBytes = data;
+      } else if (data is List<int>) {
+        imageBytes = Uint8List.fromList(data);
+      }
+
+      if (imageBytes != null && imageBytes.isNotEmpty) {
+        // Inject screenshot as an image message so the model can see it
+        final imageMessage = Message.withImage(
+          text: '[Screenshot captured]',
+          imageBytes: imageBytes,
+          isUser: true,
+        );
+        await _activeChat!.addQuery(imageMessage);
+      }
+
+      // Send text-only confirmation as the tool response
+      final toolResponseMessage = Message.toolResponse(
+        toolName: toolName,
+        response: {
+          'success': toolResult['success'] ?? false,
+          'message': imageBytes != null
+              ? 'Screenshot captured and displayed above'
+              : 'No screenshot available — screen capture may not be active',
+        },
+      );
+      await _activeChat!.addQuery(toolResponseMessage);
+    } else {
+      final toolResponseMessage = Message.toolResponse(
+        toolName: toolName,
+        response: Map<String, dynamic>.from(toolResult),
+      );
+      await _activeChat!.addQuery(toolResponseMessage);
+    }
   }
 
   String _systemPromptFor(

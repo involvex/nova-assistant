@@ -142,39 +142,60 @@ class ModelManager {
         return model;
       }
 
-      // Not installed — download it
+      // Not installed — download it ourselves (not via flutter_gemma's
+      // fromNetwork, which stores in its internal storage invisible to
+      // isInstalledOnDisk). Then delegate to installFromFile which copies
+      // to the docs directory where disk checks look.
       _statusController.add('Downloading $fileName...');
-      final builder = FlutterGemma.installModel(
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File(
+        '${tempDir.path}/nova_download_${DateTime.now().millisecondsSinceEpoch}$fileName',
+      );
+
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(Uri.parse(url));
+        final response = await request.close();
+
+        if (response.statusCode != 200) {
+          _statusController.add('Download failed: HTTP ${response.statusCode}');
+          return null;
+        }
+
+        final totalBytes = response.contentLength;
+        var receivedBytes = 0;
+        final sink = tempFile.openWrite();
+
+        await for (final chunk in response.asBroadcastStream()) {
+          sink.add(chunk);
+          receivedBytes += chunk.length;
+          if (onProgress != null && totalBytes > 0) {
+            onProgress((receivedBytes * 100 ~/ totalBytes));
+          }
+        }
+        await sink.close();
+      } finally {
+        client.close();
+      }
+
+      // Delegate to installFromFile — copies to docs dir, registers with
+      // flutter_gemma, and renames to canonical filename.
+      final installed = await installFromFile(
+        filePath: tempFile.path,
         modelType: modelType,
         fileType: fileType,
-      ).fromNetwork(url);
-      if (onProgress != null) {
-        builder.withProgress(onProgress);
+        onProgress: onProgress,
+      );
+
+      // Clean up temp file
+      try {
+        await tempFile.delete();
+      } catch (_) {}
+
+      if (installed != null) {
+        _statusController.add('Model installed: ${installed.fileName}');
       }
-      await builder.install();
-
-      final spec = await _findInstalledSpec(fileName, modelType);
-      final specName = spec?['name'] as String? ?? fileName;
-      final canonicalName = _findCanonicalName(specName, modelType) ?? specName;
-
-      final model = InstalledModel(
-        id: canonicalName,
-        fileName: canonicalName,
-        modelType: modelType,
-        installedAt: DateTime.now(),
-        fileSizeBytes: await _getFileSize(dir.path, fileName),
-      );
-
-      _installedModels.removeWhere(
-        (m) =>
-            m.fileName == canonicalName ||
-            m.fileName == specName ||
-            m.fileName == fileName,
-      );
-      _installedModels.add(model);
-      await _saveToPrefs();
-      _statusController.add('Model installed: ${model.fileName}');
-      return model;
+      return installed;
     } catch (e) {
       _statusController.add('Install failed: $e');
       debugPrint('ModelManager: installFromNetwork failed: $e');

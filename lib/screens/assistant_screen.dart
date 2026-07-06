@@ -786,6 +786,41 @@ class _AssistantScreenState extends State<AssistantScreen> {
             ),
           ),
 
+          // Conversation export
+          PopupMenuButton<String>(
+            tooltip: 'Export conversation',
+            onSelected: (format) async {
+              String? path;
+              if (format == 'text') {
+                path = await ChatHistoryService.exportAsText();
+              } else {
+                path = await ChatHistoryService.exportAsJson();
+              }
+              if (path != null && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Exported to:\n$path'),
+                    duration: const Duration(seconds: 4),
+                  ),
+                );
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem<String>(
+                value: 'text',
+                child: Text('Export as Text'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'json',
+                child: Text('Export as JSON'),
+              ),
+            ],
+            child: const Tooltip(
+              message: 'Export conversation',
+              child: Icon(Icons.download_outlined, color: Colors.grey),
+            ),
+          ),
+
           // Settings
           IconButton(
             onPressed: () => Navigator.push(

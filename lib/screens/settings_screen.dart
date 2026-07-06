@@ -5,6 +5,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/platform/assistant_role_service.dart';
+import 'package:nova_assistant/screens/identity_config_screen.dart';
 import 'package:nova_assistant/screens/memory_management_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
@@ -75,7 +76,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('settings_assistant_role', role.name);
     await prefs.reload();
-    await ModelOrchestrator.refreshAssistantRole();
+    await ModelOrchestrator.refreshSettings();
   }
 
   Future<void> _saveSetting(String key, bool value) async {
@@ -188,6 +189,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 context,
                 MaterialPageRoute<void>(
                   builder: (_) => const MemoryManagementScreen(),
+                ),
+              );
+            },
+          ),
+          _actionTile(
+            icon: Icons.face,
+            title: 'Agent Identity',
+            subtitle: 'Customize name, avatar, skills & sources',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const IdentityConfigScreen(),
                 ),
               );
             },

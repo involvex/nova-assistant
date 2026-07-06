@@ -6,6 +6,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nova_assistant/models/agent_identity.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
@@ -508,8 +509,14 @@ class ModelOrchestrator {
   }
 
   String _systemPromptFor(NovaModel model, [String? ragContext]) {
-    final role = _getAssistantRole();
-    final base = role.systemPrompt;
+    final identity = _getCachedIdentity();
+
+    String base;
+    if (identity != null && identity.name != 'Nova') {
+      base = identity.buildSystemPrompt();
+    } else {
+      base = _getAssistantRole().systemPrompt;
+    }
 
     final thinkingSuffix = model.hasThinking
         ? ' When asked to think step by step, show your reasoning in <thinking> tags '
@@ -521,10 +528,11 @@ class ModelOrchestrator {
     return '$base$thinkingSuffix$contextSuffix';
   }
 
+  static AgentIdentity? _cachedIdentity;
+
+  static AgentIdentity? _getCachedIdentity() => _cachedIdentity;
+
   static AssistantRole _getAssistantRole() {
-    // Synchronous access using a cached value would be better,
-    // but for simplicity we read from prefs synchronously on first call
-    // and cache in a static. The cache is set during initializeDefaultModel().
     return _cachedRole;
   }
 
@@ -576,6 +584,7 @@ class ModelOrchestrator {
 
   Future<void> initializeDefaultModel() async {
     await _loadAssistantRole();
+    await _loadIdentity();
     try {
       await _getOrCreateModel(selector.fastModel);
     } catch (e) {
@@ -583,10 +592,15 @@ class ModelOrchestrator {
     }
   }
 
-  /// Call this when assistant role changes in settings to refresh the cached role
-  static Future<void> refreshAssistantRole() async {
+  Future<void> _loadIdentity() async {
+    _cachedIdentity = await IdentityService.getIdentity();
+  }
+
+  /// Call this when assistant role or identity changes in settings
+  static Future<void> refreshSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final roleName = prefs.getString('settings_assistant_role');
     _cachedRole = AssistantRole.fromString(roleName);
+    _cachedIdentity = await IdentityService.getIdentity();
   }
 }

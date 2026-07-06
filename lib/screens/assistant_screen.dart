@@ -32,6 +32,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   bool _isGenerating = false;
   bool _thinkingMode = false;
+  bool _offlineMode = false;
   Uint8List? _currentScreenshot;
   String _status = 'Ready';
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
@@ -45,6 +46,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     _requestPermissions();
     _inputController.addListener(() => setState(() {}));
     _listenToModelStatus();
+    _checkModelAvailability();
   }
 
   Future<void> _loadHistory() async {
@@ -72,19 +74,70 @@ class _AssistantScreenState extends State<AssistantScreen> {
     ModelOrchestrator.instance.statusStream.listen((status) {
       if (!mounted) return;
       setState(() => _status = status);
-
-      // Handle download consent request from orchestrator
+      _checkModelAvailability();
       if (status.startsWith('NEED_DOWNLOAD_CONSENT:')) {
         final modelName = status.substring('NEED_DOWNLOAD_CONSENT:'.length);
         _showDownloadConsentDialog(modelName);
       }
     });
+  }
 
-    ModelOrchestrator.instance.historyClearedStream.listen((_) {
-      if (mounted) {
-        setState(() => _messages.clear());
+  Future<void> _checkModelAvailability() async {
+    final manager = ModelManager.instance;
+    bool anyInstalled = false;
+    for (final model in NovaModel.values) {
+      final fileName = ModelHuggingFaceURLs.fileNameFor(model);
+      if (await manager.isInstalledOnDisk(fileName)) {
+        anyInstalled = true;
+        break;
       }
-    });
+    }
+    if (mounted) {
+      setState(() => _offlineMode = !anyInstalled);
+    }
+  }
+
+  Widget _buildOfflineBanner() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFF6B6B).withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFFFF6B6B).withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.wifi_off_rounded,
+            size: 18,
+            color: Color(0xFFFF6B6B),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'No AI model installed. Go to Settings > AI Models to download one.',
+              style: TextStyle(color: Colors.grey[300], fontSize: 13),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
+            ),
+            child: const Text(
+              'Install',
+              style: TextStyle(
+                color: Color(0xFFFF6B6B),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showDownloadConsentDialog(String modelName) async {
@@ -582,6 +635,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
             // Screenshot and attachment indicators
             if (_currentScreenshot != null) _buildScreenshotIndicator(),
             if (_attachmentManager.hasAttachments) _buildAttachmentIndicator(),
+
+            // Offline indicator
+            if (_offlineMode) _buildOfflineBanner(),
 
             // Messages
             Expanded(

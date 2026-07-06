@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/memory_service.dart';
@@ -169,12 +171,51 @@ class ModelOrchestrator {
         return _activeModel!;
       } catch (e) {
         debugPrint('getActiveModel failed: $e');
-        _statusController.add('Model load failed, trying reinstall...');
+        _statusController.add('Model load failed, trying local...');
         _activeModel = null;
       }
     }
 
-    // No active model or load failed — try to install
+    // Check if model exists on disk but wasn't restored (e.g., after app restart)
+    final fileName = ModelHuggingFaceURLs.fileNameFor(model);
+    final existsOnDisk = await ModelManager.instance.isInstalledOnDisk(
+      fileName,
+    );
+
+    // If exists on disk, register it without downloading
+    if (existsOnDisk) {
+      _statusController.add(
+        'Found ${model.displayName} on disk, registering...',
+      );
+      try {
+        // Find the actual file path and use installFromFile to re-register
+        final modelPath = await _findModelPath(fileName);
+        if (modelPath != null) {
+          final installed = await ModelManager.instance.installFromFile(
+            filePath: modelPath,
+            modelType: model.modelType,
+            fileType: model.fileType,
+          );
+          if (installed != null) {
+            _activeModel = await FlutterGemma.getActiveModel(
+              maxTokens: _tokenLimitFor(model),
+              preferredBackend: PreferredBackend.gpu,
+              supportImage: supportImage,
+            ).timeout(const Duration(seconds: 30));
+            _activeModelType = model;
+            _activeModelSupportsImage = supportImage;
+            _isInitialized = true;
+            _statusController.add('${model.displayName} ready');
+            return _activeModel!;
+          }
+        }
+      } catch (e) {
+        debugPrint('Failed to load local model: $e');
+        // Fall through to download
+      }
+    }
+
+    // No active model or load failed — try to install from network
     _statusController.add('Downloading ${model.displayName}...');
     try {
       final url = ModelHuggingFaceURLs.urlFor(model);
@@ -231,11 +272,18 @@ class ModelOrchestrator {
     Uint8List? screenshot,
     bool thinkingMode = false,
   }) {
-    return selector.selectForQuery(
+    final selected = selector.selectForQuery(
       query: query,
       hasVisionContext: screenshot != null,
       requestedThinking: thinkingMode,
     );
+
+    if (screenshot != null && !selected.hasVision) {
+      if (selector.primaryHeavy.hasVision) return selector.primaryHeavy;
+      if (selector.fastModel.hasVision) return selector.fastModel;
+    }
+
+    return selected;
   }
 
   static const _maxToolRounds = 5;
@@ -248,13 +296,24 @@ class ModelOrchestrator {
   }) async* {
     final ragContext = await MemoryService.retrieveContext(query);
 
-    final model = _modelOverrideDirty && _preferredModelOverride != null
-        ? _preferredModelOverride!
-        : _selectModel(
-            query: query,
-            screenshot: screenshot,
-            thinkingMode: thinkingMode,
-          );
+    NovaModel model;
+    if (_modelOverrideDirty && _preferredModelOverride != null) {
+      model = _preferredModelOverride!;
+      if (screenshot != null && !model.hasVision) {
+        model = selector.primaryHeavy.hasVision
+            ? selector.primaryHeavy
+            : selector.fastModel;
+        _statusController.add(
+          'Auto-switched to ${model.displayName} for image input',
+        );
+      }
+    } else {
+      model = _selectModel(
+        query: query,
+        screenshot: screenshot,
+        thinkingMode: thinkingMode,
+      );
+    }
 
     if (_modelOverrideDirty) {
       _modelOverrideDirty = false;
@@ -278,6 +337,7 @@ class ModelOrchestrator {
     _activeChat ??= await inferenceModel.createChat(
       systemInstruction: _systemPromptFor(model, ragContext),
       tools: tools,
+      supportImage: model.hasVision,
     );
 
     final Message message;
@@ -448,10 +508,8 @@ class ModelOrchestrator {
   }
 
   String _systemPromptFor(NovaModel model, [String? ragContext]) {
-    final base =
-        'You are Nova, a helpful on-device AI assistant powered by Gemma. '
-        'You run entirely on the device — no data is sent to servers. '
-        'Be concise, helpful, and friendly. ';
+    final role = _getAssistantRole();
+    final base = role.systemPrompt;
 
     final thinkingSuffix = model.hasThinking
         ? ' When asked to think step by step, show your reasoning in <thinking> tags '
@@ -461,6 +519,41 @@ class ModelOrchestrator {
     final contextSuffix = ragContext != null ? '\n\n$ragContext' : '';
 
     return '$base$thinkingSuffix$contextSuffix';
+  }
+
+  static AssistantRole _getAssistantRole() {
+    // Synchronous access using a cached value would be better,
+    // but for simplicity we read from prefs synchronously on first call
+    // and cache in a static. The cache is set during initializeDefaultModel().
+    return _cachedRole;
+  }
+
+  static AssistantRole _cachedRole = AssistantRole.helpful;
+
+  Future<void> _loadAssistantRole() async {
+    final prefs = await SharedPreferences.getInstance();
+    final roleName = prefs.getString('settings_assistant_role');
+    _cachedRole = AssistantRole.fromString(roleName);
+  }
+
+  Future<String?> _findModelPath(String fileName) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final directFile = File('${dir.path}/$fileName');
+    if (await directFile.exists()) {
+      return directFile.path;
+    }
+    final modelsDir = Directory('${dir.path}/models');
+    if (await modelsDir.exists()) {
+      await for (final entity in modelsDir.list()) {
+        if (entity is File &&
+            entity.path.contains(
+              fileName.replaceAll('.litertlm', '').replaceAll('.task', ''),
+            )) {
+          return entity.path;
+        }
+      }
+    }
+    return null;
   }
 
   Future<void> clearHistory() async {
@@ -482,10 +575,18 @@ class ModelOrchestrator {
   }
 
   Future<void> initializeDefaultModel() async {
+    await _loadAssistantRole();
     try {
       await _getOrCreateModel(selector.fastModel);
     } catch (e) {
       debugPrint('Default model init failed (will retry on first use): $e');
     }
+  }
+
+  /// Call this when assistant role changes in settings to refresh the cached role
+  static Future<void> refreshAssistantRole() async {
+    final prefs = await SharedPreferences.getInstance();
+    final roleName = prefs.getString('settings_assistant_role');
+    _cachedRole = AssistantRole.fromString(roleName);
   }
 }

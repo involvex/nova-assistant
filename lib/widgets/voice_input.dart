@@ -16,6 +16,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
   final SpeechToText _speech = SpeechToText();
   bool _isListening = false;
   bool _speechAvailable = false;
+  bool _isInitializing = true;
   String _lastWords = '';
   bool _isPressed = false;
 
@@ -30,11 +31,28 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
   }
 
   Future<void> _initSpeech() async {
+    if (!_isInitializing) setState(() => _isInitializing = true);
     try {
-      _speechAvailable = await _speech.initialize();
-      if (mounted) setState(() {});
+      _speechAvailable = await _speech.initialize(
+        onStatus: (status) {
+          debugPrint('Speech status: $status');
+        },
+        onError: (error) {
+          debugPrint('Speech error: ${error.errorMsg}');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Speech error: ${error.errorMsg}'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        },
+      );
     } catch (e) {
       debugPrint('Speech init failed: $e');
+    } finally {
+      if (mounted) setState(() => _isInitializing = false);
     }
   }
 
@@ -46,6 +64,16 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
   }
 
   Future<void> _toggleListening() async {
+    if (_isInitializing) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Speech still initializing...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
+
     if (_isListening) {
       await _speech.stop();
       if (mounted) setState(() => _isListening = false);
@@ -60,7 +88,14 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
 
   Future<void> _startListening() async {
     if (!_speechAvailable) {
-      debugPrint('Speech not available on this device');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Speech recognition not available. Check microphone permission.',
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
       return;
     }
 
@@ -72,7 +107,11 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
         if (result.finalResult && _lastWords.isNotEmpty) {
           widget.onTranscription(_lastWords);
           _lastWords = '';
+          if (mounted) setState(() => _isListening = false);
         }
+      },
+      onSoundLevelChange: (level) {
+        // Optional: update UI based on sound level
       },
       listenOptions: SpeechListenOptions(
         listenFor: const Duration(seconds: 30),
@@ -99,6 +138,18 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
           final scale = _isPressed
               ? 1.2
               : (1.0 + (_animController.value * 0.05));
+
+          Color bgColor;
+          if (_isListening) {
+            bgColor = Colors.red[600]!;
+          } else if (_isInitializing) {
+            bgColor = Colors.orange;
+          } else if (_speechAvailable) {
+            bgColor = const Color(0xFF6C63FF);
+          } else {
+            bgColor = Colors.grey;
+          }
+
           return Transform.scale(
             scale: scale,
             child: Container(
@@ -106,25 +157,30 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
               height: 48,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _isListening
-                    ? Colors.red[600]
-                    : (_speechAvailable
-                          ? const Color(0xFF6C63FF)
-                          : Colors.grey),
+                color: bgColor,
                 boxShadow: [
                   BoxShadow(
-                    color: (_isListening ? Colors.red : const Color(0xFF6C63FF))
-                        .withValues(alpha: 0.4 + (_animController.value * 0.2)),
+                    color: bgColor.withValues(
+                      alpha: 0.4 + (_animController.value * 0.2),
+                    ),
                     blurRadius: 8 + (_animController.value * 8),
                     spreadRadius: _animController.value * 2,
                   ),
                 ],
               ),
-              child: Icon(
-                _isListening ? Icons.stop_rounded : Icons.mic_rounded,
-                color: Colors.white,
-                size: 24,
-              ),
+              child: _isInitializing
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Icon(
+                      _isListening ? Icons.stop_rounded : Icons.mic_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    ),
             ),
           );
         },

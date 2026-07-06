@@ -3,7 +3,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/platform/assistant_role_service.dart';
+import 'package:nova_assistant/screens/memory_management_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,6 +25,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _voiceInput = true;
   bool _ragMemory = false;
   bool _isAssistantRoleHeld = false;
+  AssistantRole _assistantRole = AssistantRole.helpful;
   String _installStatus = '';
   StreamSubscription<Map<String, dynamic>>? _assistantRoleSub;
 
@@ -61,8 +64,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _thinkingMode = prefs.getBool('settings_thinking_mode') ?? false;
         _voiceInput = prefs.getBool('settings_voice_input') ?? true;
         _ragMemory = prefs.getBool('settings_rag_memory') ?? false;
+        _assistantRole = AssistantRole.fromString(
+          prefs.getString('settings_assistant_role'),
+        );
       });
     }
+  }
+
+  Future<void> _saveAssistantRole(AssistantRole role) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('settings_assistant_role', role.name);
+    await prefs.reload();
+    await ModelOrchestrator.refreshAssistantRole();
   }
 
   Future<void> _saveSetting(String key, bool value) async {
@@ -165,6 +178,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() => _ragMemory = v);
               _saveSetting('settings_rag_memory', v);
             },
+          ),
+          _actionTile(
+            icon: Icons.psychology,
+            title: 'Custom Memories',
+            subtitle: 'Add personal info Nova should remember',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const MemoryManagementScreen(),
+                ),
+              );
+            },
+          ),
+          _actionTile(
+            icon: Icons.person_outline,
+            title: 'Assistant Role',
+            subtitle: _assistantRole.displayName,
+            onTap: () => _showRoleSelector(),
           ),
           _actionTile(
             icon: Icons.assistant_outlined,
@@ -378,6 +410,75 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       onTap: () => Navigator.pop(ctx, type),
     );
+  }
+
+  Future<void> _showRoleSelector() async {
+    final selected = await showModalBottomSheet<AssistantRole>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Assistant Role',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ...AssistantRole.values.map(
+              (role) => ListTile(
+                leading: Icon(
+                  _roleIcon(role),
+                  color: _assistantRole == role
+                      ? const Color(0xFF6C63FF)
+                      : Colors.grey[400],
+                ),
+                title: Text(
+                  role.displayName,
+                  style: TextStyle(
+                    color: _assistantRole == role
+                        ? const Color(0xFF6C63FF)
+                        : Colors.white,
+                    fontWeight: _assistantRole == role
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
+                ),
+                trailing: _assistantRole == role
+                    ? const Icon(Icons.check, color: Color(0xFF6C63FF))
+                    : null,
+                onTap: () => Navigator.pop(ctx, role),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+
+    if (selected != null && selected != _assistantRole) {
+      setState(() => _assistantRole = selected);
+      await _saveAssistantRole(selected);
+    }
+  }
+
+  IconData _roleIcon(AssistantRole role) {
+    return switch (role) {
+      AssistantRole.helpful => Icons.help_outline,
+      AssistantRole.coder => Icons.code,
+      AssistantRole.creative => Icons.palette_outlined,
+      AssistantRole.student => Icons.school_outlined,
+      AssistantRole.analyst => Icons.analytics_outlined,
+    };
   }
 
   Widget _sectionHeader(String title) {

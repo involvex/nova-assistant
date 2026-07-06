@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class MemoryService {
   static const _key = 'rag_conversations';
+  static const _customMemoriesKey = 'custom_memories';
   static SharedPreferences? _prefs;
   static const _maxEntries = 50;
 
@@ -12,7 +13,7 @@ class MemoryService {
       _prefs ??= await SharedPreferences.getInstance();
 
   static Future<void> storeConversation(String query, String response) async {
-    final isEnabled = await _isEnabled();
+    final isEnabled = await _isConversationMemoryEnabled();
     if (!isEnabled) return;
 
     try {
@@ -40,8 +41,128 @@ class MemoryService {
     } catch (_) {}
   }
 
+  static Future<List<Map<String, dynamic>>> getCustomMemories() async {
+    try {
+      final p = await _p;
+      final existing = p.getString(_customMemoriesKey);
+      if (existing == null) return [];
+      return (jsonDecode(existing) as List<dynamic>)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> addCustomMemory(String title, String content) async {
+    try {
+      final p = await _p;
+      final existing = p.getString(_customMemoriesKey);
+      final List<Map<String, dynamic>> memories = existing != null
+          ? (jsonDecode(existing) as List<dynamic>)
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList()
+          : [];
+
+      memories.add({
+        'id': DateTime.now().millisecondsSinceEpoch.toString(),
+        'title': title,
+        'content': content,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+
+      await p.setString(_customMemoriesKey, jsonEncode(memories));
+    } catch (_) {}
+  }
+
+  static Future<void> updateCustomMemory(
+    String id,
+    String title,
+    String content,
+  ) async {
+    try {
+      final p = await _p;
+      final existing = p.getString(_customMemoriesKey);
+      if (existing == null) return;
+
+      final memories = (jsonDecode(existing) as List<dynamic>)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+
+      final index = memories.indexWhere((m) => m['id'] == id);
+      if (index != -1) {
+        memories[index] = {
+          ...memories[index],
+          'title': title,
+          'content': content,
+        };
+        await p.setString(_customMemoriesKey, jsonEncode(memories));
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> deleteCustomMemory(String id) async {
+    try {
+      final p = await _p;
+      final existing = p.getString(_customMemoriesKey);
+      if (existing == null) return;
+
+      final memories = (jsonDecode(existing) as List<dynamic>)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+
+      memories.removeWhere((m) => m['id'] == id);
+      await p.setString(_customMemoriesKey, jsonEncode(memories));
+    } catch (_) {}
+  }
+
   static Future<String?> retrieveContext(String query) async {
-    final isEnabled = await _isEnabled();
+    final buffer = StringBuffer();
+
+    final customContext = await retrieveCustomMemoriesContext(query);
+    if (customContext != null) {
+      buffer.write(customContext);
+    }
+
+    final conversationContext = await _retrieveConversationContext(query);
+    if (conversationContext != null) {
+      if (buffer.isNotEmpty) buffer.writeln();
+      buffer.write(conversationContext);
+    }
+
+    return buffer.isEmpty ? null : buffer.toString();
+  }
+
+  static Future<String?> retrieveCustomMemoriesContext(String query) async {
+    final isEnabled = await _isCustomMemoryEnabled();
+    if (!isEnabled) return null;
+
+    try {
+      final memories = await getCustomMemories();
+      if (memories.isEmpty) return null;
+
+      final queryLower = query.toLowerCase();
+      final relevant = memories.where((m) {
+        final text = '${m['title']} ${m['content']}'.toLowerCase();
+        return queryLower
+            .split(' ')
+            .any((word) => word.length > 3 && text.contains(word));
+      }).toList();
+
+      if (relevant.isEmpty) return null;
+
+      final buf = StringBuffer('Custom memories:\n');
+      for (final m in relevant) {
+        buf.writeln('- ${m['title']}: ${m['content']}');
+      }
+      return buf.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<String?> _retrieveConversationContext(String query) async {
+    final isEnabled = await _isConversationMemoryEnabled();
     if (!isEnabled) return null;
 
     try {
@@ -57,7 +178,6 @@ class MemoryService {
 
       final queryWords = query.toLowerCase().split(RegExp(r'\s+')).toSet();
 
-      // Score entries by keyword overlap with query
       final scored = entries.map((e) {
         final text = '${e['query']} ${e['response']}'.toLowerCase();
         final words = text.split(RegExp(r'\s+')).toSet();
@@ -65,32 +185,48 @@ class MemoryService {
         return MapEntry(e, overlap);
       }).toList();
 
-      // Get top 3 by score
       scored.sort((a, b) => b.value.compareTo(a.value));
       final top = scored.take(3).where((s) => s.value > 0).toList();
 
       if (top.isEmpty) return null;
 
-      final buffer = StringBuffer('Relevant past conversation:\n');
+      final buf = StringBuffer('Relevant past conversation:\n');
       for (final entry in top) {
-        buffer.writeln('- Q: ${entry.key['query']}');
-        buffer.writeln('  A: ${entry.key['response']}');
+        buf.writeln('- Q: ${entry.key['query']}');
+        buf.writeln('  A: ${entry.key['response']}');
       }
-      return buffer.toString();
+      return buf.toString();
     } catch (_) {
       return null;
     }
   }
 
-  static Future<bool> _isEnabled() async {
+  static Future<bool> _isConversationMemoryEnabled() async {
     final p = await _p;
     return p.getBool('settings_rag_memory') ?? false;
   }
 
-  static Future<void> clear() async {
+  static Future<bool> _isCustomMemoryEnabled() async {
+    final p = await _p;
+    return p.getBool('settings_custom_memory') ?? true;
+  }
+
+  static Future<void> clearConversationHistory() async {
     try {
       final p = await _p;
       await p.remove(_key);
     } catch (_) {}
+  }
+
+  static Future<void> clearCustomMemories() async {
+    try {
+      final p = await _p;
+      await p.remove(_customMemoriesKey);
+    } catch (_) {}
+  }
+
+  static Future<void> clear() async {
+    await clearConversationHistory();
+    await clearCustomMemories();
   }
 }

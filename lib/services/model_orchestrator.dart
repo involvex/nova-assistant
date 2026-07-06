@@ -97,6 +97,7 @@ class InferenceResult {
   final bool isStreaming;
   final String? thinking;
   final List<Map<String, dynamic>>? toolCalls;
+  final int? inferenceTimeMs;
 
   InferenceResult({
     required this.text,
@@ -104,6 +105,7 @@ class InferenceResult {
     this.isStreaming = false,
     this.thinking,
     this.toolCalls,
+    this.inferenceTimeMs,
   });
 }
 
@@ -638,6 +640,7 @@ class ModelOrchestrator {
     String fullResponse = '';
     String? currentThinking;
     final textBuffer = StringBuffer();
+    final inferenceStopwatch = Stopwatch()..start();
 
     // Tool call loop: after executing a tool, re-generate so the model
     // can incorporate the tool result into its response.
@@ -752,21 +755,25 @@ class ModelOrchestrator {
     }
 
     if (toolRounds >= _maxToolRounds && hasPendingToolCalls) {
+      inferenceStopwatch.stop();
       yield InferenceResult(
         text: '$fullResponse\n\n[Tool call limit reached]',
         model: model,
         isStreaming: false,
         thinking: thinkingMode ? currentThinking : null,
+        inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
       );
       await MemoryService.storeConversation(query, fullResponse);
       return;
     }
 
+    inferenceStopwatch.stop();
     yield InferenceResult(
       text: fullResponse,
       model: model,
       isStreaming: false,
       thinking: thinkingMode ? currentThinking : null,
+      inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
     );
 
     await MemoryService.storeConversation(query, fullResponse);

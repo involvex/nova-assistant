@@ -246,9 +246,13 @@ class _AssistantScreenState extends State<AssistantScreen> {
               text: accumulated,
               modelName: result.model.displayName,
               isStreaming: result.isStreaming,
+              isError: false,
               toolCalls: result.toolCalls != null
                   ? jsonEncode(result.toolCalls)
                   : null,
+              thinking: result.thinking,
+              inferenceTimeMs:
+                  result.inferenceTimeMs ?? _messages[idx].inferenceTimeMs,
             );
           });
           _scrollToBottom();

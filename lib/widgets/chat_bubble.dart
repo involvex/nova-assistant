@@ -163,14 +163,31 @@ class ChatBubble extends StatelessWidget {
                 ),
               ),
 
-            // Timestamp
-            Padding(
-              padding: const EdgeInsets.only(top: 2, left: 12, right: 12),
-              child: Text(
-                _formatTime(message.timestamp),
-                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+            // Timestamp / inference time
+            if (!message.isStreaming)
+              Padding(
+                padding: const EdgeInsets.only(top: 2, left: 12, right: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _formatTime(message.timestamp),
+                      style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                    ),
+                    if (!message.isUser && message.inferenceTimeMs != null) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatInferenceTime(message.inferenceTimeMs!),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey[600],
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -296,6 +313,12 @@ class ChatBubble extends StatelessWidget {
     if (isToday) return timeStr;
     final dateStr = '${dt.month}/${dt.day}/${dt.year.toString().substring(2)}';
     return '$dateStr $timeStr';
+  }
+
+  String _formatInferenceTime(int ms) {
+    if (ms < 1000) return '${ms}ms';
+    final seconds = ms / 1000;
+    return '${seconds.toStringAsFixed(1)}s';
   }
 }
 

@@ -13,6 +13,7 @@ class ChatMessage {
   final bool isError;
   final String? thinking;
   final String? toolCalls;
+  final int? inferenceTimeMs;
 
   ChatMessage({
     required this.id,
@@ -25,6 +26,7 @@ class ChatMessage {
     this.isError = false,
     this.thinking,
     this.toolCalls,
+    this.inferenceTimeMs,
   });
 
   ChatMessage copyWith({
@@ -38,6 +40,7 @@ class ChatMessage {
     bool? isError,
     String? thinking,
     String? toolCalls,
+    int? inferenceTimeMs,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -50,6 +53,7 @@ class ChatMessage {
       isError: isError ?? this.isError,
       thinking: thinking ?? this.thinking,
       toolCalls: toolCalls ?? this.toolCalls,
+      inferenceTimeMs: inferenceTimeMs ?? this.inferenceTimeMs,
     );
   }
 
@@ -64,6 +68,7 @@ class ChatMessage {
     'isError': isError,
     'thinking': thinking,
     'toolCalls': toolCalls,
+    'inferenceTimeMs': inferenceTimeMs,
   };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -79,5 +84,6 @@ class ChatMessage {
     isError: json['isError'] as bool? ?? false,
     thinking: json['thinking'] as String?,
     toolCalls: json['toolCalls'] as String?,
+    inferenceTimeMs: json['inferenceTimeMs'] as int?,
   );
 }

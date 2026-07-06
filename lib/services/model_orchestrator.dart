@@ -9,9 +9,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/agent_identity.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
+import 'package:nova_assistant/models/external_tool.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/memory_service.dart';
+import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/platform/tool_executor_service.dart';
 
@@ -405,12 +407,28 @@ class ModelOrchestrator {
 
             // Execute all tool calls found in this response
             for (final parsed in parsedCalls) {
-              _statusController.add('Executing ${parsed['name']}...');
+              final toolName = parsed['name'] as String;
+              final toolArgs = Map<String, dynamic>.from(parsed['args'] as Map);
+              _statusController.add('Executing $toolName...');
 
-              final toolResult = await ToolExecutorService.instance.executeTool(
-                parsed['name'] as String,
-                Map<String, dynamic>.from(parsed['args'] as Map),
-              );
+              // Try MCP external tools first, then native tools
+              ExternalToolResult? mcpResult;
+              if (McpService.instance.getTool(toolName) != null) {
+                mcpResult = await McpService.instance.executeTool(
+                  toolName,
+                  toolArgs,
+                );
+              }
+
+              final Map<String, dynamic> toolResult;
+              if (mcpResult != null) {
+                toolResult = mcpResult.toJson();
+              } else {
+                toolResult = await ToolExecutorService.instance.executeTool(
+                  toolName,
+                  toolArgs,
+                );
+              }
 
               final toolResponseMessage = Message.toolResponse(
                 toolName: parsed['name'] as String,
@@ -581,6 +599,17 @@ class ModelOrchestrator {
 
     if (attachmentContext != null && attachmentContext.isNotEmpty) {
       buffer.write('\n\n--- Attached Data ---\n$attachmentContext');
+    }
+
+    // Add data source context from MCP sources
+    final enabledSources = McpService.instance.sources
+        .where((s) => s.enabled)
+        .toList();
+    if (enabledSources.isNotEmpty) {
+      buffer.write('\n\n--- Connected Data Sources ---');
+      for (final source in enabledSources) {
+        buffer.write('\n- ${source.name}: ${source.description}');
+      }
     }
 
     return buffer.toString();

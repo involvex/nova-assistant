@@ -1,7 +1,13 @@
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:nova_assistant/services/mcp_service.dart';
 
 class NovaTools {
-  static final List<Tool> all = [
+  static List<Tool> get all => [
+    ..._builtInTools,
+    ...McpService.instance.enabledTools,
+  ];
+
+  static final List<Tool> _builtInTools = [
     getTime,
     setAlarm,
     cancelAlarm,

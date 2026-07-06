@@ -6,6 +6,7 @@ import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/platform/assistant_role_service.dart';
 import 'package:nova_assistant/screens/identity_config_screen.dart';
+import 'package:nova_assistant/screens/mcp_settings_screen.dart';
 import 'package:nova_assistant/screens/memory_management_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
@@ -202,6 +203,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 context,
                 MaterialPageRoute<void>(
                   builder: (_) => const IdentityConfigScreen(),
+                ),
+              );
+            },
+          ),
+          _actionTile(
+            icon: Icons.build_outlined,
+            title: 'External Tools & Data',
+            subtitle: 'MCP integrations, HTTP tools, data sources',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const McpSettingsScreen(),
                 ),
               );
             },

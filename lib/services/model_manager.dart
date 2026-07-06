@@ -115,19 +115,20 @@ class ModelManager {
       }
 
       if (foundOnDisk) {
-        // File exists on disk but wasn't in prefs — just track it, no download
-        final specName = fileName;
+        // File exists on disk — find actual spec name and track it
+        final spec = await _findInstalledSpec(fileName, modelType);
+        final actualName = spec?['name'] as String? ?? fileName;
         final model = InstalledModel(
-          id: specName,
-          fileName: specName,
+          id: actualName,
+          fileName: actualName,
           modelType: modelType,
           installedAt: DateTime.now(),
           fileSizeBytes: await _getFileSize(dir.path, fileName),
         );
-        _installedModels.removeWhere((m) => m.id == specName);
+        _installedModels.removeWhere((m) => m.id == actualName);
         _installedModels.add(model);
         await _saveToPrefs();
-        _statusController.add('Model found on disk: $fileName');
+        _statusController.add('Model found on disk: $actualName');
         return model;
       }
 
@@ -223,26 +224,25 @@ class ModelManager {
         return null;
       }
 
-      final tempDir = await getTemporaryDirectory();
       final fileName = p.basename(filePath);
-      final tempFile = File('${tempDir.path}/$fileName');
+      final docsDir = await getApplicationDocumentsDirectory();
+      final targetPath = '${docsDir.path}/$fileName';
 
-      _statusController.add('Copying model file...');
-      await sourceFile.copy(tempFile.path);
+      // Copy to documents directory (flutter_gemma needs permanent access)
+      if (!await File(targetPath).exists()) {
+        _statusController.add('Copying model file to app storage...');
+        await sourceFile.copy(targetPath);
+      }
 
       final builder = FlutterGemma.installModel(
         modelType: modelType,
         fileType: fileType,
-      ).fromFile(tempFile.path);
+      ).fromFile(targetPath);
       if (onProgress != null) {
         builder.withProgress(onProgress);
       }
       final result = await builder.install();
       final spec = result.spec;
-
-      try {
-        await tempFile.delete();
-      } catch (_) {}
 
       final model = InstalledModel(
         id: spec.name,
@@ -252,6 +252,7 @@ class ModelManager {
         fileSizeBytes: await sourceFile.length(),
       );
 
+      _installedModels.removeWhere((m) => m.id == spec.name);
       _installedModels.add(model);
       await _saveToPrefs();
       _statusController.add('Model installed: ${spec.name}');
@@ -280,6 +281,26 @@ class ModelManager {
     return _installedModels.any((m) => m.fileName == fileName);
   }
 
+  Future<bool> isInstalledOnDisk(String fileName) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$fileName');
+      if (await file.exists()) return true;
+      final modelsDir = Directory('${dir.path}/models');
+      if (await modelsDir.exists()) {
+        await for (final entity in modelsDir.list()) {
+          if (entity is File &&
+              entity.path.contains(
+                fileName.replaceAll('.litertlm', '').replaceAll('.task', ''),
+              )) {
+            return true;
+          }
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
   /// Register a model already on disk (no download). Used by prefetch to
   /// register existing files without triggering network requests.
   Future<void> registerDiskModel({
@@ -292,7 +313,6 @@ class ModelManager {
     final existing = _installedModels.where((m) => m.fileName == fileName);
     if (existing.isNotEmpty) return;
 
-    // Register with FlutterGemma so the engine knows about it
     try {
       await FlutterGemma.installModel(
         modelType: modelType,
@@ -306,11 +326,49 @@ class ModelManager {
         installedAt: DateTime.now(),
         fileSizeBytes: fileSizeBytes,
       );
+      _installedModels.removeWhere((m) => m.id == fileName);
       _installedModels.add(model);
       await _saveToPrefs();
       _statusController.add('Registered: $fileName');
     } catch (e) {
-      debugPrint('registerDiskModel failed: $e');
+      debugPrint('registerDiskModel failed: $e — trying fuzzy match');
+      // Fallback: try to find the file in models subdirectory with fuzzy match
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        final modelsDir = Directory('${dir.path}/models');
+        if (await modelsDir.exists()) {
+          await for (final entity in modelsDir.list()) {
+            if (entity is File &&
+                p
+                    .basename(entity.path)
+                    .contains(
+                      fileName
+                          .replaceAll('.litertlm', '')
+                          .replaceAll('.task', ''),
+                    )) {
+              try {
+                await FlutterGemma.installModel(
+                  modelType: modelType,
+                  fileType: fileType,
+                ).fromFile(entity.path).install();
+                final actualName = p.basename(entity.path);
+                final m = InstalledModel(
+                  id: actualName,
+                  fileName: actualName,
+                  modelType: modelType,
+                  installedAt: DateTime.now(),
+                  fileSizeBytes: await entity.length(),
+                );
+                _installedModels.removeWhere((x) => x.id == actualName);
+                _installedModels.add(m);
+                await _saveToPrefs();
+                _statusController.add('Registered (fuzzy): $actualName');
+              } catch (_) {}
+              break;
+            }
+          }
+        }
+      } catch (_) {}
     }
   }
 }

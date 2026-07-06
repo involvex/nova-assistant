@@ -26,6 +26,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private var assistantRoleEventSink: EventChannel.EventSink? = null
+    private var screenCapturePendingResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -39,6 +40,14 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             this
         )
+
+        ScreenCaptureHelper.setPermissionResultCallback { granted ->
+            runOnUiThread {
+                screenCapturePendingResult?.success(granted)
+                screenCapturePendingResult = null
+                ScreenCaptureHelper.onScreenCapturePermissionResult(granted)
+            }
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -119,12 +128,14 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
             REQUEST_SCREEN_CAPTURE -> {
+                val pendingResult = screenCapturePendingResult
+                screenCapturePendingResult = null
                 val granted = resultCode == Activity.RESULT_OK && data != null
                 if (granted && data != null) {
                     ScreenCaptureHelper.startCapture(this, data)
-                    ScreenCaptureHelper.onScreenCapturePermissionResult(true)
+                    pendingResult?.success(true)
                 } else {
-                    ScreenCaptureHelper.onScreenCapturePermissionResult(false)
+                    pendingResult?.success(false)
                 }
             }
             REQUEST_ASSISTANT_ROLE -> {

@@ -41,7 +41,8 @@ class AssistantActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        dev.nova.assistant.ScreenCaptureHelper.registerWith(flutterEngine.dartExecutor.binaryMessenger, this)
+        // ScreenCaptureHelper is owned by MainActivity — do not register here.
+        // AssistantActivity handles screen capture via its own MediaProjection flow.
     }
 
     private fun requestScreenCapture() {

@@ -37,6 +37,7 @@ class ModelOrchestrator {
   InferenceModel? _activeModel;
   InferenceChat? _activeChat;
   NovaModel? _activeModelType;
+  bool _activeModelSupportsImage = false;
   NovaModel? _preferredModelOverride;
   bool _modelOverrideDirty = false;
   bool _isInitialized = false;
@@ -126,14 +127,21 @@ class ModelOrchestrator {
     }
   }
 
-  Future<InferenceModel> _getOrCreateModel(NovaModel model) async {
-    // Return cached model if same type
-    if (_activeModel != null && _activeModelType == model) {
+  Future<InferenceModel> _getOrCreateModel(
+    NovaModel model, [
+    Uint8List? screenshot,
+  ]) async {
+    final needsImageSupport = model.hasVision && screenshot != null;
+
+    // Return cached model if same type AND image support setting matches
+    if (_activeModel != null &&
+        _activeModelType == model &&
+        _activeModelSupportsImage == needsImageSupport) {
       return _activeModel!;
     }
 
-    // Close previous model if switching
-    if (_activeModel != null && _activeModelType != model) {
+    // Close previous model if switching type or image support requirement
+    if (_activeModel != null) {
       try {
         await _activeModel!.close();
       } catch (e) {
@@ -143,6 +151,8 @@ class ModelOrchestrator {
       _activeChat = null;
     }
 
+    final bool supportImage = needsImageSupport;
+
     // Try to get the active model with timeout
     if (FlutterGemma.hasActiveModel()) {
       try {
@@ -150,8 +160,10 @@ class ModelOrchestrator {
         _activeModel = await FlutterGemma.getActiveModel(
           maxTokens: _tokenLimitFor(model),
           preferredBackend: PreferredBackend.gpu,
+          supportImage: supportImage,
         ).timeout(const Duration(seconds: 30));
         _activeModelType = model;
+        _activeModelSupportsImage = supportImage;
         _isInitialized = true;
         _statusController.add('${model.displayName} ready');
         return _activeModel!;
@@ -188,8 +200,10 @@ class ModelOrchestrator {
       _activeModel = await FlutterGemma.getActiveModel(
         maxTokens: _tokenLimitFor(model),
         preferredBackend: PreferredBackend.gpu,
+        supportImage: supportImage,
       ).timeout(const Duration(seconds: 30));
       _activeModelType = model;
+      _activeModelSupportsImage = supportImage;
       _isInitialized = true;
       _statusController.add('${model.displayName} ready');
       return _activeModel!;
@@ -250,7 +264,7 @@ class ModelOrchestrator {
 
     InferenceModel inferenceModel;
     try {
-      inferenceModel = await _getOrCreateModel(model);
+      inferenceModel = await _getOrCreateModel(model, screenshot);
     } catch (e) {
       _statusController.add('Error: $e');
       yield InferenceResult(
@@ -265,17 +279,6 @@ class ModelOrchestrator {
       systemInstruction: _systemPromptFor(model, ragContext),
       tools: tools,
     );
-
-    // If this message has an image but the chat was created with a
-    // non-vision model (e.g. smollm from a prior text message), reset
-    // the chat so it uses the correct vision-capable model.
-    if (screenshot != null && _activeChat != null) {
-      await _activeChat!.close();
-      _activeChat = await inferenceModel.createChat(
-        systemInstruction: _systemPromptFor(model, ragContext),
-        tools: tools,
-      );
-    }
 
     final Message message;
     if (screenshot != null) {
@@ -462,6 +465,7 @@ class ModelOrchestrator {
 
   Future<void> clearHistory() async {
     _activeChat = null;
+    _activeModelSupportsImage = false;
     await ChatHistoryService.clear();
     _historyClearedController.add(null);
   }
@@ -472,6 +476,7 @@ class ModelOrchestrator {
     } catch (_) {}
     _activeModel = null;
     _activeChat = null;
+    _activeModelSupportsImage = false;
     _isInitialized = false;
     await _historyClearedController.close();
   }

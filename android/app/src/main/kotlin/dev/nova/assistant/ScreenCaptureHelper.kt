@@ -37,6 +37,14 @@ object ScreenCaptureHelper {
     val latestFrame: ByteArray? get() = _latestFrame
 
     private var _captureCompletionCallback: ((Boolean) -> Unit)? = null
+    private var _permissionResultCallback: ((Boolean) -> Unit)? = null
+
+    fun setPermissionResultCallback(cb: ((Boolean) -> Unit)?) {
+        _permissionResultCallback = cb
+        if (cb == null) {
+            _captureCompletionCallback = null
+        }
+    }
 
     fun registerWith(messenger: BinaryMessenger, activity: Activity) {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
@@ -180,6 +188,8 @@ object ScreenCaptureHelper {
     }
 
     fun onScreenCapturePermissionResult(granted: Boolean) {
+        _permissionResultCallback?.invoke(granted)
+        _permissionResultCallback = null
         if (granted) {
             // Callback is invoked in registerWith's requestCapture handler
             // after startCapture completes captureFrame

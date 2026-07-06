@@ -91,14 +91,9 @@ class ModelManager {
       final uri = Uri.parse(url);
       final fileName = p.basename(uri.path);
 
-      // Check if already in our tracked list — skip download
-      final existing = _installedModels.where((m) => m.fileName == fileName);
-      if (existing.isNotEmpty) {
-        _statusController.add('Model already installed: $fileName');
-        return existing.first;
-      }
-
-      // Check if file exists on disk but not in prefs (e.g. after prefs corruption)
+      // ALWAYS check disk as source of truth — _installedModels may have
+      // stale entries from a failed install. Only return early if the file
+      // actually exists on disk.
       final dir = await getApplicationDocumentsDirectory();
       final fileOnDisk = File('${dir.path}/$fileName');
       final modelsDir = Directory('${dir.path}/models');
@@ -117,9 +112,8 @@ class ModelManager {
 
       if (foundOnDisk) {
         // File exists on disk — find actual spec name and track it
-        final spec = await _findInstalledSpec(fileName, modelType);
+        final spec = await _findInstalledSpec(fileName);
         final actualName = spec?['name'] as String? ?? fileName;
-        // Prefer canonical name over spec name for consistency
         final canonicalName =
             _findCanonicalName(actualName, modelType) ?? actualName;
         final model = InstalledModel(
@@ -129,7 +123,6 @@ class ModelManager {
           installedAt: DateTime.now(),
           fileSizeBytes: await _getFileSize(dir.path, fileName),
         );
-        // Clean up any duplicate entries (by canonical name, spec name, or URL name)
         _installedModels.removeWhere(
           (m) =>
               m.fileName == canonicalName ||
@@ -203,10 +196,7 @@ class ModelManager {
     }
   }
 
-  Future<Map<String, dynamic>?> _findInstalledSpec(
-    String fileName,
-    ModelType modelType,
-  ) async {
+  Future<Map<String, dynamic>?> _findInstalledSpec(String fileName) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       // Check direct path
@@ -264,11 +254,11 @@ class ModelManager {
       final fileName = p.basename(filePath);
       final ext = p.extension(fileName).toLowerCase();
 
-      // Validate file extension — only .litertlm and .task are supported.
-      // .gguf/.bin/.tflite files will crash the native engine.
-      if (ext != '.litertlm' && ext != '.task') {
+      // Validate file extension — .litertlm, .task, and .gguf are supported.
+      // .bin/.tflite files may crash the native engine.
+      if (ext != '.litertlm' && ext != '.task' && ext != '.gguf') {
         _statusController.add(
-          'Unsupported format: $ext — only .litertlm and .task are supported',
+          'Unsupported format: $ext — only .litertlm, .task, and .gguf are supported',
         );
         return null;
       }

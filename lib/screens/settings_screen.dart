@@ -108,7 +108,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _actionTile(
             icon: Icons.folder_open,
             title: 'Install model from file',
-            subtitle: 'Select a .litertlm or .task file from your device',
+            subtitle:
+                'Select a .litertlm, .task, or .gguf file from your device',
             onTap: () => _pickAndInstallModel(context),
           ),
 
@@ -298,7 +299,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['litertlm', 'task'],
+        allowedExtensions: ['litertlm', 'task', 'gguf'],
         dialogTitle: 'Select a model file',
       );
 

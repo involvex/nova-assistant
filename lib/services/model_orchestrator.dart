@@ -17,17 +17,29 @@ import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/platform/tool_executor_service.dart';
 
+enum DownloadConsent { download, pickFile, cancel }
+
+/// Thrown when the user chooses to pick a local file instead of downloading.
+class ModelNeedsFilePickException implements Exception {
+  final NovaModel model;
+  ModelNeedsFilePickException(this.model);
+  @override
+  String toString() => 'Model needs file pick: ${model.displayName}';
+}
+
 class InferenceResult {
   final String text;
   final NovaModel model;
   final bool isStreaming;
   final String? thinking;
+  final List<Map<String, dynamic>>? toolCalls;
 
   InferenceResult({
     required this.text,
     required this.model,
     this.isStreaming = false,
     this.thinking,
+    this.toolCalls,
   });
 }
 
@@ -146,8 +158,12 @@ class ModelOrchestrator {
       return _activeModel!;
     }
 
-    // Close previous model if switching type or image support requirement
-    if (_activeModel != null) {
+    // --- Switching models ---
+    // Close previous model AND clear flutter_gemma's active identity so
+    // getActiveModel() won't return the stale model from a prior session.
+    final switchingModel =
+        _activeModelType != null && _activeModelType != model;
+    if (switchingModel || (_activeModel != null && _activeModelType != model)) {
       try {
         await _activeModel!.close();
       } catch (e) {
@@ -155,12 +171,19 @@ class ModelOrchestrator {
       }
       _activeModel = null;
       _activeChat = null;
+      // Reset flutter_gemma's active model so it doesn't return the old one
+      try {
+        await FlutterGemma.clearActiveInferenceIdentity();
+      } catch (e) {
+        debugPrint('Error clearing active identity: $e');
+      }
     }
 
     final bool supportImage = needsImageSupport;
 
-    // Try to get the active model with timeout
-    if (FlutterGemma.hasActiveModel()) {
+    // If flutter_gemma has an active model (e.g., same model type restored on
+    // startup), try to use it directly.
+    if (FlutterGemma.hasActiveModel() && !switchingModel) {
       try {
         _statusController.add('Loading ${model.displayName}...');
         _activeModel = await FlutterGemma.getActiveModel(
@@ -222,10 +245,23 @@ class ModelOrchestrator {
       }
     }
 
-    // No active model or load failed — try to install from network
+    // No active model or load failed — ask user before downloading
+    final url = ModelHuggingFaceURLs.urlFor(model);
+    final choice = await _showDownloadConsent(model: model, url: url);
+
+    if (choice == DownloadConsent.pickFile) {
+      // User wants to pick a file from device — throw a special exception
+      // so the UI can handle the file picker flow.
+      throw ModelNeedsFilePickException(model);
+    }
+
+    if (choice == DownloadConsent.cancel) {
+      throw Exception('Download cancelled by user');
+    }
+
+    // choice == DownloadConsent.download — proceed with network install
     _statusController.add('Downloading ${model.displayName}...');
     try {
-      final url = ModelHuggingFaceURLs.urlFor(model);
       final installed = await ModelManager.instance
           .installFromNetwork(
             url: url,
@@ -260,6 +296,35 @@ class ModelOrchestrator {
       rethrow;
     }
   }
+
+  /// Show a download consent dialog before downloading a model.
+  /// Returns the user's choice.
+  Future<DownloadConsent> _showDownloadConsent({
+    required NovaModel model,
+    required String url,
+  }) async {
+    final completer = Completer<DownloadConsent>();
+    _downloadConsentCompleter = completer;
+    _downloadConsentModel = model;
+    _downloadConsentUrl = url;
+    _statusController.add('NEED_DOWNLOAD_CONSENT:${model.displayName}');
+    return completer.future;
+  }
+
+  /// Completes the download consent dialog (called from UI layer).
+  void completeDownloadConsent(DownloadConsent choice) {
+    _downloadConsentCompleter?.complete(choice);
+    _downloadConsentCompleter = null;
+    _downloadConsentModel = null;
+    _downloadConsentUrl = null;
+  }
+
+  Completer<DownloadConsent>? _downloadConsentCompleter;
+  NovaModel? _downloadConsentModel;
+  String? _downloadConsentUrl;
+
+  NovaModel? get downloadConsentModel => _downloadConsentModel;
+  String? get downloadConsentUrl => _downloadConsentUrl;
 
   int _tokenLimitFor(NovaModel model) {
     switch (model) {
@@ -379,6 +444,7 @@ class ModelOrchestrator {
     // can incorporate the tool result into its response.
     bool hasPendingToolCalls = true;
     int toolRounds = 0;
+    final List<Map<String, dynamic>> allToolCalls = [];
     while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
       hasPendingToolCalls = false;
       toolRounds++;
@@ -390,12 +456,9 @@ class ModelOrchestrator {
           textBuffer.write(token);
 
           // Try to parse function calls from the accumulated buffer.
-          // Returns null if JSON is incomplete/truncated, or a non-empty
-          // list if one or more complete tool calls were found.
           final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
           if (parsedCalls != null && parsedCalls.isNotEmpty) {
-            // Remove the raw JSON tool call text from fullResponse so it
-            // doesn't leak into the final user-visible response.
+            // Remove the raw JSON tool call text from fullResponse
             final toolText = textBuffer.toString();
             final idx = fullResponse.lastIndexOf(toolText);
             if (idx >= 0) {
@@ -410,6 +473,12 @@ class ModelOrchestrator {
               final toolName = parsed['name'] as String;
               final toolArgs = Map<String, dynamic>.from(parsed['args'] as Map);
               _statusController.add('Executing $toolName...');
+
+              allToolCalls.add({
+                'name': toolName,
+                'args': toolArgs,
+                'status': 'executing',
+              });
 
               // Try MCP external tools first, then native tools
               ExternalToolResult? mcpResult;
@@ -430,16 +499,22 @@ class ModelOrchestrator {
                 );
               }
 
+              // Update the last tool call with result
+              if (allToolCalls.isNotEmpty) {
+                allToolCalls.last['status'] = 'done';
+                allToolCalls.last['result'] = toolResult;
+              }
+
               await _sendToolResponse(toolName, toolResult);
               hasPendingToolCalls = true;
             }
-            // Don't yield here — wait for the next generation pass
           } else {
             yield InferenceResult(
               text: fullResponse,
               model: model,
               isStreaming: true,
               thinking: thinkingMode ? currentThinking : null,
+              toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
             );
           }
         } else if (event is ThinkingResponse) {
@@ -449,15 +524,27 @@ class ModelOrchestrator {
             model: model,
             isStreaming: true,
             thinking: currentThinking,
+            toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
           );
         } else if (event is FunctionCallResponse) {
           // Plugin-level function call detected
           _statusController.add('Executing ${event.name}...');
 
+          allToolCalls.add({
+            'name': event.name,
+            'args': Map<String, dynamic>.from(event.args),
+            'status': 'executing',
+          });
+
           final toolResult = await ToolExecutorService.instance.executeTool(
             event.name,
             Map<String, dynamic>.from(event.args),
           );
+
+          if (allToolCalls.isNotEmpty) {
+            allToolCalls.last['status'] = 'done';
+            allToolCalls.last['result'] = toolResult;
+          }
 
           await _sendToolResponse(event.name, toolResult);
           hasPendingToolCalls = true;

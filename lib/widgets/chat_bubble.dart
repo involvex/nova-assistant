@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -69,6 +70,9 @@ class ChatBubble extends StatelessWidget {
                 ),
               ),
 
+            // Tool call chips (for assistant messages with tool calls)
+            if (!isUser && message.toolCalls != null) _buildToolCalls(),
+
             // Message bubble
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -136,6 +140,86 @@ class ChatBubble extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _buildToolCalls() {
+    List<dynamic> calls;
+    try {
+      calls = jsonDecode(message.toolCalls!) as List<dynamic>;
+    } catch (_) {
+      return const SizedBox.shrink();
+    }
+
+    if (calls.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: calls.map((call) {
+          final name = call['name'] as String? ?? 'unknown';
+          final status = call['status'] as String? ?? 'done';
+          final isExecuting = status == 'executing';
+
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: isExecuting
+                  ? const Color(0xFF6C63FF).withValues(alpha: 0.15)
+                  : Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isExecuting
+                    ? const Color(0xFF6C63FF).withValues(alpha: 0.3)
+                    : Colors.white.withValues(alpha: 0.1),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isExecuting)
+                  const SizedBox(
+                    width: 10,
+                    height: 10,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Color(0xFF6C63FF),
+                      ),
+                    ),
+                  )
+                else
+                  const Icon(
+                    Icons.check_circle_outline,
+                    size: 12,
+                    color: Colors.green,
+                  ),
+                const SizedBox(width: 4),
+                Text(
+                  _formatToolName(name),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isExecuting
+                        ? const Color(0xFF6C63FF)
+                        : Colors.grey[400],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  String _formatToolName(String name) {
+    return name
+        .replaceAll('_', ' ')
+        .split(' ')
+        .map((w) => w[0].toUpperCase() + w.substring(1))
+        .join(' ');
   }
 
   Widget _buildStreamingIndicator() {

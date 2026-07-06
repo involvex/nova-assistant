@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
 import 'package:nova_assistant/widgets/chat_bubble.dart';
@@ -68,8 +70,13 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   void _listenToModelStatus() {
     ModelOrchestrator.instance.statusStream.listen((status) {
-      if (mounted) {
-        setState(() => _status = status);
+      if (!mounted) return;
+      setState(() => _status = status);
+
+      // Handle download consent request from orchestrator
+      if (status.startsWith('NEED_DOWNLOAD_CONSENT:')) {
+        final modelName = status.substring('NEED_DOWNLOAD_CONSENT:'.length);
+        _showDownloadConsentDialog(modelName);
       }
     });
 
@@ -78,6 +85,58 @@ class _AssistantScreenState extends State<AssistantScreen> {
         setState(() => _messages.clear());
       }
     });
+  }
+
+  Future<void> _showDownloadConsentDialog(String modelName) async {
+    final orchestrator = ModelOrchestrator.instance;
+    final model = orchestrator.downloadConsentModel;
+    final url = orchestrator.downloadConsentUrl;
+    if (model == null || url == null) return;
+
+    final choice = await showDialog<DownloadConsent>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Text('Download $modelName?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'This model is not installed on your device.',
+              style: TextStyle(color: Colors.grey[400]),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Size: ~${model.sizeMB}MB',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Source: ${Uri.parse(url).host}',
+              style: TextStyle(color: Colors.grey[500], fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, DownloadConsent.cancel),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, DownloadConsent.pickFile),
+            child: const Text('Pick File'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, DownloadConsent.download),
+            child: const Text('Download'),
+          ),
+        ],
+      ),
+    );
+
+    orchestrator.completeDownloadConsent(choice ?? DownloadConsent.cancel);
   }
 
   @override
@@ -166,6 +225,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
               text: accumulated,
               modelName: result.model.displayName,
               isStreaming: result.isStreaming,
+              toolCalls: result.toolCalls != null
+                  ? jsonEncode(result.toolCalls)
+                  : null,
             );
           });
           _scrollToBottom();
@@ -173,6 +235,17 @@ class _AssistantScreenState extends State<AssistantScreen> {
       }
     } catch (e) {
       final idx = _messages.indexWhere((m) => m.id == assistantId);
+      if (e is ModelNeedsFilePickException) {
+        // User chose "Pick File" — open file picker
+        setState(() {
+          _isGenerating = false;
+        });
+        _attachmentManager.clear();
+        await _handleModelFilePick(e.model);
+        // Retry sending after file pick
+        _inputController.text = text;
+        return;
+      }
       if (idx != -1) {
         setState(() {
           _messages[idx] = _messages[idx].copyWith(
@@ -308,6 +381,60 @@ class _AssistantScreenState extends State<AssistantScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to pick file: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _handleModelFilePick(NovaModel model) async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['litertlm', 'task', 'gguf'],
+      );
+
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      if (file.path == null) return;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Installing ${model.displayName}...'),
+          backgroundColor: const Color(0xFF6C63FF),
+        ),
+      );
+
+      final installed = await ModelManager.instance.installFromFile(
+        filePath: file.path!,
+        modelType: model.modelType,
+        fileType: model.fileType,
+      );
+
+      if (installed != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${model.displayName} installed!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Re-send the last user message to trigger model load
+        if (_messages.isNotEmpty) {
+          final lastUserMsg = _messages.lastWhere(
+            (m) => m.isUser,
+            orElse: () => _messages.first,
+          );
+          _inputController.text = lastUserMsg.text;
+          _sendMessage();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to install model: $e'),
             backgroundColor: Colors.red,
           ),
         );

@@ -166,6 +166,27 @@ class _AssistantScreenState extends State<AssistantScreen> {
     });
   }
 
+  void _retryFromError(int errorIndex) {
+    // Find the user message that preceded this error
+    String? userText;
+    for (var i = errorIndex - 1; i >= 0; i--) {
+      if (_messages[i].isUser) {
+        userText = _messages[i].text;
+        break;
+      }
+    }
+    if (userText == null || userText.isEmpty) return;
+
+    // Remove the error message and any following messages
+    setState(() {
+      _messages.removeRange(errorIndex, _messages.length);
+    });
+
+    // Re-send
+    _inputController.text = userText;
+    _sendMessage();
+  }
+
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _isGenerating) return;
@@ -247,9 +268,16 @@ class _AssistantScreenState extends State<AssistantScreen> {
         return;
       }
       if (idx != -1) {
+        // Build error message with actionable info
+        String errorText;
+        if (e is ModelException) {
+          errorText = '⚠️ ${e.message}\n\n${e.suggestion ?? ''}';
+        } else {
+          errorText = 'Sorry, I encountered an error: $e';
+        }
         setState(() {
           _messages[idx] = _messages[idx].copyWith(
-            text: 'Sorry, I encountered an error: $e',
+            text: errorText,
             isStreaming: false,
             isError: true,
           );
@@ -565,6 +593,20 @@ class _AssistantScreenState extends State<AssistantScreen> {
                           message: msg,
                           onScreenshotTap: msg.imageData != null
                               ? () => _showFullScreenshot(msg.imageData!)
+                              : null,
+                          onRetry: msg.isError && !msg.isUser
+                              ? () => _retryFromError(index)
+                              : null,
+                          onSettingsTap: msg.isError && !msg.isUser
+                              ? () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute<void>(
+                                      builder: (context) =>
+                                          const SettingsScreen(),
+                                    ),
+                                  );
+                                }
                               : null,
                         );
                       },

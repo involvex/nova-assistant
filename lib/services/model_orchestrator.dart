@@ -27,6 +27,70 @@ class ModelNeedsFilePickException implements Exception {
   String toString() => 'Model needs file pick: ${model.displayName}';
 }
 
+/// Base class for model-related errors with actionable information.
+class ModelException implements Exception {
+  final String message;
+  final NovaModel? model;
+  final String? suggestion;
+  final Object? underlyingError;
+
+  const ModelException(
+    this.message, {
+    this.model,
+    this.suggestion,
+    this.underlyingError,
+  });
+
+  @override
+  String toString() => message;
+}
+
+/// Model file exists on disk but failed to load into the native engine.
+class ModelLoadException extends ModelException {
+  const ModelLoadException(
+    super.message, {
+    super.model,
+    super.suggestion,
+    super.underlyingError,
+  });
+}
+
+/// Model file not found on disk.
+class ModelNotFoundException extends ModelException {
+  const ModelNotFoundException(
+    super.message, {
+    super.model,
+    super.suggestion,
+    super.underlyingError,
+  });
+}
+
+/// Download from network failed.
+class ModelDownloadException extends ModelException {
+  final int? statusCode;
+  const ModelDownloadException(
+    super.message, {
+    super.model,
+    super.suggestion,
+    super.underlyingError,
+    this.statusCode,
+  });
+}
+
+/// Not enough storage to install the model.
+class ModelStorageException extends ModelException {
+  final int? neededBytes;
+  final int? availableBytes;
+  const ModelStorageException(
+    super.message, {
+    super.model,
+    super.suggestion,
+    super.underlyingError,
+    this.neededBytes,
+    this.availableBytes,
+  });
+}
+
 class InferenceResult {
   final String text;
   final NovaModel model;
@@ -200,6 +264,15 @@ class ModelOrchestrator {
         debugPrint('getActiveModel failed: $e');
         _statusController.add('Model load failed, trying local...');
         _activeModel = null;
+        // Don't swallow — if this is a clear "no model" error, convert it
+        if (e is StateError && e.message.contains('No active')) {
+          throw ModelNotFoundException(
+            '${model.displayName} is not installed.',
+            model: model,
+            suggestion: 'Download it or pick a file from your device.',
+            underlyingError: e,
+          );
+        }
       }
     }
 
@@ -215,9 +288,6 @@ class ModelOrchestrator {
         'Found ${model.displayName} on disk, registering...',
       );
       try {
-        // Find the actual file path and re-register with flutter_gemma.
-        // Use registerDiskModel (not installFromFile) to avoid redundant file
-        // copy and ensure canonical filename is used.
         final modelPath = await _findModelPath(fileName);
         if (modelPath != null) {
           final fileSize = await File(modelPath).length();
@@ -241,7 +311,17 @@ class ModelOrchestrator {
         }
       } catch (e) {
         debugPrint('Failed to load local model: $e');
-        // Fall through to download
+        // File exists but failed to load — likely corrupted or incompatible.
+        // Convert to a typed exception so the UI can show actionable info.
+        if (e is ModelException) rethrow;
+        throw ModelLoadException(
+          'Failed to load ${model.displayName} from disk.',
+          model: model,
+          suggestion:
+              'The model file may be corrupted. '
+              'Try re-downloading or pick a different file.',
+          underlyingError: e,
+        );
       }
     }
 
@@ -276,7 +356,11 @@ class ModelOrchestrator {
           .timeout(const Duration(seconds: 300));
 
       if (installed == null) {
-        throw Exception('Model installation returned null');
+        throw ModelDownloadException(
+          'Download of ${model.displayName} failed.',
+          model: model,
+          suggestion: 'Check your internet connection and try again.',
+        );
       }
 
       // Now get the model after install
@@ -291,9 +375,54 @@ class ModelOrchestrator {
       _isInitialized = true;
       _statusController.add('${model.displayName} ready');
       return _activeModel!;
+    } on ModelException {
+      rethrow;
+    } on TimeoutException {
+      throw ModelLoadException(
+        '${model.displayName} loading timed out.',
+        model: model,
+        suggestion:
+            'The model may be too large for your device, or the file may be corrupted. '
+            'Try a smaller model or pick a file from your device.',
+      );
     } catch (e) {
       _statusController.add('Failed to load ${model.displayName}: $e');
-      rethrow;
+      // Classify the error
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('storage') || msg.contains('no space')) {
+        throw ModelStorageException(
+          'Not enough storage for ${model.displayName}.',
+          model: model,
+          suggestion: 'Free up storage space and try again.',
+          underlyingError: e,
+        );
+      }
+      if (msg.contains('corrupt') ||
+          msg.contains('invalid') ||
+          msg.contains('unsupported')) {
+        throw ModelLoadException(
+          '${model.displayName} file is corrupted or incompatible.',
+          model: model,
+          suggestion: 'Re-download the model or pick a different file.',
+          underlyingError: e,
+        );
+      }
+      if (msg.contains('network') ||
+          msg.contains('connection') ||
+          msg.contains('socket')) {
+        throw ModelDownloadException(
+          'Network error downloading ${model.displayName}.',
+          model: model,
+          suggestion: 'Check your internet connection and try again.',
+          underlyingError: e,
+        );
+      }
+      throw ModelLoadException(
+        'Failed to load ${model.displayName}.',
+        model: model,
+        suggestion: 'Try again or pick a file from your device.',
+        underlyingError: e,
+      );
     }
   }
 
@@ -407,10 +536,21 @@ class ModelOrchestrator {
     InferenceModel inferenceModel;
     try {
       inferenceModel = await _getOrCreateModel(model, screenshot);
+    } on ModelNeedsFilePickException {
+      rethrow; // Let the UI handle this
+    } on ModelException catch (e) {
+      _statusController.add('Error: ${e.message}');
+      yield InferenceResult(
+        text:
+            '⚠️ ${e.message}\n\n${e.suggestion ?? 'Check Settings > AI Models.'}',
+        model: model,
+        isStreaming: false,
+      );
+      return;
     } catch (e) {
       _statusController.add('Error: $e');
       yield InferenceResult(
-        text: 'Failed to load model: $e\n\nPlease check Settings > AI Models.',
+        text: 'Failed to load model: $e\n\nCheck Settings > AI Models.',
         model: model,
         isStreaming: false,
       );

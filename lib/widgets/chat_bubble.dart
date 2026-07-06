@@ -7,12 +7,14 @@ class ChatBubble extends StatelessWidget {
   final ChatMessage message;
   final VoidCallback? onRetry;
   final VoidCallback? onScreenshotTap;
+  final VoidCallback? onSettingsTap;
 
   const ChatBubble({
     super.key,
     required this.message,
     this.onRetry,
     this.onScreenshotTap,
+    this.onSettingsTap,
   });
 
   @override
@@ -127,6 +129,31 @@ class ChatBubble extends StatelessWidget {
                 ],
               ),
             ),
+
+            // Error action buttons
+            if (!isUser && message.isError)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 12, right: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (onRetry != null)
+                      _ErrorActionChip(
+                        icon: Icons.refresh,
+                        label: 'Retry',
+                        onTap: onRetry!,
+                      ),
+                    if (onRetry != null && onSettingsTap != null)
+                      const SizedBox(width: 8),
+                    if (onSettingsTap != null)
+                      _ErrorActionChip(
+                        icon: Icons.settings,
+                        label: 'Settings',
+                        onTap: onSettingsTap!,
+                      ),
+                  ],
+                ),
+              ),
 
             // Timestamp
             Padding(
@@ -254,5 +281,49 @@ class ChatBubble extends StatelessWidget {
 
   String _formatTime(DateTime dt) {
     return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _ErrorActionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ErrorActionChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: const Color(0xFF6C63FF).withValues(alpha: 0.3),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: const Color(0xFF6C63FF)),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 11,
+                color: Color(0xFF6C63FF),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

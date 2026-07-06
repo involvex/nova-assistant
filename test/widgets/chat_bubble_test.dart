@@ -156,11 +156,12 @@ void main() {
     });
 
     testWidgets('formats timestamp correctly', (tester) async {
+      final now = DateTime.now();
       final message = ChatMessage(
         id: '9',
         text: 'Timed',
         isUser: false,
-        timestamp: DateTime(2026, 7, 5, 9, 5),
+        timestamp: DateTime(now.year, now.month, now.day, 9, 5),
       );
 
       await tester.pumpWidget(
@@ -170,6 +171,35 @@ void main() {
       );
 
       expect(find.text('09:05'), findsOneWidget);
+    });
+
+    testWidgets('includes date for messages from a previous day', (
+      tester,
+    ) async {
+      final now = DateTime.now();
+      final yesterday = now.subtract(const Duration(days: 1));
+      final message = ChatMessage(
+        id: '10',
+        text: 'Old message',
+        isUser: false,
+        timestamp: DateTime(
+          yesterday.year,
+          yesterday.month,
+          yesterday.day,
+          9,
+          5,
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ChatBubble(message: message)),
+        ),
+      );
+
+      final dateStr =
+          '${yesterday.month}/${yesterday.day}/${yesterday.year.toString().substring(2)} 09:05';
+      expect(find.text(dateStr), findsOneWidget);
     });
 
     testWidgets('renders markdown in message text', (tester) async {

@@ -8,6 +8,7 @@ class ChatBubble extends StatelessWidget {
   final VoidCallback? onRetry;
   final VoidCallback? onScreenshotTap;
   final VoidCallback? onSettingsTap;
+  final VoidCallback? onCopy;
 
   const ChatBubble({
     super.key,
@@ -15,6 +16,7 @@ class ChatBubble extends StatelessWidget {
     this.onRetry,
     this.onScreenshotTap,
     this.onSettingsTap,
+    this.onCopy,
   });
 
   @override
@@ -76,57 +78,63 @@ class ChatBubble extends StatelessWidget {
             if (!isUser && message.toolCalls != null) _buildToolCalls(),
 
             // Message bubble
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isUser
-                    ? const Color(0xFF6C63FF)
-                    : const Color(0xFF1A1A2E),
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(18),
-                  topRight: const Radius.circular(18),
-                  bottomLeft: Radius.circular(isUser ? 18 : 4),
-                  bottomRight: Radius.circular(isUser ? 4 : 18),
+            GestureDetector(
+              onLongPress: onCopy,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
                 ),
-                border: isUser
-                    ? null
-                    : Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
+                decoration: BoxDecoration(
+                  color: isUser
+                      ? const Color(0xFF6C63FF)
+                      : const Color(0xFF1A1A2E),
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(18),
+                    topRight: const Radius.circular(18),
+                    bottomLeft: Radius.circular(isUser ? 18 : 4),
+                    bottomRight: Radius.circular(isUser ? 4 : 18),
                   ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (message.isStreaming) _buildStreamingIndicator(),
-                  MarkdownBody(
-                    data: message.text,
-                    selectable: true,
-                    styleSheet: MarkdownStyleSheet(
-                      p: TextStyle(
-                        color: isUser
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.92),
-                        fontSize: 15,
-                        height: 1.5,
-                      ),
-                      code: TextStyle(
-                        backgroundColor: Colors.black26,
-                        color: Colors.cyan[100],
-                        fontFamily: 'monospace',
-                        fontSize: 13,
-                      ),
-                      codeblockDecoration: BoxDecoration(
-                        color: Colors.black38,
-                        borderRadius: BorderRadius.circular(8),
+                  border: isUser
+                      ? null
+                      : Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (message.isStreaming) _buildStreamingIndicator(),
+                    MarkdownBody(
+                      data: message.text,
+                      selectable: true,
+                      styleSheet: MarkdownStyleSheet(
+                        p: TextStyle(
+                          color: isUser
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.92),
+                          fontSize: 15,
+                          height: 1.5,
+                        ),
+                        code: TextStyle(
+                          backgroundColor: Colors.black26,
+                          color: Colors.cyan[100],
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                        ),
+                        codeblockDecoration: BoxDecoration(
+                          color: Colors.black38,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
 
@@ -280,7 +288,14 @@ class ChatBubble extends StatelessWidget {
   }
 
   String _formatTime(DateTime dt) {
-    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    final now = DateTime.now();
+    final isToday =
+        now.year == dt.year && now.month == dt.month && now.day == dt.day;
+    final timeStr =
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    if (isToday) return timeStr;
+    final dateStr = '${dt.month}/${dt.day}/${dt.year.toString().substring(2)}';
+    return '$dateStr $timeStr';
   }
 }
 

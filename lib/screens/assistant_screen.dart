@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/attached_data.dart';
@@ -608,6 +608,15 @@ class _AssistantScreenState extends State<AssistantScreen> {
                                   );
                                 }
                               : null,
+                          onCopy: () {
+                            Clipboard.setData(ClipboardData(text: msg.text));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Copied to clipboard'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          },
                         );
                       },
                     ),

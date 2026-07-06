@@ -2,12 +2,15 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/platform/assistant_role_service.dart';
+import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/identity_config_screen.dart';
 import 'package:nova_assistant/screens/mcp_settings_screen.dart';
 import 'package:nova_assistant/screens/memory_management_screen.dart';
+import 'package:nova_assistant/screens/conversation_search_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -268,6 +271,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('History cleared')),
+                );
+              }
+            },
+          ),
+          _actionTile(
+            icon: Icons.search_outlined,
+            title: 'Search conversation history',
+            subtitle: 'Find past messages by keyword',
+            onTap: () async {
+              final result = await Navigator.push<ChatMessage>(
+                context,
+                MaterialPageRoute<ChatMessage>(
+                  builder: (_) => const ConversationSearchScreen(),
+                ),
+              );
+              if (result != null && context.mounted) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const AssistantScreen(),
+                  ),
                 );
               }
             },

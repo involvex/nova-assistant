@@ -468,6 +468,63 @@ class ModelOrchestrator {
     }
   }
 
+  static const _contextBudgetRatio = 0.6;
+  static const _imageTokenEstimate = 500;
+
+  Future<void> _truncateContext(InferenceChat chat, NovaModel model) async {
+    final limit = _tokenLimitFor(model);
+    final budget = (limit * _contextBudgetRatio).round();
+    final history = chat.fullHistory;
+
+    int estimatedTokens = 0;
+    for (final msg in history) {
+      estimatedTokens += _estimateTokens(msg);
+      if (estimatedTokens > budget) break;
+    }
+
+    if (estimatedTokens <= budget) return;
+
+    final List<Message> keepMessages = [];
+    for (final msg in history) {
+      keepMessages.add(msg);
+    }
+
+    while (keepMessages.length > 2) {
+      int recentLimit = (budget * 0.7).round();
+      int tokenSum = 0;
+      int cutoffIndex = keepMessages.length;
+
+      for (var i = keepMessages.length - 1; i >= 0; i--) {
+        tokenSum += _estimateTokens(keepMessages[i]);
+        if (tokenSum > recentLimit) {
+          cutoffIndex = i;
+          break;
+        }
+      }
+
+      if (cutoffIndex == 0 || cutoffIndex == keepMessages.length) break;
+
+      final removed = cutoffIndex;
+      keepMessages.removeRange(0, cutoffIndex);
+      try {
+        await chat.clearHistory(replayHistory: keepMessages);
+        debugPrint(
+          'Context truncated: removed $removed oldest messages, kept ${keepMessages.length}',
+        );
+        return;
+      } on Exception catch (e) {
+        debugPrint('Context truncation failed: $e');
+        return;
+      }
+    }
+  }
+
+  int _estimateTokens(Message message) {
+    if (message.hasImage) return _imageTokenEstimate;
+    if (message.text == null) return 0;
+    return (message.text!.length / 4).round();
+  }
+
   NovaModel _selectModel({
     required String query,
     Uint8List? screenshot,
@@ -562,6 +619,8 @@ class ModelOrchestrator {
       tools: tools,
       supportImage: model.hasVision,
     );
+
+    await _truncateContext(_activeChat!, model);
 
     final Message message;
     if (screenshot != null) {

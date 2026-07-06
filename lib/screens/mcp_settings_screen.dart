@@ -134,7 +134,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
               onChanged: (value) {
                 _mcpService.updateTool(tool.copyWith(enabled: value));
               },
-              activeColor: const Color(0xFF6C63FF),
+              activeThumbColor: const Color(0xFF6C63FF),
             ),
             PopupMenuButton<String>(
               onSelected: (action) {
@@ -178,7 +178,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
               onChanged: (value) {
                 _mcpService.updateSource(source.copyWith(enabled: value));
               },
-              activeColor: const Color(0xFF6C63FF),
+              activeThumbColor: const Color(0xFF6C63FF),
             ),
             PopupMenuButton<String>(
               onSelected: (action) {
@@ -239,7 +239,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
       text: tool != null ? _prettyJson(tool.parameters) : '{\n  \n}',
     );
 
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
@@ -349,7 +349,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
       text: source?.config['maxLength'] ?? '',
     );
 
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
@@ -459,7 +459,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
   }
 
   void _deleteTool(ExternalTool tool) {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
@@ -486,7 +486,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
   }
 
   void _deleteSource(DataSource source) {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),

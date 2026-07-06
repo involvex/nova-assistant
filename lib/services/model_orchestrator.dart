@@ -531,7 +531,7 @@ class ModelOrchestrator {
     return results.isEmpty ? null : results;
   }
 
-  /// Coerce arguments into a Map<String, dynamic>. Handles both Map and
+  /// Coerce arguments into a `Map<String, dynamic>`. Handles both Map and
   /// String-typed arguments (some models emit "arguments": "{}" as a string).
   Map<String, dynamic> _coerceArguments(dynamic raw) {
     if (raw is Map) return Map<String, dynamic>.from(raw);

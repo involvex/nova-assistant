@@ -662,61 +662,189 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   Widget _buildAttachmentIndicator() {
     return Container(
-      height: 40,
+      height: 56,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: _attachmentManager.attachments.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final att = _attachmentManager.attachments[index];
-          final icon = switch (att.type) {
-            AttachedDataType.file => Icons.insert_drive_file_outlined,
-            AttachedDataType.url => Icons.link,
-            AttachedDataType.text => Icons.text_snippet_outlined,
-          };
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF6C63FF).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: const Color(0xFF6C63FF).withValues(alpha: 0.3),
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 14, color: const Color(0xFF6C63FF)),
-                const SizedBox(width: 6),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 120),
-                  child: Text(
-                    att.name,
-                    style: const TextStyle(
-                      color: Color(0xFF6C63FF),
-                      fontSize: 12,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: () {
-                    setState(() => _attachmentManager.remove(att.id));
-                  },
-                  child: const Icon(
-                    Icons.close,
-                    size: 14,
-                    color: Color(0xFF6C63FF),
-                  ),
-                ),
-              ],
-            ),
-          );
+          return _buildAttachmentChip(att);
         },
       ),
     );
+  }
+
+  Widget _buildAttachmentChip(AttachedData att) {
+    final iconData = _getIconForAttachment(att);
+    final color = _getColorForAttachment(att);
+    final displayText = _getDisplayName(att);
+    final subtitle = _getSubtitle(att);
+
+    return Tooltip(
+      message: _getTooltip(att),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Icon(iconData, size: 16, color: color),
+            ),
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 100),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    displayText,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: color.withValues(alpha: 0.7),
+                        fontSize: 10,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: () {
+                setState(() => _attachmentManager.remove(att.id));
+              },
+              child: Icon(
+                Icons.close,
+                size: 14,
+                color: color.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _getIconForAttachment(AttachedData att) {
+    if (att.type == AttachedDataType.url) return Icons.link;
+    if (att.type == AttachedDataType.text) return Icons.text_snippet_outlined;
+
+    final name = att.name.toLowerCase();
+    if (name.endsWith('.png') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.gif') ||
+        name.endsWith('.webp')) {
+      return Icons.image_outlined;
+    }
+    if (name.endsWith('.pdf')) return Icons.picture_as_pdf_outlined;
+    if (name.endsWith('.json')) return Icons.code_outlined;
+    if (name.endsWith('.dart') ||
+        name.endsWith('.py') ||
+        name.endsWith('.js')) {
+      return Icons.code_outlined;
+    }
+    if (name.endsWith('.md') || name.endsWith('.txt')) {
+      return Icons.description_outlined;
+    }
+    if (name.endsWith('.csv') || name.endsWith('.xlsx')) {
+      return Icons.table_chart_outlined;
+    }
+    return Icons.insert_drive_file_outlined;
+  }
+
+  Color _getColorForAttachment(AttachedData att) {
+    if (att.type == AttachedDataType.url) return const Color(0xFF00BFA5);
+    if (att.type == AttachedDataType.text) return const Color(0xFFFF9100);
+
+    final name = att.name.toLowerCase();
+    if (name.endsWith('.png') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.gif') ||
+        name.endsWith('.webp')) {
+      return const Color(0xFFE040FB);
+    }
+    if (name.endsWith('.pdf')) return const Color(0xFFFF5252);
+    if (name.endsWith('.json') ||
+        name.endsWith('.dart') ||
+        name.endsWith('.py') ||
+        name.endsWith('.js')) {
+      return const Color(0xFF448AFF);
+    }
+    return const Color(0xFF6C63FF);
+  }
+
+  String _getDisplayName(AttachedData att) {
+    if (att.type == AttachedDataType.url) {
+      try {
+        final uri = Uri.parse(att.url ?? '');
+        return uri.host;
+      } catch (_) {
+        return att.name;
+      }
+    }
+    // Truncate long filenames
+    if (att.name.length > 16) {
+      return '${att.name.substring(0, 13)}...';
+    }
+    return att.name;
+  }
+
+  String? _getSubtitle(AttachedData att) {
+    if (att.type == AttachedDataType.url) {
+      try {
+        final uri = Uri.parse(att.url ?? '');
+        final path = uri.path;
+        if (path.length > 20) return '${path.substring(0, 17)}...';
+        return path.isEmpty ? null : path;
+      } catch (_) {
+        return null;
+      }
+    }
+    if (att.type == AttachedDataType.file) {
+      if (att.fileSizeBytes != null) {
+        if (att.fileSizeBytes! > 1024 * 1024) {
+          return '${(att.fileSizeBytes! / (1024 * 1024)).toStringAsFixed(1)} MB';
+        }
+        if (att.fileSizeBytes! > 1024) {
+          return '${(att.fileSizeBytes! / 1024).toStringAsFixed(1)} KB';
+        }
+        return '${att.fileSizeBytes} B';
+      }
+    }
+    return null;
+  }
+
+  String _getTooltip(AttachedData att) {
+    final buffer = StringBuffer(att.name);
+    if (att.type == AttachedDataType.url) {
+      buffer.writeln('\nURL: ${att.url}');
+    }
+    return buffer.toString();
   }
 
   Widget _buildEmptyState() {

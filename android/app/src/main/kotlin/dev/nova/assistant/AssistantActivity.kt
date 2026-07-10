@@ -39,6 +39,12 @@ class AssistantActivity : FlutterActivity() {
         requestScreenCapture()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        Log.d(TAG, "AssistantActivity: received ASSIST intent in onNewIntent")
+        requestScreenCapture()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         // ScreenCaptureHelper is owned by MainActivity — do not register here.

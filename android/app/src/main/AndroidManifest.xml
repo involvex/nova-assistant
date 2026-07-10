@@ -50,12 +50,15 @@
         <activity
             android:name=".AssistantActivity"
             android:exported="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-            android:launchMode="singleTop">
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:excludeFromRecents="true">
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.ASSISTANT" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <meta-data
                 android:name="android.app.assistant"

@@ -52,8 +52,7 @@
             android:exported="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-            android:launchMode="singleTop"
-            android:noHistory="true">
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.ASSISTANT" />
@@ -62,18 +61,6 @@
                 android:name="android.app.assistant"
                 android:resource="@xml/app_assistant" />
         </activity>
-
-        <!-- Stub service for voice interaction declarations -->
-        <service
-            android:name=".AssistantService"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.speech.RecognitionService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.voiceInteractionService"
-                android:resource="@xml/app_assistant" />
-        </service>
 
         <!-- Floating overlay for assistant responses -->
         <activity

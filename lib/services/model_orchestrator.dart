@@ -125,6 +125,8 @@ class ModelOrchestrator {
   NovaModel? _preferredModelOverride;
   bool _modelOverrideDirty = false;
   bool _isInitialized = false;
+  Timer? _idleTimer;
+  static const _defaultIdleTimeout = Duration(minutes: 5);
 
   final _statusController = StreamController<String>.broadcast();
   Stream<String> get statusStream => _statusController.stream;
@@ -153,6 +155,21 @@ class ModelOrchestrator {
   void clearModelOverride() {
     _preferredModelOverride = null;
     _modelOverrideDirty = false;
+  }
+
+  void _resetIdleTimer() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(_defaultIdleTimeout, _releaseIdleResources);
+  }
+
+  Future<void> _releaseIdleResources() async {
+    try {
+      await _activeModel?.close();
+    } catch (_) {}
+    _activeModel = null;
+    _activeChat = null;
+    _activeModelSupportsImage = false;
+    _statusController.add('Idle — model released to save battery');
   }
 
   Future<void> prefetchModels() async {
@@ -261,6 +278,7 @@ class ModelOrchestrator {
         _activeModelSupportsImage = supportImage;
         _isInitialized = true;
         _statusController.add('${model.displayName} ready');
+        _resetIdleTimer();
         return _activeModel!;
       } catch (e) {
         debugPrint('getActiveModel failed: $e');
@@ -871,8 +889,9 @@ class ModelOrchestrator {
         imageBytes = Uint8List.fromList(data);
       }
 
-      if (imageBytes != null && imageBytes.isNotEmpty) {
-        // Inject screenshot as an image message so the model can see it
+      if (imageBytes != null &&
+          imageBytes.isNotEmpty &&
+          _activeModelSupportsImage) {
         final imageMessage = Message.withImage(
           text: '[Screenshot captured]',
           imageBytes: imageBytes,
@@ -881,14 +900,18 @@ class ModelOrchestrator {
         await _activeChat!.addQuery(imageMessage);
       }
 
-      // Send text-only confirmation as the tool response
       final toolResponseMessage = Message.toolResponse(
         toolName: toolName,
         response: {
           'success': toolResult['success'] ?? false,
-          'message': imageBytes != null
-              ? 'Screenshot captured and displayed above'
-              : 'No screenshot available — screen capture may not be active',
+          if (imageBytes != null && _activeModelSupportsImage)
+            'message': 'Screenshot captured and displayed above'
+          else if (imageBytes != null)
+            'message':
+                'Screenshot captured, but the current model cannot process images'
+          else
+            'message':
+                'No screenshot available — screen capture may not be active',
         },
       );
       await _activeChat!.addQuery(toolResponseMessage);

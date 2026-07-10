@@ -29,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _thinkingMode = false;
   bool _voiceInput = true;
   bool _ragMemory = false;
+  bool _batteryOptimization = true;
   bool _isAssistantRoleHeld = false;
   AssistantRole _assistantRole = AssistantRole.helpful;
   String _installStatus = '';
@@ -69,6 +70,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _thinkingMode = prefs.getBool('settings_thinking_mode') ?? false;
         _voiceInput = prefs.getBool('settings_voice_input') ?? true;
         _ragMemory = prefs.getBool('settings_rag_memory') ?? false;
+        _batteryOptimization =
+            prefs.getBool('settings_battery_optimization') ?? true;
         _assistantRole = AssistantRole.fromString(
           prefs.getString('settings_assistant_role'),
         );
@@ -183,6 +186,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) {
               setState(() => _ragMemory = v);
               _saveSetting('settings_rag_memory', v);
+            },
+          ),
+          _toggleTile(
+            icon: Icons.battery_charging_full_outlined,
+            title: 'Battery optimization',
+            subtitle: 'Release model after 5 minutes idle to save power',
+            value: _batteryOptimization,
+            onChanged: (v) {
+              setState(() => _batteryOptimization = v);
+              _saveSetting('settings_battery_optimization', v);
+              ModelOrchestrator.instance.setBatteryOptimization(v);
             },
           ),
           _actionTile(

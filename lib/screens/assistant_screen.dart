@@ -24,7 +24,8 @@ class AssistantScreen extends StatefulWidget {
   State<AssistantScreen> createState() => _AssistantScreenState();
 }
 
-class _AssistantScreenState extends State<AssistantScreen> {
+class _AssistantScreenState extends State<AssistantScreen>
+    with WidgetsBindingObserver {
   final List<ChatMessage> _messages = [];
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -40,6 +41,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadThinkingMode();
     _loadInitialScreenshot();
     _loadHistory();
@@ -194,10 +196,20 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      ModelOrchestrator.instance.releaseIdleResources();
+    } else if (state == AppLifecycleState.resumed) {
+      _checkModelAvailability();
+    }
   }
 
   Future<void> _loadInitialScreenshot() async {

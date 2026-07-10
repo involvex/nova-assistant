@@ -125,6 +125,7 @@ class ModelOrchestrator {
   NovaModel? _preferredModelOverride;
   bool _modelOverrideDirty = false;
   bool _isInitialized = false;
+  bool _batteryOptimizationEnabled = true;
   Timer? _idleTimer;
   static const _defaultIdleTimeout = Duration(minutes: 5);
 
@@ -135,6 +136,16 @@ class ModelOrchestrator {
   Stream<void> get historyClearedStream => _historyClearedController.stream;
 
   bool get isInitialized => _isInitialized;
+
+  void setBatteryOptimization(bool enabled) {
+    _batteryOptimizationEnabled = enabled;
+    if (!enabled) {
+      _idleTimer?.cancel();
+      _idleTimer = null;
+    } else {
+      _resetIdleTimer();
+    }
+  }
 
   NovaModel? get preferredModelType => _preferredModelOverride;
 
@@ -158,11 +169,13 @@ class ModelOrchestrator {
   }
 
   void _resetIdleTimer() {
+    if (!_batteryOptimizationEnabled) return;
     _idleTimer?.cancel();
     _idleTimer = Timer(_defaultIdleTimeout, _releaseIdleResources);
   }
 
   Future<void> _releaseIdleResources() async {
+    if (!_batteryOptimizationEnabled) return;
     try {
       await _activeModel?.close();
     } catch (_) {}
@@ -171,6 +184,8 @@ class ModelOrchestrator {
     _activeModelSupportsImage = false;
     _statusController.add('Idle — model released to save battery');
   }
+
+  Future<void> releaseIdleResources() => _releaseIdleResources();
 
   Future<void> prefetchModels() async {
     _statusController.add('Checking models...');
@@ -327,6 +342,7 @@ class ModelOrchestrator {
           _activeModelSupportsImage = supportImage;
           _isInitialized = true;
           _statusController.add('${model.displayName} ready');
+          _resetIdleTimer();
           return _activeModel!;
         }
       } catch (e) {
@@ -394,6 +410,7 @@ class ModelOrchestrator {
       _activeModelSupportsImage = supportImage;
       _isInitialized = true;
       _statusController.add('${model.displayName} ready');
+      _resetIdleTimer();
       return _activeModel!;
     } on ModelException {
       rethrow;

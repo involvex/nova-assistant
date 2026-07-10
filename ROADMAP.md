@@ -31,7 +31,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [x] **Fix tool call truncation** - Clean fullResponse, multi-call support, string args
 - [x] **Error handling improvements** - `ModelException` hierarchy with actionable suggestions, error bubbles with retry/settings action chips
 - [ ] **Memory management** - Optimize RAG memory retrieval and reduce memory usage
-- [ ] **Battery optimization** - Reduce power consumption during inference
+- [x] **Battery optimization** - 5-minute idle model release, lifecycle-aware suspend, Settings toggle
 - [x] **Offline mode indicator** - Red banner when no model installed, with direct "Install" button
 
 ### Medium Priority
@@ -174,7 +174,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 - ~~Fix model re-download bug (canonical filename)~~
 - ~~Fix tool call truncation (fullResponse cleanup, multi-call)~~
 - ~~Error handling improvements~~ (`ModelException` hierarchy with retry/settings chips)
-- Battery optimization
+- ~~Battery optimization~~ (idle release, lifecycle-aware, Settings toggle)
 - Message reactions picker UI
 - Semantic conversation search
 

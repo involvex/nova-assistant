@@ -1243,96 +1243,95 @@ class _AssistantScreenState extends State<AssistantScreen>
           top: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Attach buttons
-          if (_currentScreenshot == null)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  onPressed: _captureAndAttachScreenshot,
-                  icon: const Icon(
-                    Icons.screenshot_monitor_outlined,
-                    color: Colors.grey,
-                  ),
-                  tooltip: 'Attach screenshot',
+          // Attachment buttons row
+          Row(
+            children: [
+              IconButton(
+                onPressed: _captureAndAttachScreenshot,
+                icon: const Icon(
+                  Icons.screenshot_monitor_outlined,
+                  color: Colors.grey,
                 ),
-                IconButton(
-                  onPressed: _pickImageFromGallery,
-                  icon: const Icon(
-                    Icons.photo_library_outlined,
-                    color: Colors.grey,
-                  ),
-                  tooltip: 'Attach from gallery',
-                ),
-                IconButton(
-                  onPressed: _pickFile,
-                  icon: const Icon(Icons.attach_file, color: Colors.grey),
-                  tooltip: 'Attach file',
-                ),
-                IconButton(
-                  onPressed: _showUrlDialog,
-                  icon: const Icon(Icons.link, color: Colors.grey),
-                  tooltip: 'Attach URL',
-                ),
-              ],
-            ),
-
-          // Text input
-          Expanded(
-            child: TextField(
-              controller: _inputController,
-              focusNode: _inputFocus,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Ask Nova anything...',
-                hintStyle: TextStyle(color: Colors.grey[600]),
-                filled: true,
-                fillColor: const Color(0xFF1A1A2E),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
+                tooltip: 'Attach screenshot',
               ),
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => _sendMessage(),
-            ),
+              IconButton(
+                onPressed: _pickImageFromGallery,
+                icon: const Icon(
+                  Icons.photo_library_outlined,
+                  color: Colors.grey,
+                ),
+                tooltip: 'Attach from gallery',
+              ),
+              IconButton(
+                onPressed: _pickFile,
+                icon: const Icon(Icons.attach_file, color: Colors.grey),
+                tooltip: 'Attach file',
+              ),
+              IconButton(
+                onPressed: _showUrlDialog,
+                icon: const Icon(Icons.link, color: Colors.grey),
+                tooltip: 'Attach URL',
+              ),
+            ],
           ),
 
-          const SizedBox(width: 8),
+          const SizedBox(height: 8),
 
-          // Voice input
-          VoiceInputButton(
-            onTranscription: (text) {
-              if (text.isNotEmpty) {
-                _inputController.text = text;
-                _sendMessage();
-              }
-            },
-          ),
-
-          const SizedBox(width: 8),
-
-          // Send button
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            child: IconButton(
-              onPressed:
-                  _inputController.text.trim().isNotEmpty && !_isGenerating
-                  ? _sendMessage
-                  : null,
-              icon: Icon(
-                Icons.send_rounded,
-                color: _inputController.text.trim().isNotEmpty
-                    ? const Color(0xFF6C63FF)
-                    : Colors.grey,
+          // Text input + voice + send row
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _inputController,
+                  focusNode: _inputFocus,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'Ask Nova anything...',
+                    hintStyle: TextStyle(color: Colors.grey[600]),
+                    filled: true,
+                    fillColor: const Color(0xFF1A1A2E),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                  ),
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _sendMessage(),
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              VoiceInputButton(
+                onTranscription: (text) {
+                  if (text.isNotEmpty) {
+                    _inputController.text = text;
+                    _sendMessage();
+                  }
+                },
+              ),
+              const SizedBox(width: 8),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                child: IconButton(
+                  onPressed:
+                      _inputController.text.trim().isNotEmpty && !_isGenerating
+                      ? _sendMessage
+                      : null,
+                  icon: Icon(
+                    Icons.send_rounded,
+                    color: _inputController.text.trim().isNotEmpty
+                        ? const Color(0xFF6C63FF)
+                        : Colors.grey,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

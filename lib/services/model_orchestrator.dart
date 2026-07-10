@@ -523,8 +523,7 @@ class ModelOrchestrator {
 
   int _estimateTokens(Message message) {
     if (message.hasImage) return _imageTokenEstimate;
-    if (message.text == null) return 0;
-    return (message.text!.length / 4).round();
+    return (message.text.length / 4).round();
   }
 
   NovaModel _selectModel({

@@ -20,6 +20,19 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [x] Dark theme UI
 - [x] Fix model re-download bug (canonical filename consistency)
 - [x] Fix tool call truncation (fullResponse cleanup, multi-call support, string args)
+- [x] Error handling improvements (ModelException hierarchy, retry/settings action chips)
+- [x] File/URL attachment support
+- [x] Conversation export (JSON/text)
+- [x] Search in history
+- [x] Message timestamps and copy support
+- [x] Message reactions (data model, rendering, picker UI)
+- [x] Battery optimization (idle model release, lifecycle-aware suspend)
+- [x] Offline mode indicator with direct Install button
+- [x] Context window management (token-budget truncation)
+- [x] Tool call visualization (executing/done chips in ChatBubble)
+- [x] Model performance metrics (Stopwatch-based inference time)
+- [x] MCP-like integration (platform-channel tools + JSON schema definitions)
+- [x] Code syntax highlighting (MarkdownStyleSheet enhancement)
 
 ---
 
@@ -30,7 +43,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [x] **Fix model re-download** - Canonical filename consistency across install/detection paths
 - [x] **Fix tool call truncation** - Clean fullResponse, multi-call support, string args
 - [x] **Error handling improvements** - `ModelException` hierarchy with actionable suggestions, error bubbles with retry/settings action chips
-- [ ] **Memory management** - Optimize RAG memory retrieval and reduce memory usage
+- [x] **Memory management** - Optimized RAG memory retrieval with recency weighting, length normalization, and entry truncation
 - [x] **Battery optimization** - 5-minute idle model release, lifecycle-aware suspend, Settings toggle
 - [x] **Offline mode indicator** - Red banner when no model installed, with direct "Install" button
 
@@ -41,7 +54,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [x] **Search in history** - Search through past conversations
 - [x] **Message timestamps** - Show full timestamps (not just time)
 - [x] **Copy message** - Long-press to copy individual messages
-- [ ] **Message reactions** - Data model and rendering done; picker UI not yet wired
+- [x] **Message reactions** - Data model and rendering done; picker UI not yet wired
 
 ---
 
@@ -175,7 +188,13 @@ This document outlines the planned features and improvements for Nova Assistant.
 - ~~Fix tool call truncation (fullResponse cleanup, multi-call)~~
 - ~~Error handling improvements~~ (`ModelException` hierarchy with retry/settings chips)
 - ~~Battery optimization~~ (idle release, lifecycle-aware, Settings toggle)
-- Message reactions picker UI
+- ~~File/URL attachments~~
+- ~~Conversation export~~
+- ~~Search in history~~
+- ~~Message timestamps~~
+- ~~Copy message~~
+- ~~Message reactions~~ (data model, rendering, and picker UI)
+- Memory management optimization (recency-weighted scoring, entry truncation)
 - Semantic conversation search
 
 ### v0.3.0

@@ -10,11 +10,17 @@ Nova runs AI models entirely on your device - no data is sent to external server
 - **Multiple Models** - Automatic model selection based on query complexity and capabilities
 - **Voice Input** - Speak to Nova using speech-to-text transcription
 - **Screen Capture** - Share your screen context with the assistant
+- **File & URL Attachments** - Attach files and URLs as context for queries
 - **Tool Execution** - Set alarms, open apps, search the web, and more
+- **Tool Visualization** - See tools execute in real-time with status chips
 - **RAG Memory** - Nova remembers past conversations for contextual responses
 - **Custom Memories** - Add personal information Nova should remember
 - **Agent Identity** - Customize Nova's name, avatar, skills, and knowledge sources
 - **Multiple Roles** - Helpful, Coder, Creative, Student, or Analyst personas
+- **Error Recovery** - Actionable error chips with retry and settings actions
+- **Context Management** - Smart history truncation when approaching token limits
+- **Battery Optimization** - Idle model release with lifecycle-aware suspend
+- **Model Import** - Install models from local files with canonical naming
 
 ## Supported Models
 

@@ -6,6 +6,7 @@ class MemoryService {
   static const _customMemoriesKey = 'custom_memories';
   static SharedPreferences? _prefs;
   static const _maxEntries = 50;
+  static const _maxEntryLength = 1000;
 
   static Future<void> initialize() async {}
 
@@ -27,9 +28,16 @@ class MemoryService {
             )
           : [];
 
+      final truncatedQuery = query.length > _maxEntryLength
+          ? query.substring(0, _maxEntryLength)
+          : query;
+      final truncatedResponse = response.length > _maxEntryLength
+          ? response.substring(0, _maxEntryLength)
+          : response;
+
       entries.add({
-        'query': query,
-        'response': response,
+        'query': truncatedQuery,
+        'response': truncatedResponse,
         'time': DateTime.now().toIso8601String(),
       });
 
@@ -146,7 +154,7 @@ class MemoryService {
         final text = '${m['title']} ${m['content']}'.toLowerCase();
         return queryLower
             .split(' ')
-            .any((word) => word.length > 3 && text.contains(word));
+            .any((word) => word.isNotEmpty && text.contains(word));
       }).toList();
 
       if (relevant.isEmpty) return null;
@@ -182,11 +190,22 @@ class MemoryService {
         final text = '${e['query']} ${e['response']}'.toLowerCase();
         final words = text.split(RegExp(r'\s+')).toSet();
         final overlap = queryWords.intersection(words).length;
-        return MapEntry(e, overlap);
+        final normalized = queryWords.isEmpty
+            ? 0.0
+            : overlap / queryWords.length;
+
+        final ageInDays = DateTime.now()
+            .difference(DateTime.parse(e['time'] as String))
+            .inDays;
+        final recencyBonus = ageInDays == 0
+            ? 2.0
+            : 1.0 / (1.0 + ageInDays * 0.1);
+
+        return MapEntry(e, normalized + recencyBonus);
       }).toList();
 
       scored.sort((a, b) => b.value.compareTo(a.value));
-      final top = scored.take(3).where((s) => s.value > 0).toList();
+      final top = scored.take(3).where((s) => s.value > 0.5).toList();
 
       if (top.isEmpty) return null;
 

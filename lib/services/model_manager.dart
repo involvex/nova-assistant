@@ -264,43 +264,30 @@ class ModelManager {
       }
 
       final docsDir = await getApplicationDocumentsDirectory();
-      final targetPath = '${docsDir.path}/$fileName';
+
+      // Compute the canonical name BEFORE installation so flutter_gemma's
+      // spec (repository, protected files, and active-model prefs) points to
+      // the final path from the start. This avoids a path mismatch that
+      // occurs when the file is renamed AFTER install.
+      final specName = _deriveBaseName(fileName);
+      final canonicalName = _findCanonicalName(specName, modelType) ?? fileName;
+      final canonicalPath = '${docsDir.path}/$canonicalName';
 
       // Copy to documents directory (flutter_gemma needs permanent access)
-      if (!await File(targetPath).exists()) {
+      if (!await File(canonicalPath).exists()) {
         _statusController.add('Copying model file to app storage...');
-        await sourceFile.copy(targetPath);
+        await sourceFile.copy(canonicalPath);
       }
 
       final builder = FlutterGemma.installModel(
         modelType: modelType,
         fileType: fileType,
-      ).fromFile(targetPath);
+      ).fromFile(canonicalPath);
       if (onProgress != null) {
         builder.withProgress(onProgress);
       }
       final result = await builder.install();
       final spec = result.spec;
-
-      // Use the canonical filename from ModelHuggingFaceURLs instead of
-      // spec.name to stay consistent with all other checks in the codebase.
-      final canonicalName =
-          _findCanonicalName(spec.name, modelType) ?? fileName;
-
-      // Rename file to canonical name so isInstalledOnDisk() and
-      // _findModelPath() can find it after app restart.
-      final canonicalPath = '${docsDir.path}/$canonicalName';
-      if (targetPath != canonicalPath) {
-        final canonicalFile = File(canonicalPath);
-        if (!await canonicalFile.exists()) {
-          await File(targetPath).rename(canonicalPath);
-        } else {
-          // Canonical name already exists — clean up the temp copy
-          try {
-            await File(targetPath).delete();
-          } catch (_) {}
-        }
-      }
 
       final model = InstalledModel(
         id: canonicalName,
@@ -327,6 +314,26 @@ class ModelManager {
       debugPrint('ModelManager: installFromFile failed: $e');
       return null;
     }
+  }
+
+  /// Replicates flutter_gemma's filename base-name extraction so we can
+  /// compute the canonical install path BEFORE calling into flutter_gemma.
+  /// This avoids a post-install rename that would invalidate flutter_gemma's
+  /// internal path mappings.
+  static String _deriveBaseName(String filename) {
+    String result = filename;
+    const extensions = [
+      '.task',
+      '.bin',
+      '.tflite',
+      '.json',
+      '.model',
+      '.litertlm',
+    ];
+    for (final ext in extensions) {
+      result = result.replaceAll(ext, '');
+    }
+    return result;
   }
 
   /// Find the canonical filename for a model given its flutter_gemma spec name

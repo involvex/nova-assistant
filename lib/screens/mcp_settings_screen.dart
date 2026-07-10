@@ -247,8 +247,8 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
           tool != null
               ? 'Edit Tool'
               : (type == ExternalToolType.http
-                    ? 'Add HTTP Tool'
-                    : 'Add MCP Tool'),
+                  ? 'Add HTTP Tool'
+                  : 'Add MCP Tool'),
           style: const TextStyle(color: Colors.white),
         ),
         content: SingleChildScrollView(

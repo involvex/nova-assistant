@@ -775,8 +775,8 @@ class _AssistantScreenState extends State<AssistantScreen>
                         model.hasThinking
                             ? Icons.psychology
                             : (model.hasVision
-                                  ? Icons.image
-                                  : Icons.chat_bubble_outline),
+                                ? Icons.image
+                                : Icons.chat_bubble_outline),
                         size: 18,
                         color: const Color(0xFF6C63FF),
                       ),
@@ -823,9 +823,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                     const SizedBox(width: 4),
                     Text(
                       ModelOrchestrator
-                              .instance
-                              .preferredModelType
-                              ?.displayName ??
+                              .instance.preferredModelType?.displayName ??
                           'Auto',
                       style: const TextStyle(
                         color: Colors.white70,
@@ -1321,8 +1319,8 @@ class _AssistantScreenState extends State<AssistantScreen>
                 child: IconButton(
                   onPressed:
                       _inputController.text.trim().isNotEmpty && !_isGenerating
-                      ? _sendMessage
-                      : null,
+                          ? _sendMessage
+                          : null,
                   icon: Icon(
                     Icons.send_rounded,
                     color: _inputController.text.trim().isNotEmpty

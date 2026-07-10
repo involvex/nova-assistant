@@ -3,9 +3,9 @@ import 'package:nova_assistant/services/mcp_service.dart';
 
 class NovaTools {
   static List<Tool> get all => [
-    ..._builtInTools,
-    ...McpService.instance.enabledTools,
-  ];
+        ..._builtInTools,
+        ...McpService.instance.enabledTools,
+      ];
 
   static final List<Tool> _builtInTools = [
     getTime,

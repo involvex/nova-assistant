@@ -35,9 +35,8 @@ class ChatBubble extends StatelessWidget {
         ),
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
         child: Column(
-          crossAxisAlignment: isUser
-              ? CrossAxisAlignment.end
-              : CrossAxisAlignment.start,
+          crossAxisAlignment:
+              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             // Screenshot preview
             if (message.imageData != null)

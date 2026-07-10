@@ -26,23 +26,23 @@ class InstalledModel {
   double get fileSizeMB => fileSizeBytes / (1024 * 1024);
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'fileName': fileName,
-    'modelType': modelType.name,
-    'installedAt': installedAt.toIso8601String(),
-    'fileSizeBytes': fileSizeBytes,
-  };
+        'id': id,
+        'fileName': fileName,
+        'modelType': modelType.name,
+        'installedAt': installedAt.toIso8601String(),
+        'fileSizeBytes': fileSizeBytes,
+      };
 
   factory InstalledModel.fromJson(Map<String, dynamic> json) => InstalledModel(
-    id: json['id'] as String,
-    fileName: json['fileName'] as String,
-    modelType: ModelType.values.firstWhere(
-      (e) => e.name == json['modelType'],
-      orElse: () => ModelType.general,
-    ),
-    installedAt: DateTime.parse(json['installedAt'] as String),
-    fileSizeBytes: json['fileSizeBytes'] as int,
-  );
+        id: json['id'] as String,
+        fileName: json['fileName'] as String,
+        modelType: ModelType.values.firstWhere(
+          (e) => e.name == json['modelType'],
+          orElse: () => ModelType.general,
+        ),
+        installedAt: DateTime.parse(json['installedAt'] as String),
+        fileSizeBytes: json['fileSizeBytes'] as int,
+      );
 }
 
 class ModelManager {
@@ -75,9 +75,8 @@ class ModelManager {
 
   Future<void> _saveToPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonList = _installedModels
-        .map((m) => jsonEncode(m.toJson()))
-        .toList();
+    final jsonList =
+        _installedModels.map((m) => jsonEncode(m.toJson())).toList();
     await prefs.setStringList(_prefsKey, jsonList);
   }
 
@@ -436,9 +435,7 @@ class ModelManager {
         if (await modelsDir.exists()) {
           await for (final entity in modelsDir.list()) {
             if (entity is File &&
-                p
-                    .basename(entity.path)
-                    .contains(
+                p.basename(entity.path).contains(
                       fileName
                           .replaceAll('.litertlm', '')
                           .replaceAll('.task', ''),

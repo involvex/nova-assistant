@@ -144,9 +144,8 @@ class _ResultTile extends StatelessWidget {
             Icon(
               message.isUser ? Icons.person_outline : Icons.auto_awesome,
               size: 16,
-              color: message.isUser
-                  ? Colors.grey[400]
-                  : const Color(0xFF6C63FF),
+              color:
+                  message.isUser ? Colors.grey[400] : const Color(0xFF6C63FF),
             ),
             const SizedBox(width: 10),
             Expanded(

@@ -24,13 +24,13 @@ class ChatSession {
   }) : lastActiveAt = createdAt;
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'model': model.name,
-    'createdAt': createdAt.toIso8601String(),
-    'lastActiveAt': lastActiveAt.toIso8601String(),
-    'isActive': isActive,
-  };
+        'id': id,
+        'name': name,
+        'model': model.name,
+        'createdAt': createdAt.toIso8601String(),
+        'lastActiveAt': lastActiveAt.toIso8601String(),
+        'isActive': isActive,
+      };
 
   factory ChatSession.fromJson(Map<String, dynamic> json) {
     final session = ChatSession(

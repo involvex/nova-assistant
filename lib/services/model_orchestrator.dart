@@ -353,8 +353,7 @@ class ModelOrchestrator {
         throw ModelLoadException(
           'Failed to load ${model.displayName} from disk.',
           model: model,
-          suggestion:
-              'The model file may be corrupted. '
+          suggestion: 'The model file may be corrupted. '
               'Try re-downloading or pick a different file.',
           underlyingError: e,
         );
@@ -698,8 +697,7 @@ class ModelOrchestrator {
             final toolText = textBuffer.toString();
             final idx = fullResponse.lastIndexOf(toolText);
             if (idx >= 0) {
-              fullResponse =
-                  fullResponse.substring(0, idx) +
+              fullResponse = fullResponse.substring(0, idx) +
                   fullResponse.substring(idx + toolText.length);
             }
             textBuffer.clear();
@@ -957,7 +955,7 @@ class ModelOrchestrator {
 
     final thinkingSuffix = model.hasThinking
         ? ' When asked to think step by step, show your reasoning in <thinking> tags '
-              'before your final answer.'
+            'before your final answer.'
         : '';
 
     final buffer = StringBuffer('$base$thinkingSuffix');
@@ -971,9 +969,8 @@ class ModelOrchestrator {
     }
 
     // Add data source context from MCP sources
-    final enabledSources = McpService.instance.sources
-        .where((s) => s.enabled)
-        .toList();
+    final enabledSources =
+        McpService.instance.sources.where((s) => s.enabled).toList();
     if (enabledSources.isNotEmpty) {
       buffer.write('\n\n--- Connected Data Sources ---');
       for (final source in enabledSources) {

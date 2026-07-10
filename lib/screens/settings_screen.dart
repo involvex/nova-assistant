@@ -42,12 +42,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _loadSettings();
     _checkAssistantRole();
-    _assistantRoleSub = AssistantRoleService.instance.onAssistantRoleChanged
-        .listen((event) {
-          if (event['event'] == 'assistantRoleChanged' && mounted) {
-            setState(() => _isAssistantRoleHeld = event['held'] as bool);
-          }
-        });
+    _assistantRoleSub =
+        AssistantRoleService.instance.onAssistantRoleChanged.listen((event) {
+      if (event['event'] == 'assistantRoleChanged' && mounted) {
+        setState(() => _isAssistantRoleHeld = event['held'] as bool);
+      }
+    });
     ModelManager.instance.statusStream.listen((status) {
       if (mounted) setState(() => _installStatus = status);
     });
@@ -477,8 +477,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         type == ModelType.gemma4
             ? Icons.auto_awesome
             : type == ModelType.gemmaIt
-            ? Icons.smart_toy
-            : Icons.psychology,
+                ? Icons.smart_toy
+                : Icons.psychology,
         color: const Color(0xFF6C63FF),
       ),
       title: Text(title, style: const TextStyle(color: Colors.white)),

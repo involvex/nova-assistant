@@ -68,8 +68,8 @@ class MemoryService {
       final existing = p.getString(_customMemoriesKey);
       final List<Map<String, dynamic>> memories = existing != null
           ? (jsonDecode(existing) as List<dynamic>)
-                .map((e) => Map<String, dynamic>.from(e as Map))
-                .toList()
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList()
           : [];
 
       memories.add({
@@ -190,16 +190,14 @@ class MemoryService {
         final text = '${e['query']} ${e['response']}'.toLowerCase();
         final words = text.split(RegExp(r'\s+')).toSet();
         final overlap = queryWords.intersection(words).length;
-        final normalized = queryWords.isEmpty
-            ? 0.0
-            : overlap / queryWords.length;
+        final normalized =
+            queryWords.isEmpty ? 0.0 : overlap / queryWords.length;
 
         final ageInDays = DateTime.now()
             .difference(DateTime.parse(e['time'] as String))
             .inDays;
-        final recencyBonus = ageInDays == 0
-            ? 2.0
-            : 1.0 / (1.0 + ageInDays * 0.1);
+        final recencyBonus =
+            ageInDays == 0 ? 2.0 : 1.0 / (1.0 + ageInDays * 0.1);
 
         return MapEntry(e, normalized + recencyBonus);
       }).toList();

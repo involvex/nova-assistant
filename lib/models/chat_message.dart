@@ -62,36 +62,36 @@ class ChatMessage {
   }
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'text': text,
-    'isUser': isUser,
-    'timestamp': timestamp.toIso8601String(),
-    'imageData': imageData != null ? base64Encode(imageData!) : null,
-    'modelName': modelName,
-    'isStreaming': isStreaming,
-    'isError': isError,
-    'thinking': thinking,
-    'toolCalls': toolCalls,
-    'inferenceTimeMs': inferenceTimeMs,
-    'reactions': reactions,
-  };
+        'id': id,
+        'text': text,
+        'isUser': isUser,
+        'timestamp': timestamp.toIso8601String(),
+        'imageData': imageData != null ? base64Encode(imageData!) : null,
+        'modelName': modelName,
+        'isStreaming': isStreaming,
+        'isError': isError,
+        'thinking': thinking,
+        'toolCalls': toolCalls,
+        'inferenceTimeMs': inferenceTimeMs,
+        'reactions': reactions,
+      };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
-    id: json['id'] as String,
-    text: json['text'] as String,
-    isUser: json['isUser'] as bool,
-    timestamp: DateTime.parse(json['timestamp'] as String),
-    imageData: json['imageData'] != null
-        ? base64Decode(json['imageData'] as String)
-        : null,
-    modelName: json['modelName'] as String?,
-    isStreaming: json['isStreaming'] as bool? ?? false,
-    isError: json['isError'] as bool? ?? false,
-    thinking: json['thinking'] as String?,
-    toolCalls: json['toolCalls'] as String?,
-    inferenceTimeMs: json['inferenceTimeMs'] as int?,
-    reactions: json['reactions'] != null
-        ? Map<String, int>.from(json['reactions'] as Map)
-        : const {},
-  );
+        id: json['id'] as String,
+        text: json['text'] as String,
+        isUser: json['isUser'] as bool,
+        timestamp: DateTime.parse(json['timestamp'] as String),
+        imageData: json['imageData'] != null
+            ? base64Decode(json['imageData'] as String)
+            : null,
+        modelName: json['modelName'] as String?,
+        isStreaming: json['isStreaming'] as bool? ?? false,
+        isError: json['isError'] as bool? ?? false,
+        thinking: json['thinking'] as String?,
+        toolCalls: json['toolCalls'] as String?,
+        inferenceTimeMs: json['inferenceTimeMs'] as int?,
+        reactions: json['reactions'] != null
+            ? Map<String, int>.from(json['reactions'] as Map)
+            : const {},
+      );
 }

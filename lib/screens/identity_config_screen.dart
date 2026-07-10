@@ -55,9 +55,8 @@ class _IdentityConfigScreenState extends State<IdentityConfigScreen> {
         _nameController.text = identity.name;
         _backstoryController.text = identity.backstory;
         _avatarEmoji = identity.avatarEmoji;
-        _selectedSkills = identity.skills.isNotEmpty
-            ? identity.skills
-            : {AgentSkill.general};
+        _selectedSkills =
+            identity.skills.isNotEmpty ? identity.skills : {AgentSkill.general};
         _selectedSources = identity.sources.isNotEmpty
             ? identity.sources
             : {KnowledgeSource.none};
@@ -304,9 +303,8 @@ class _IdentityConfigScreenState extends State<IdentityConfigScreen> {
                       _selectedSkills = {..._selectedSkills, skill};
                     } else {
                       if (_selectedSkills.length > 1) {
-                        _selectedSkills = _selectedSkills
-                            .where((s) => s != skill)
-                            .toSet();
+                        _selectedSkills =
+                            _selectedSkills.where((s) => s != skill).toSet();
                       }
                     }
                   });
@@ -315,9 +313,8 @@ class _IdentityConfigScreenState extends State<IdentityConfigScreen> {
                   skill.displayName,
                   style: TextStyle(
                     color: isSelected ? Colors.white : Colors.grey[400],
-                    fontWeight: isSelected
-                        ? FontWeight.w500
-                        : FontWeight.normal,
+                    fontWeight:
+                        isSelected ? FontWeight.w500 : FontWeight.normal,
                   ),
                 ),
                 subtitle: Text(
@@ -365,9 +362,8 @@ class _IdentityConfigScreenState extends State<IdentityConfigScreen> {
                       }
                     } else {
                       if (_selectedSources.length > 1) {
-                        _selectedSources = _selectedSources
-                            .where((s) => s != source)
-                            .toSet();
+                        _selectedSources =
+                            _selectedSources.where((s) => s != source).toSet();
                       }
                     }
                   });
@@ -376,9 +372,8 @@ class _IdentityConfigScreenState extends State<IdentityConfigScreen> {
                   source.displayName,
                   style: TextStyle(
                     color: isSelected ? Colors.white : Colors.grey[400],
-                    fontWeight: isSelected
-                        ? FontWeight.w500
-                        : FontWeight.normal,
+                    fontWeight:
+                        isSelected ? FontWeight.w500 : FontWeight.normal,
                   ),
                 ),
                 subtitle: Text(

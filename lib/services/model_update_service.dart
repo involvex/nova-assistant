@@ -31,14 +31,14 @@ class ModelUpdateInfo {
   bool get isNewer => currentVersion != latestVersion;
 
   Map<String, dynamic> toJson() => {
-    'model': model.name,
-    'currentVersion': currentVersion,
-    'latestVersion': latestVersion,
-    'downloadUrl': downloadUrl,
-    'fileSizeBytes': fileSizeBytes,
-    'releaseNotes': releaseNotes,
-    'publishedAt': publishedAt.toIso8601String(),
-  };
+        'model': model.name,
+        'currentVersion': currentVersion,
+        'latestVersion': latestVersion,
+        'downloadUrl': downloadUrl,
+        'fileSizeBytes': fileSizeBytes,
+        'releaseNotes': releaseNotes,
+        'publishedAt': publishedAt.toIso8601String(),
+      };
 
   factory ModelUpdateInfo.fromJson(Map<String, dynamic> json) {
     return ModelUpdateInfo(

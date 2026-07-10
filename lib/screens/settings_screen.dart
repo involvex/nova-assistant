@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
@@ -33,6 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isAssistantRoleHeld = false;
   AssistantRole _assistantRole = AssistantRole.helpful;
   String _installStatus = '';
+  String _appVersion = '0.1.0';
   StreamSubscription<Map<String, dynamic>>? _assistantRoleSub;
 
   @override
@@ -49,6 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ModelManager.instance.statusStream.listen((status) {
       if (mounted) setState(() => _installStatus = status);
     });
+    _loadAppVersion();
   }
 
   @override
@@ -77,6 +80,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       });
     }
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() => _appVersion = '${info.version}+${info.buildNumber}');
+      }
+    } catch (_) {}
   }
 
   Future<void> _saveAssistantRole(AssistantRole role) async {
@@ -260,7 +272,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _infoTile(
             icon: Icons.info_outline,
             title: 'Nova Assistant',
-            subtitle: 'Version 0.1.0 — Powered by Gemma',
+            subtitle: 'Version $_appVersion — Powered by Gemma',
           ),
           _infoTile(
             icon: Icons.privacy_tip_outlined,

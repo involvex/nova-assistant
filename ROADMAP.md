@@ -29,19 +29,19 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 - [x] **Fix model re-download** - Canonical filename consistency across install/detection paths
 - [x] **Fix tool call truncation** - Clean fullResponse, multi-call support, string args
-- [ ] **Error handling improvements** - Better error messages and recovery for model loading failures
+- [x] **Error handling improvements** - `ModelException` hierarchy with actionable suggestions, error bubbles with retry/settings action chips
 - [ ] **Memory management** - Optimize RAG memory retrieval and reduce memory usage
 - [ ] **Battery optimization** - Reduce power consumption during inference
-- [ ] **Offline mode indicator** - Clear UI feedback when models are unavailable
+- [x] **Offline mode indicator** - Red banner when no model installed, with direct "Install" button
 
 ### Medium Priority
 
-- [ ] **File/URL attachment** - Attach files and URLs as custom context for queries
-- [ ] **Conversation export** - Export chat history as JSON or text
-- [ ] **Search in history** - Search through past conversations
-- [ ] **Message timestamps** - Show full timestamps (not just time)
-- [ ] **Copy message** - Long-press to copy individual messages
-- [ ] **Message reactions** - Thumbs up/down for feedback
+- [x] **File/URL attachment** - Attach files and URLs as custom context for queries
+- [x] **Conversation export** - Export chat history as JSON or text
+- [x] **Search in history** - Search through past conversations
+- [x] **Message timestamps** - Show full timestamps (not just time)
+- [x] **Copy message** - Long-press to copy individual messages
+- [ ] **Message reactions** - Data model and rendering done; picker UI not yet wired
 
 ---
 
@@ -49,13 +49,13 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### High Priority
 
-- [ ] **Context window management** - Smart truncation for long conversations
+- [x] **Context window management** - Smart truncation via `clearHistory(replayHistory:)` when conversation exceeds 60% token budget
 - [ ] **Multi-turn tool calls** - Support for sequential tool execution
-- [ ] **Tool call visualization** - Show tool calls and results in the UI
-- [ ] **Streaming tool results** - Real-time updates during tool execution
-- [ ] **Model performance metrics** - Track inference time and token usage
-- [ ] **MCP-like integration** - Connect to external data sources and tools
-- [ ] **Auto-model selection** - Choose model based on content type (text, image, code)
+- [x] **Tool call visualization** - Tool call chips in `ChatBubble` show executing/done state
+- [ ] **Streaming tool results** - Real-time updates during tool execution via platform channels
+- [x] **Model performance metrics** - `Stopwatch`-based inference time tracking shown per response
+- [x] **MCP-like integration** - External tools via platform channels + JSON schema tool definitions
+- [x] **Auto-model selection** - `ModelSelector.selectForQuery` routes by length, vision, thinking mode
 
 ### Medium Priority
 
@@ -63,7 +63,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [ ] **Conversation summaries** - Automatic conversation summarization
 - [ ] **Proactive suggestions** - AI-suggested quick actions based on context
 - [ ] **Multi-language support** - Detect and respond in user's language
-- [ ] **Code syntax highlighting** - Enhanced code block rendering
+- [x] **Code syntax highlighting** - Enhanced code block rendering via `MarkdownStyleSheet`
 - [ ] **Custom knowledge bases** - Load and query custom document collections
 
 ---
@@ -171,18 +171,21 @@ This document outlines the planned features and improvements for Nova Assistant.
 ## Release Schedule
 
 ### v0.2.0 (Next Release)
-- Fix model re-download bug (canonical filename)
-- Fix tool call truncation (fullResponse cleanup, multi-call)
-- Error handling improvements
+- ~~Fix model re-download bug (canonical filename)~~
+- ~~Fix tool call truncation (fullResponse cleanup, multi-call)~~
+- ~~Error handling improvements~~ (`ModelException` hierarchy with retry/settings chips)
 - Battery optimization
-- File/URL attachment support
+- Message reactions picker UI
+- Semantic conversation search
 
 ### v0.3.0
-- MCP-like data source integration
-- Auto-model selection based on content type
-- Tool call visualization
-- Context window management
-- Model performance metrics
+- ~~MCP-like data source integration~~ (platform-channel tools + JSON schemas)
+- ~~Auto-model selection based on content type~~ (`ModelSelector.selectForQuery`)
+- ~~Tool call visualization~~ (executing/done chips in `ChatBubble`)
+- ~~Context window management~~ (token-budget truncation via `clearHistory(replayHistory:)`)
+- ~~Model performance metrics~~ (Stopwatch-based `inferenceTimeMs`)
+- Multi-turn sequential tool execution
+- Streaming tool results via platform channels
 
 ### v0.4.0
 - Windows support

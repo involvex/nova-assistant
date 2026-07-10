@@ -677,6 +677,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
                               ),
                             );
                           },
+                          onReactionRequest: () => _showReactionPicker(index),
+                          onReactionChipTap: (emoji) =>
+                              _toggleReaction(index, emoji),
                         );
                       },
                     ),
@@ -1341,6 +1344,96 @@ class _AssistantScreenState extends State<AssistantScreen> {
         ],
       ),
     );
+  }
+
+  static const _reactionEmojis = ['👍', '👎', '😄', '❤️', '🤔'];
+
+  Future<void> _showReactionPicker(int messageIndex) async {
+    final msg = _messages[messageIndex];
+    final items = <Widget>[];
+
+    if (msg.isUser) {
+      items.add(
+        ListTile(
+          leading: const Icon(Icons.copy, color: Colors.white70, size: 20),
+          title: const Text('Copy', style: TextStyle(color: Colors.white)),
+          onTap: () {
+            Navigator.pop(context);
+            Clipboard.setData(ClipboardData(text: msg.text));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Copied to clipboard'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          },
+        ),
+      );
+      items.add(const Divider(color: Colors.white10, height: 1));
+    }
+
+    items.addAll(
+      _reactionEmojis.map((emoji) {
+        final count = msg.reactions[emoji] ?? 0;
+        return ListTile(
+          leading: Text(emoji, style: const TextStyle(fontSize: 22)),
+          title: Text(
+            count > 0 ? '$emoji ($count)' : emoji,
+            style: TextStyle(color: Colors.grey[300]),
+          ),
+          onTap: () {
+            Navigator.pop(context);
+            _toggleReaction(messageIndex, emoji);
+          },
+        );
+      }),
+    );
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Add Reaction',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ...items,
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _toggleReaction(int messageIndex, String emoji) {
+    setState(() {
+      final msg = _messages[messageIndex];
+      final newReactions = Map<String, int>.from(msg.reactions);
+      final current = newReactions[emoji] ?? 0;
+      if (current > 0) {
+        newReactions[emoji] = current - 1;
+        if (newReactions[emoji] == 0) {
+          newReactions.remove(emoji);
+        }
+      } else {
+        newReactions[emoji] = 1;
+      }
+      _messages[messageIndex] = msg.copyWith(reactions: newReactions);
+    });
+    ChatHistoryService.save(_messages);
   }
 
   void _showFullScreenshot(Uint8List data) {

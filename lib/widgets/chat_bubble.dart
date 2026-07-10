@@ -9,6 +9,8 @@ class ChatBubble extends StatelessWidget {
   final VoidCallback? onScreenshotTap;
   final VoidCallback? onSettingsTap;
   final VoidCallback? onCopy;
+  final VoidCallback? onReactionRequest;
+  final ValueChanged<String>? onReactionChipTap;
 
   const ChatBubble({
     super.key,
@@ -17,6 +19,8 @@ class ChatBubble extends StatelessWidget {
     this.onScreenshotTap,
     this.onSettingsTap,
     this.onCopy,
+    this.onReactionRequest,
+    this.onReactionChipTap,
   });
 
   @override
@@ -35,7 +39,7 @@ class ChatBubble extends StatelessWidget {
               ? CrossAxisAlignment.end
               : CrossAxisAlignment.start,
           children: [
-            // Screenshot preview (only for user messages with images)
+            // Screenshot preview
             if (message.imageData != null)
               GestureDetector(
                 onTap: onScreenshotTap,
@@ -49,7 +53,7 @@ class ChatBubble extends StatelessWidget {
                 ),
               ),
 
-            // Model badge (for assistant messages)
+            // Model badge
             if (!isUser && message.modelName != null)
               Padding(
                 padding: const EdgeInsets.only(left: 12, bottom: 2),
@@ -74,12 +78,12 @@ class ChatBubble extends StatelessWidget {
                 ),
               ),
 
-            // Tool call chips (for assistant messages with tool calls)
+            // Tool call chips
             if (!isUser && message.toolCalls != null) _buildToolCalls(),
 
             // Message bubble
             GestureDetector(
-              onLongPress: onCopy,
+              onLongPress: () => onReactionRequest?.call(),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
@@ -163,6 +167,38 @@ class ChatBubble extends StatelessWidget {
                 ),
               ),
 
+            // Reactions
+            if (message.reactions.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 12, right: 12, top: 4),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 2,
+                  children: message.reactions.entries.map((entry) {
+                    return GestureDetector(
+                      onTap: () => onReactionChipTap?.call(entry.key),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.1),
+                          ),
+                        ),
+                        child: Text(
+                          '${entry.key} ${entry.value}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+
             // Timestamp / inference time
             if (!message.isStreaming)
               Padding(
@@ -198,7 +234,7 @@ class ChatBubble extends StatelessWidget {
     List<dynamic> calls;
     try {
       calls = jsonDecode(message.toolCalls!) as List<dynamic>;
-    } catch (_) {
+    } on FormatException {
       return const SizedBox.shrink();
     }
 

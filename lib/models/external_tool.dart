@@ -218,7 +218,8 @@ class LocalToolProvider implements ExternalToolProvider {
     try {
       final command = tool.config['command'] ?? '';
       if (command.isEmpty) {
-        return ExternalToolResult(success: false, error: 'No command specified');
+        return ExternalToolResult(
+            success: false, error: 'No command specified');
       }
 
       final result = await Process.run(command, [jsonEncode(args)]);
@@ -226,7 +227,8 @@ class LocalToolProvider implements ExternalToolProvider {
       if (result.exitCode == 0) {
         return ExternalToolResult(success: true, data: result.stdout);
       } else {
-        return ExternalToolResult(success: false, error: result.stderr.toString());
+        return ExternalToolResult(
+            success: false, error: result.stderr.toString());
       }
     } catch (e) {
       return ExternalToolResult(success: false, error: e.toString());

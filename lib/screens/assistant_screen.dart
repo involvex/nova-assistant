@@ -36,6 +36,8 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _thinkingMode = false;
   bool _offlineMode = false;
   Uint8List? _currentScreenshot;
+  bool _isLoadingInitialScreenshot =
+      true; // Track if initial screenshot is loading
   String _status = 'Ready';
   bool _shouldPreserveScreenshot = false;
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
@@ -223,9 +225,19 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _loadInitialScreenshot() async {
-    final screenshot = await ScreenshotService.instance.getLatestScreenshot();
-    if (screenshot != null && mounted) {
-      setState(() => _currentScreenshot = screenshot);
+    _isLoadingInitialScreenshot = true;
+    try {
+      final screenshot = await ScreenshotService.instance.getLatestScreenshot();
+      if (mounted) {
+        setState(() {
+          _currentScreenshot = screenshot;
+          _isLoadingInitialScreenshot = false;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingInitialScreenshot = false);
+      }
     }
   }
 
@@ -265,6 +277,16 @@ class _AssistantScreenState extends State<AssistantScreen>
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _isGenerating) return;
+
+    // Wait for initial screenshot to load if still loading (from assistant mode)
+    // This ensures screenshot is captured before model selection happens
+    if (_isLoadingInitialScreenshot && _currentScreenshot == null) {
+      debugPrint('Waiting for initial screenshot to load...');
+      while (_isLoadingInitialScreenshot && _currentScreenshot == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      debugPrint('Screenshot loaded: ${_currentScreenshot != null}');
+    }
 
     _inputController.clear();
     _inputFocus.unfocus();

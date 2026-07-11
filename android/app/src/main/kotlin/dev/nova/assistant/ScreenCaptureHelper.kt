@@ -50,7 +50,13 @@ object ScreenCaptureHelper {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getLatestScreenshot" -> {
-                    val frame = _latestFrame
+                    // First check our own captured frame
+                    var frame = _latestFrame
+                    // If no frame captured yet, check if AssistantActivity cached a screenshot
+                    // (this happens when launched via assistant button with screen capture)
+                    if (frame == null) {
+                        frame = AssistantActivity.latestScreenshot
+                    }
                     if (frame != null) {
                         Log.d(TAG, "Returning screenshot: ${frame.size} bytes")
                         result.success(frame)

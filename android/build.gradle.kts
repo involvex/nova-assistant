@@ -5,16 +5,26 @@ allprojects {
     }
 }
 
-val newBuildDir: Directory = rootProject.layout.buildDirectory.dir("../../build").get()
+val newBuildDir: Directory =
+    rootProject.layout.buildDirectory
+        .dir("../../build")
+        .get()
 rootProject.layout.buildDirectory.value(newBuildDir)
 
 subprojects {
-    val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
-    project.layout.buildDirectory.value(newSubprojectBuildDir)
-}
+    if (project == rootProject) return@subprojects
 
-subprojects {
-    project.evaluationDependsOn(":app")
+    val projectPath = project.projectDir.absolutePath
+    val skipRedirect = projectPath.contains(".pub-cache") ||
+                       projectPath.contains("Pub\\Cache") ||
+                       projectPath.contains("Pub/Cache") ||
+                       projectPath.contains("Pub") ||
+                       projectPath.contains(".dart_tool")
+
+    if (!skipRedirect) {
+        val newSubprojectBuildDir = newBuildDir.dir(project.name)
+        project.layout.buildDirectory.value(newSubprojectBuildDir)
+    }
 }
 
 tasks.register<Delete>("clean") {

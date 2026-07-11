@@ -152,6 +152,7 @@ class AttachedData {
           : extractedText!;
       buffer.writeln(preview);
     }
+
     return buffer.toString();
   }
 }

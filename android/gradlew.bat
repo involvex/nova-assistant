@@ -2,13 +2,11 @@
 @rem ##########################################################################
 @rem
 @rem  Gradle startup script for Windows
-@rem  Uses standalone Gradle 9.5.1 if available (C:\Users\lukas\.gradle\bin\gradle-9.5.1)
-@rem  Falls back to the wrapper download mechanism otherwise.
 @rem
 @rem ##########################################################################
 
 @rem Set local scope for the variables with windows NT shell
-if "%OS%"=="Windows_NT" setlocal enabledelayedexpansion
+if "%OS%"=="Windows_NT" setlocal
 
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS=
@@ -34,8 +32,8 @@ echo location of your Java installation.
 goto fail
 
 :findJavaFromJavaHome
-set "JAVA_HOME=%JAVA_HOME:"=%"
-set "JAVA_EXE=%JAVA_HOME%/bin/java.exe"
+set JAVA_HOME=%JAVA_HOME:"=%
+set JAVA_EXE=%JAVA_HOME%/bin/java.exe
 
 if exist "%JAVA_EXE%" goto init
 
@@ -69,18 +67,12 @@ goto execute
 set CMD_LINE_ARGS=%$
 
 :execute
-set "CLASSPATH=%APP_HOME%gradle\wrapper\gradle-wrapper.jar"
+@rem Setup the command line
 
-set "USER_GRADLE_HOME=C:\Users\lukas\.gradle\bin\gradle-9.5.1"
-if exist "!USER_GRADLE_HOME!\bin\gradle.bat" (
-    set "GRADLE_HOME=!USER_GRADLE_HOME!"
-    echo Using standalone Gradle from %GRADLE_HOME%
-    call "!GRADLE_HOME!\bin\gradle.bat" !CMD_LINE_ARGS!
-    goto end
-)
+set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
 
-@rem Execute Gradle via wrapper (will download if needed)
-"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain !CMD_LINE_ARGS!
+@rem Execute Gradle
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %CMD_LINE_ARGS%
 
 :end
 @rem End local scope for the variables with windows NT shell

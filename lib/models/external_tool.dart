@@ -135,6 +135,7 @@ class HttpToolProvider implements ExternalToolProvider {
         if (response.statusCode >= 200 && response.statusCode < 300) {
           try {
             final json = jsonDecode(body);
+
             return ExternalToolResult(success: true, data: json);
           } catch (_) {
             return ExternalToolResult(success: true, data: body);
@@ -204,6 +205,44 @@ class McpToolProvider implements ExternalToolProvider {
       }
     } catch (e) {
       return ExternalToolResult(success: false, error: e.toString());
+    }
+  }
+}
+
+class LocalToolProvider implements ExternalToolProvider {
+  @override
+  Future<ExternalToolResult> execute(
+    ExternalTool tool,
+    Map<String, dynamic> args,
+  ) async {
+    try {
+      final command = tool.config['command'] ?? '';
+      if (command.isEmpty) {
+        return ExternalToolResult(success: false, error: 'No command specified');
+      }
+
+      final result = await Process.run(command, [jsonEncode(args)]);
+
+      if (result.exitCode == 0) {
+        return ExternalToolResult(success: true, data: result.stdout);
+      } else {
+        return ExternalToolResult(success: false, error: result.stderr.toString());
+      }
+    } catch (e) {
+      return ExternalToolResult(success: false, error: e.toString());
+    }
+  }
+}
+
+class ToolProviderFactory {
+  static ExternalToolProvider getProvider(ExternalToolType type) {
+    switch (type) {
+      case ExternalToolType.http:
+        return HttpToolProvider();
+      case ExternalToolType.local:
+        return LocalToolProvider();
+      case ExternalToolType.mcp:
+        return McpToolProvider();
     }
   }
 }

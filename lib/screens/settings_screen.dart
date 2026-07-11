@@ -12,6 +12,7 @@ import 'package:nova_assistant/screens/identity_config_screen.dart';
 import 'package:nova_assistant/screens/mcp_settings_screen.dart';
 import 'package:nova_assistant/screens/memory_management_screen.dart';
 import 'package:nova_assistant/screens/conversation_search_screen.dart';
+import 'package:nova_assistant/screens/model_browser_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   AssistantRole _assistantRole = AssistantRole.helpful;
   String _installStatus = '';
   String _appVersion = '0.1.0';
+  String _hfTokenStatus = 'Not configured';
   StreamSubscription<Map<String, dynamic>>? _assistantRoleSub;
 
   @override
@@ -78,8 +80,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _assistantRole = AssistantRole.fromString(
           prefs.getString('settings_assistant_role'),
         );
+        _hfTokenStatus = _resolveHfTokenStatus(prefs.getString('hf_token'));
       });
     }
+  }
+
+  String _resolveHfTokenStatus(String? token) {
+    if (token == null || token.isEmpty) return 'Not configured';
+    final display = token.length > 12
+        ? '${token.substring(0, 8)}...${token.substring(token.length - 4)}'
+        : token;
+    return 'Configured ($display)';
+  }
+
+  Future<void> _showHfTokenDialog(BuildContext context) async {
+    final controller = TextEditingController();
+    final prefs = await SharedPreferences.getInstance();
+    final current = prefs.getString('hf_token') ?? '';
+    controller.text = current;
+
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('HuggingFace Token',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Required for gated models (e.g. Gemma). '
+              'Get yours at huggingface.co/settings/tokens',
+              style: TextStyle(color: Colors.grey[400], fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'hf_...',
+                hintStyle: TextStyle(color: Colors.grey[600]),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.grey[700]!),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              if (current.isNotEmpty) {
+                prefs.remove('hf_token');
+              }
+              Navigator.pop(ctx);
+              setState(() => _hfTokenStatus = 'Not configured');
+            },
+            child: Text('Remove', style: TextStyle(color: Colors.grey[400])),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey[400])),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final token = controller.text.trim();
+              await ModelManager.setHuggingFaceToken(
+                token.isEmpty ? null : token,
+              );
+              if (context.mounted) {
+                setState(() => _hfTokenStatus = _resolveHfTokenStatus(token));
+                Navigator.pop(ctx);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadAppVersion() async {
@@ -122,6 +205,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 8),
 
+          // HuggingFace token
+          _actionTile(
+            icon: Icons.key,
+            title: 'HuggingFace Token',
+            subtitle: _hfTokenStatus,
+            onTap: () => _showHfTokenDialog(context),
+          ),
+
           // Install from file button
           _actionTile(
             icon: Icons.folder_open,
@@ -129,6 +220,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle:
                 'Select a .litertlm, .task, or .gguf file from your device',
             onTap: () => _pickAndInstallModel(context),
+          ),
+
+          _actionTile(
+            icon: Icons.explore_outlined,
+            title: 'Browse & Download Models',
+            subtitle: 'Discover and download models from HuggingFace',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const ModelBrowserScreen(),
+                ),
+              );
+              if (context.mounted) {
+                setState(() {});
+              }
+            },
           ),
 
           if (_installStatus.isNotEmpty)

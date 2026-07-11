@@ -1,10 +1,14 @@
-# Add project specific ProGuard rules here.
--keep class dev.nova.assistant.** { *; }
+-keep class dev.fluttercommunity.plus.packageinfo.** { *; }
+-keep class com.mr.flutter.plugin.filepicker.** { *; }
+-keep class dev.flutterberlin.flutter_gemma_mediapipe.** { *; }
+-keep class com.csdcorp.speech_to_text.** { *; }
+-keep class io.flutter.plugins.GeneratedPluginRegistrant { *; }
 
-# Flutter Gemma (MediaPipe)
--keep class com.google.mediapipe.** { *; }
--dontwarn com.google.mediapipe.**
+-dontwarn dev.fluttercommunity.plus.packageinfo.**
+-dontwarn com.mr.flutter.plugin.filepicker.**
+-dontwarn dev.flutterberlin.flutter_gemma_mediapipe.**
+-dontwarn com.csdcorp.speech_to_text.**
 
-# LiteRT-LM
--keep class com.google.ai.edge.litert.** { *; }
--dontwarn com.google.ai.edge.litert.**
+-dontwarn com.google.auto.value.extension.memoized.Memoized
+-dontwarn com.google.mediapipe.proto.CalculatorProfileProto$CalculatorProfile
+-dontwarn com.google.mediapipe.proto.GraphTemplateProto$CalculatorGraphTemplate

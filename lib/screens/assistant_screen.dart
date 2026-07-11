@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -36,7 +37,9 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _offlineMode = false;
   Uint8List? _currentScreenshot;
   String _status = 'Ready';
+  bool _shouldPreserveScreenshot = false;
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
+  StreamSubscription<void>? _historyClearedSub;
 
   @override
   void initState() {
@@ -49,6 +52,12 @@ class _AssistantScreenState extends State<AssistantScreen>
     _inputController.addListener(() => setState(() {}));
     _listenToModelStatus();
     _checkModelAvailability();
+    _historyClearedSub =
+        ModelOrchestrator.instance.historyClearedStream.listen((_) {
+      if (mounted) {
+        setState(() => _messages.clear());
+      }
+    });
   }
 
   Future<void> _loadHistory() async {
@@ -197,6 +206,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _historyClearedSub?.cancel();
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();
@@ -326,18 +336,16 @@ class _AssistantScreenState extends State<AssistantScreen>
     } catch (e) {
       final idx = _messages.indexWhere((m) => m.id == assistantId);
       if (e is ModelNeedsFilePickException) {
-        // User chose "Pick File" — open file picker
+        _shouldPreserveScreenshot = true;
         setState(() {
           _isGenerating = false;
         });
         _attachmentManager.clear();
         await _handleModelFilePick(e.model);
-        // Retry sending after file pick
         _inputController.text = text;
         return;
       }
       if (idx != -1) {
-        // Build error message with actionable info
         String errorText;
         if (e is ModelException) {
           errorText = '⚠️ ${e.message}\n\n${e.suggestion ?? ''}';
@@ -355,7 +363,10 @@ class _AssistantScreenState extends State<AssistantScreen>
     } finally {
       setState(() {
         _isGenerating = false;
-        _currentScreenshot = null;
+        if (!_shouldPreserveScreenshot) {
+          _currentScreenshot = null;
+        }
+        _shouldPreserveScreenshot = false;
       });
       _attachmentManager.clear();
     }
@@ -517,13 +528,17 @@ class _AssistantScreenState extends State<AssistantScreen>
             backgroundColor: Colors.green,
           ),
         );
-        // Re-send the last user message to trigger model load
+
+        ModelOrchestrator.instance.refreshModelOverride();
         if (_messages.isNotEmpty) {
           final lastUserMsg = _messages.lastWhere(
             (m) => m.isUser,
             orElse: () => _messages.first,
           );
           _inputController.text = lastUserMsg.text;
+          if (lastUserMsg.imageData != null) {
+            _currentScreenshot = lastUserMsg.imageData;
+          }
           _sendMessage();
         }
       }

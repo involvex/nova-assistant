@@ -163,6 +163,7 @@ class IdentityService {
 
   static Future<bool> isActive() async {
     final prefs = await _p;
+
     return prefs.getBool(_activeKey) ?? false;
   }
 

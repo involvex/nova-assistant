@@ -168,6 +168,12 @@ class ModelOrchestrator {
     _modelOverrideDirty = false;
   }
 
+  void refreshModelOverride() {
+    if (_preferredModelOverride != null) {
+      _modelOverrideDirty = true;
+    }
+  }
+
   void _resetIdleTimer() {
     if (!_batteryOptimizationEnabled) return;
     _idleTimer?.cancel();
@@ -619,10 +625,6 @@ class ModelOrchestrator {
       );
     }
 
-    if (_modelOverrideDirty) {
-      _modelOverrideDirty = false;
-    }
-
     _statusController.add('Using ${model.displayName}');
 
     InferenceModel inferenceModel;
@@ -647,6 +649,10 @@ class ModelOrchestrator {
         isStreaming: false,
       );
       return;
+    }
+
+    if (_modelOverrideDirty) {
+      _modelOverrideDirty = false;
     }
 
     _activeChat ??= await inferenceModel.createChat(
@@ -1020,6 +1026,8 @@ class ModelOrchestrator {
   Future<void> clearHistory() async {
     _activeChat = null;
     _activeModelSupportsImage = false;
+    _preferredModelOverride = null;
+    _modelOverrideDirty = false;
     await ChatHistoryService.clear();
     _historyClearedController.add(null);
   }

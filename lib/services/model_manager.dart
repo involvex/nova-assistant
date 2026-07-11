@@ -51,6 +51,7 @@ class ModelManager {
   ModelManager._();
 
   static const _prefsKey = 'installed_models';
+  static const _hfTokenKey = 'hf_token';
   final List<InstalledModel> _installedModels = [];
 
   final _statusController = StreamController<String>.broadcast();
@@ -90,9 +91,6 @@ class ModelManager {
       final uri = Uri.parse(url);
       final fileName = p.basename(uri.path);
 
-      // ALWAYS check disk as source of truth — _installedModels may have
-      // stale entries from a failed install. Only return early if the file
-      // actually exists on disk.
       final dir = await getApplicationDocumentsDirectory();
       final fileOnDisk = File('${dir.path}/$fileName');
       final modelsDir = Directory('${dir.path}/models');
@@ -110,7 +108,6 @@ class ModelManager {
       }
 
       if (foundOnDisk) {
-        // File exists on disk — find actual spec name and track it
         final spec = await _findInstalledSpec(fileName);
         final actualName = spec?['name'] as String? ?? fileName;
         final canonicalName =
@@ -134,19 +131,19 @@ class ModelManager {
         return model;
       }
 
-      // Not installed — download it ourselves (not via flutter_gemma's
-      // fromNetwork, which stores in its internal storage invisible to
-      // isInstalledOnDisk). Then delegate to installFromFile which copies
-      // to the docs directory where disk checks look.
       _statusController.add('Downloading $fileName...');
       final tempDir = await getTemporaryDirectory();
       final tempFile = File(
-        '${tempDir.path}/nova_download_${DateTime.now().millisecondsSinceEpoch}$fileName',
+        '${tempDir.path}/nova_download_${DateTime.now().millisecondsSinceEpoch}_$fileName',
       );
 
+      final hfToken = await getHuggingFaceToken();
       final client = HttpClient();
       try {
-        final request = await client.getUrl(Uri.parse(url));
+        final request = await client.getUrl(uri);
+        if (hfToken != null && hfToken.isNotEmpty) {
+          request.headers.set('Authorization', 'Bearer $hfToken');
+        }
         final response = await request.close();
 
         if (response.statusCode != 200) {
@@ -166,6 +163,16 @@ class ModelManager {
           }
         }
         await sink.close();
+
+        if (totalBytes > 0 && receivedBytes != totalBytes) {
+          _statusController.add(
+            'Download incomplete: expected $totalBytes bytes, got $receivedBytes',
+          );
+          try {
+            await tempFile.delete();
+          } catch (_) {}
+          return null;
+        }
       } finally {
         client.close();
       }
@@ -241,6 +248,7 @@ class ModelManager {
     required ModelFileType fileType,
     void Function(int progress)? onProgress,
   }) async {
+    String canonicalPath = '';
     try {
       _statusController.add('Installing model from file...');
 
@@ -253,8 +261,6 @@ class ModelManager {
       final fileName = p.basename(filePath);
       final ext = p.extension(fileName).toLowerCase();
 
-      // Validate file extension — .litertlm, .task, and .gguf are supported.
-      // .bin/.tflite files may crash the native engine.
       if (ext != '.litertlm' && ext != '.task' && ext != '.gguf') {
         _statusController.add(
           'Unsupported format: $ext — only .litertlm, .task, and .gguf are supported',
@@ -264,15 +270,10 @@ class ModelManager {
 
       final docsDir = await getApplicationDocumentsDirectory();
 
-      // Compute the canonical name BEFORE installation so flutter_gemma's
-      // spec (repository, protected files, and active-model prefs) points to
-      // the final path from the start. This avoids a path mismatch that
-      // occurs when the file is renamed AFTER install.
       final specName = _deriveBaseName(fileName);
       final canonicalName = _findCanonicalName(specName, modelType) ?? fileName;
-      final canonicalPath = '${docsDir.path}/$canonicalName';
+      canonicalPath = '${docsDir.path}/$canonicalName';
 
-      // Copy to documents directory (flutter_gemma needs permanent access)
       if (!await File(canonicalPath).exists()) {
         _statusController.add('Copying model file to app storage...');
         await sourceFile.copy(canonicalPath);
@@ -296,8 +297,6 @@ class ModelManager {
         fileSizeBytes: await File(canonicalPath).length(),
       );
 
-      // Remove any entries matching this model (by canonical name, spec name,
-      // or source filename) to prevent duplicates in prefs.
       _installedModels.removeWhere(
         (m) =>
             m.fileName == canonicalName ||
@@ -311,6 +310,11 @@ class ModelManager {
     } catch (e) {
       _statusController.add('Install failed: $e');
       debugPrint('ModelManager: installFromFile failed: $e');
+      if (canonicalPath.isNotEmpty) {
+        try {
+          await File(canonicalPath).delete();
+        } catch (_) {}
+      }
       return null;
     }
   }
@@ -428,6 +432,12 @@ class ModelManager {
       _statusController.add('Registered: $fileName');
     } catch (e) {
       debugPrint('registerDiskModel failed: $e — trying fuzzy match');
+      try {
+        final fileToDelete = File(filePath);
+        if (await fileToDelete.exists()) {
+          await fileToDelete.delete();
+        }
+      } catch (_) {}
       // Fallback: try to find the file in models subdirectory with fuzzy match
       try {
         final dir = await getApplicationDocumentsDirectory();
@@ -464,5 +474,26 @@ class ModelManager {
         }
       } catch (_) {}
     }
+  }
+
+  static Future<String?> getHuggingFaceToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString(_hfTokenKey);
+    if (token != null && token.isNotEmpty) return token;
+    return null;
+  }
+
+  static Future<void> setHuggingFaceToken(String? token) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (token == null || token.isEmpty) {
+      await prefs.remove(_hfTokenKey);
+    } else {
+      await prefs.setString(_hfTokenKey, token);
+    }
+  }
+
+  static Future<bool> hasHuggingFaceToken() async {
+    final token = await getHuggingFaceToken();
+    return token != null && token.isNotEmpty;
   }
 }

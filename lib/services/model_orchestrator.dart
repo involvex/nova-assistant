@@ -699,6 +699,10 @@ class ModelOrchestrator {
     bool thinkingMode = false,
     List<Tool> tools = const [],
     List<AttachedData> attachments = const [],
+
+    /// When true, forces use of the primary heavy model instead of auto-selection.
+    /// Useful for assistant mode where reliability is more important than speed.
+    bool forcePrimaryModel = false,
   }) async* {
     // Check if there are image attachments that need vision processing
     final hasImageAttachments = attachments.any((att) {
@@ -729,10 +733,20 @@ class ModelOrchestrator {
         '[DEBUG] Model selection: overrideDirty=$_modelOverrideDirty, '
         'preferred=${_preferredModelOverride?.displayName ?? "null"}, '
         'screenshot=${screenshot != null}, '
-        'hasImageAttachments=$hasImageAttachments, thinking=$thinkingMode',
+        'hasImageAttachments=$hasImageAttachments, thinking=$thinkingMode, '
+        'forcePrimaryModel=$forcePrimaryModel',
       );
     }
-    if (_modelOverrideDirty && _preferredModelOverride != null) {
+
+    // Force primary model when requested - ensures heavy model is used for
+    // reliability-critical scenarios like assistant mode
+    if (forcePrimaryModel) {
+      model = selector.primaryHeavy;
+      if (_debugMode) {
+        _statusController
+            .add('[DEBUG] Force Primary Model: ${model.displayName}');
+      }
+    } else if (_modelOverrideDirty && _preferredModelOverride != null) {
       model = _preferredModelOverride!;
       if ((screenshot != null || hasImageAttachments) && !model.hasVision) {
         model = selector.primaryHeavy.hasVision

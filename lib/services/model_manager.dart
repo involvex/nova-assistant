@@ -244,13 +244,13 @@ class ModelManager {
     try {
       final dir = await getApplicationDocumentsDirectory();
 
-      // Check direct path
+      // Check direct path first
       final directFile = File('${dir.path}/$fileName');
       if (await directFile.exists()) {
         return directFile.path;
       }
 
-      // Check models subdirectory with basename matching
+      // Check models subdirectory with exact basename matching (no extension)
       final modelsDir = Directory('${dir.path}/models');
       if (await modelsDir.exists()) {
         final baseName = fileName
@@ -260,11 +260,26 @@ class ModelManager {
         await for (final entity in modelsDir.list()) {
           if (entity is File) {
             final entityName = p.basename(entity.path);
-            if (entityName
+            final entityBaseName = entityName
                 .replaceAll('.litertlm', '')
                 .replaceAll('.task', '')
-                .replaceAll('.gguf', '')
-                .contains(baseName)) {
+                .replaceAll('.gguf', '');
+            // Exact match on base name (after removing extensions)
+            if (entityBaseName == baseName) {
+              return entity.path;
+            }
+          }
+        }
+        // Second pass: partial match (entity name contains base name)
+        await for (final entity in modelsDir.list()) {
+          if (entity is File) {
+            final entityName = p.basename(entity.path);
+            final entityBaseName = entityName
+                .replaceAll('.litertlm', '')
+                .replaceAll('.task', '')
+                .replaceAll('.gguf', '');
+            if (entityBaseName.contains(baseName) ||
+                baseName.contains(entityBaseName)) {
               return entity.path;
             }
           }
@@ -272,6 +287,65 @@ class ModelManager {
       }
     } catch (_) {}
     return null;
+  }
+
+  /// Find all model files on disk matching the given pattern.
+  /// Returns list of file paths.
+  Future<List<String>> findAllModelFiles(String pattern) async {
+    final results = <String>[];
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final modelsDir = Directory('${dir.path}/models');
+      if (await modelsDir.exists()) {
+        final patternLower = pattern.toLowerCase();
+        await for (final entity in modelsDir.list()) {
+          if (entity is File) {
+            final entityName = p.basename(entity.path).toLowerCase();
+            if (entityName.contains(patternLower)) {
+              results.add(entity.path);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return results;
+  }
+
+  /// Validate a model file before installation.
+  /// Returns null if valid, error message if invalid.
+  Future<String?> validateModelFile(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        return 'File does not exist';
+      }
+
+      final fileSize = await file.length();
+      if (fileSize == 0) {
+        return 'File is empty';
+      }
+
+      // Minimum model file size: 1MB (reasonable for any model)
+      if (fileSize < 1024 * 1024) {
+        return 'File is too small (${fileSize} bytes) - may be corrupted';
+      }
+
+      // Maximum reasonable model size: 5GB
+      if (fileSize > 5 * 1024 * 1024 * 1024) {
+        return 'File is unreasonably large (${(fileSize / 1024 / 1024 / 1024).toStringAsFixed(1)}GB)';
+      }
+
+      final fileName = p.basename(filePath);
+      final ext = p.extension(fileName).toLowerCase();
+      if (ext != '.litertlm' && ext != '.task' && ext != '.gguf') {
+        return 'Unsupported file extension: $ext';
+      }
+
+      // File looks valid
+      return null;
+    } catch (e) {
+      return 'Error validating file: $e';
+    }
   }
 
   /// Delete a model file from disk given its filename.
@@ -305,6 +379,16 @@ class ModelManager {
     void Function(int progress)? onProgress,
   }) async {
     String canonicalPath = '';
+
+    // Validate the file before attempting installation
+    final validationError = await validateModelFile(filePath);
+    if (validationError != null) {
+      _statusController.add('Invalid model file: $validationError');
+      debugPrint(
+          'ModelManager: installFromFile validation failed: $validationError');
+      return null;
+    }
+
     try {
       _statusController.add('Installing model from file...');
 
@@ -330,47 +414,58 @@ class ModelManager {
       final canonicalName = _findCanonicalName(specName, modelType) ?? fileName;
       canonicalPath = '${docsDir.path}/$canonicalName';
 
+      bool copied = false;
       if (!await File(canonicalPath).exists()) {
         _statusController.add('Copying model file to app storage...');
         await sourceFile.copy(canonicalPath);
+        copied = true;
       }
 
-      final builder = FlutterGemma.installModel(
-        modelType: modelType,
-        fileType: fileType,
-      ).fromFile(canonicalPath);
-      if (onProgress != null) {
-        builder.withProgress(onProgress);
+      try {
+        final builder = FlutterGemma.installModel(
+          modelType: modelType,
+          fileType: fileType,
+        ).fromFile(canonicalPath);
+        if (onProgress != null) {
+          builder.withProgress(onProgress);
+        }
+        final result = await builder.install();
+        final spec = result.spec;
+
+        final model = InstalledModel(
+          id: canonicalName,
+          fileName: canonicalName,
+          modelType: modelType,
+          installedAt: DateTime.now(),
+          fileSizeBytes: await File(canonicalPath).length(),
+        );
+
+        _installedModels.removeWhere(
+          (m) =>
+              m.fileName == canonicalName ||
+              m.fileName == spec.name ||
+              m.fileName == fileName,
+        );
+        _installedModels.add(model);
+        await _saveToPrefs();
+        _statusController.add('Model installed: $canonicalName');
+        return model;
+      } catch (installError) {
+        // Installation failed - clean up copied file if we created one
+        if (copied && canonicalPath.isNotEmpty) {
+          try {
+            final copiedFile = File(canonicalPath);
+            if (await copiedFile.exists()) {
+              await copiedFile.delete();
+              debugPrint('Cleaned up failed install: $canonicalPath');
+            }
+          } catch (_) {}
+        }
+        rethrow; // Re-throw to let caller handle the install error
       }
-      final result = await builder.install();
-      final spec = result.spec;
-
-      final model = InstalledModel(
-        id: canonicalName,
-        fileName: canonicalName,
-        modelType: modelType,
-        installedAt: DateTime.now(),
-        fileSizeBytes: await File(canonicalPath).length(),
-      );
-
-      _installedModels.removeWhere(
-        (m) =>
-            m.fileName == canonicalName ||
-            m.fileName == spec.name ||
-            m.fileName == fileName,
-      );
-      _installedModels.add(model);
-      await _saveToPrefs();
-      _statusController.add('Model installed: $canonicalName');
-      return model;
     } catch (e) {
       _statusController.add('Install failed: $e');
       debugPrint('ModelManager: installFromFile failed: $e');
-      if (canonicalPath.isNotEmpty) {
-        try {
-          await File(canonicalPath).delete();
-        } catch (_) {}
-      }
       return null;
     }
   }
@@ -528,5 +623,102 @@ class ModelManager {
   static Future<bool> hasHuggingFaceToken() async {
     final token = await getHuggingFaceToken();
     return token != null && token.isNotEmpty;
+  }
+
+  /// Verify all installed models are present and loadable.
+  /// Returns a list of issues found (empty if all OK).
+  Future<List<String>> verifyInstalledModels() async {
+    final issues = <String>[];
+
+    for (final model in List<InstalledModel>.from(_installedModels)) {
+      final path = await _findModelFile(model.fileName);
+      if (path == null) {
+        issues.add('${model.fileName}: file not found on disk');
+        continue;
+      }
+
+      // Check file size matches
+      final actualSize = await File(path).length();
+      if (actualSize != model.fileSizeBytes) {
+        issues.add(
+          '${model.fileName}: size mismatch (tracked: ${model.fileSizeBytes}, actual: $actualSize)',
+        );
+      }
+
+      // Try to validate the file
+      final validationError = await validateModelFile(path);
+      if (validationError != null) {
+        issues.add('${model.fileName}: $validationError');
+      }
+    }
+
+    return issues;
+  }
+
+  /// Repair installed models list by removing entries for missing files.
+  /// Returns number of entries removed.
+  Future<int> repairInstalledModels() async {
+    int removed = 0;
+    final toRemove = <InstalledModel>[];
+
+    for (final model in _installedModels) {
+      final path = await _findModelFile(model.fileName);
+      if (path == null) {
+        toRemove.add(model);
+      }
+    }
+
+    for (final model in toRemove) {
+      _installedModels.removeWhere((m) => m.id == model.id);
+      removed++;
+      debugPrint('Removed missing model from tracking: ${model.fileName}');
+    }
+
+    if (removed > 0) {
+      await _saveToPrefs();
+      _statusController.add('Removed $removed invalid model entries');
+    }
+
+    return removed;
+  }
+
+  /// Get detailed info about all model files on disk (for debugging).
+  Future<Map<String, dynamic>> getStorageInfo() async {
+    final info = <String, dynamic>{
+      'trackedModels': _installedModels.length,
+      'models': <Map<String, dynamic>>[],
+    };
+
+    final dir = await getApplicationDocumentsDirectory();
+
+    // Info about tracked models
+    for (final model in _installedModels) {
+      final path = await _findModelFile(model.fileName);
+      info['models'].add({
+        'name': model.fileName,
+        'trackedSize': model.fileSizeBytes,
+        'actualPath': path,
+        'exists': path != null,
+      });
+    }
+
+    // Info about files in models directory
+    final modelsDir = Directory('${dir.path}/models');
+    if (await modelsDir.exists()) {
+      final files = <Map<String, dynamic>>[];
+      await for (final entity in modelsDir.list()) {
+        if (entity is File) {
+          final stat = await entity.stat();
+          files.add({
+            'name': p.basename(entity.path),
+            'size': stat.size,
+            'modified': stat.modified.toIso8601String(),
+          });
+        }
+      }
+      info['modelFiles'] = files;
+    }
+
+    return info;
   }
 }

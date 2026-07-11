@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_gemma_litertlm/flutter_gemma_litertlm.dart';
@@ -11,33 +12,67 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Ensure SharedPreferences is initialized before any usage
-  await SharedPreferences.getInstance();
+  try {
+    // Ensure SharedPreferences is initialized before any usage
+    await SharedPreferences.getInstance();
 
-  // Initialize Flutter Gemma with all available inference engines
-  await FlutterGemma.initialize(
-    inferenceEngines: const [
-      LiteRtLmEngine(), // .litertlm models (Gemma 4, Qwen3, FastVLM, etc.)
-      MediaPipeEngine(), // .task models (Gemma3n, Gemma 3, DeepSeek, etc.)
-    ],
-    maxDownloadRetries: 3,
-  );
+    // Initialize Flutter Gemma with all available inference engines
+    await FlutterGemma.initialize(
+      inferenceEngines: const [
+        LiteRtLmEngine(), // .litertlm models (Gemma 4, Qwen3, FastVLM, etc.)
+        MediaPipeEngine(), // .task models (Gemma3n, Gemma 3, DeepSeek, etc.)
+      ],
+      maxDownloadRetries: 3,
+    );
 
-  // Initialize model manager (restores installed models list from prefs)
-  await ModelManager.instance.initialize();
+    // Initialize model manager (restores installed models list from prefs)
+    await ModelManager.instance.initialize();
 
-  // Initialize RAG memory
-  await MemoryService.initialize();
+    // Repair any corrupted tracking data
+    await _repairModels();
 
-  // Pre-download and initialize models in background
-  _prefetchModels();
+    // Initialize RAG memory
+    await MemoryService.initialize();
+
+    // Pre-download and initialize models in background
+    _prefetchModels();
+  } catch (e) {
+    debugPrint('Initialization error: $e');
+    // Continue anyway - the app can still function in degraded mode
+  }
 
   runApp(const NovaApp());
 }
 
+Future<void> _repairModels() async {
+  try {
+    // First, verify what we have tracked vs what's actually on disk
+    final issues = await ModelManager.instance.verifyInstalledModels();
+    if (issues.isNotEmpty) {
+      debugPrint('Model verification found issues: $issues');
+    }
+
+    // Repair any missing models from tracking
+    final removed = await ModelManager.instance.repairInstalledModels();
+    if (removed > 0) {
+      debugPrint('Removed $removed invalid model entries');
+    }
+  } catch (e) {
+    debugPrint('Model repair failed: $e');
+  }
+}
+
 Future<void> _prefetchModels() async {
-  await ModelOrchestrator.instance.prefetchModels();
-  ModelOrchestrator.instance.initializeDefaultModel();
+  try {
+    await ModelOrchestrator.instance.prefetchModels();
+  } catch (e) {
+    debugPrint('Model prefetch failed: $e');
+  }
+  try {
+    await ModelOrchestrator.instance.initializeDefaultModel();
+  } catch (e) {
+    debugPrint('Default model init failed: $e');
+  }
 }
 
 class NovaApp extends StatelessWidget {

@@ -172,3 +172,23 @@ class ModelHuggingFaceURLs {
     return null;
   }
 }
+
+extension NovaModelExtensions on NovaModel {
+  String get capabilitySummary {
+    final caps = <String>[];
+    if (hasVision) caps.add('Vision');
+    if (hasThinking) caps.add('Thinking');
+    return caps.isEmpty ? 'Text only' : caps.join(' + ');
+  }
+
+  String get sizeLabel => '$sizeMB MB';
+
+  bool get supportsFunctionCalling => true;
+
+  List<String> get capabilityList {
+    final list = <String>['Function Calling'];
+    if (hasVision) list.insert(0, 'Vision');
+    if (hasThinking) list.insert(0, 'Thinking');
+    return list;
+  }
+}

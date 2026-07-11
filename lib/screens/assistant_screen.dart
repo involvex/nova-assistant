@@ -16,6 +16,7 @@ import 'package:nova_assistant/tools/tool_definitions.dart';
 import 'package:nova_assistant/widgets/chat_bubble.dart';
 import 'package:nova_assistant/widgets/voice_input.dart';
 import 'package:nova_assistant/screens/settings_screen.dart';
+import 'package:nova_assistant/screens/model_selector_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AssistantScreen extends StatefulWidget {
@@ -422,6 +423,30 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
   }
 
+  Future<void> _showModelSelectorSheet(BuildContext context) async {
+    final isAutoMode = ModelOrchestrator.instance.preferredModelType == null;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => ModelSelectorSheet(
+        currentSelection: ModelOrchestrator.instance.preferredModelType,
+        isAutoMode: isAutoMode,
+        onModelSelected: (model) {
+          ModelOrchestrator.instance.preferredModelType = model;
+          setState(() {});
+        },
+        onAutoModeChanged: (auto) {
+          if (auto) {
+            ModelOrchestrator.instance.clearModelOverride();
+          }
+          setState(() {});
+        },
+      ),
+    );
+  }
+
   Future<void> _pickImageFromGallery() async {
     final status = await Permission.photos.request();
     if (status.isDenied || status.isPermanentlyDenied) {
@@ -797,129 +822,11 @@ class _AssistantScreenState extends State<AssistantScreen>
             ),
           ),
 
-          // Model picker
+          // Model picker - opens bottom sheet
           Tooltip(
             message: 'Select model',
-            child: PopupMenuButton<String>(
-              initialValue:
-                  ModelOrchestrator.instance.preferredModelType == null
-                      ? 'auto'
-                      : ModelOrchestrator.instance.preferredModelType!.name,
-              onSelected: (value) {
-                if (value == 'auto') {
-                  ModelOrchestrator.instance.clearModelOverride();
-                } else {
-                  final model = NovaModel.values.firstWhere(
-                    (m) => m.name == value,
-                    orElse: () => NovaModel.gemma4E2b,
-                  );
-                  ModelOrchestrator.instance.preferredModelType = model;
-                }
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem<String>(
-                  value: 'auto',
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.auto_awesome,
-                        size: 18,
-                        color: ModelOrchestrator.instance.preferredModelType ==
-                                null
-                            ? const Color(0xFF6C63FF)
-                            : Colors.grey,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Auto',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: ModelOrchestrator
-                                            .instance.preferredModelType ==
-                                        null
-                                    ? FontWeight.bold
-                                    : FontWeight.w500,
-                                color: ModelOrchestrator
-                                            .instance.preferredModelType ==
-                                        null
-                                    ? const Color(0xFF6C63FF)
-                                    : null,
-                              ),
-                            ),
-                            Text(
-                              'Smart selection',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (ModelOrchestrator.instance.preferredModelType == null)
-                        const Icon(Icons.check,
-                            size: 16, color: Color(0xFF6C63FF)),
-                    ],
-                  ),
-                ),
-                const PopupMenuDivider(),
-                ...NovaModel.values.map((model) {
-                  final isSelected =
-                      ModelOrchestrator.instance.preferredModelType == model;
-                  return PopupMenuItem<String>(
-                    value: model.name,
-                    child: Row(
-                      children: [
-                        Icon(
-                          model.hasThinking
-                              ? Icons.psychology
-                              : (model.hasVision
-                                  ? Icons.image
-                                  : Icons.chat_bubble_outline),
-                          size: 18,
-                          color: isSelected
-                              ? const Color(0xFF6C63FF)
-                              : Colors.grey,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                model.displayName,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.w500,
-                                  color: isSelected
-                                      ? const Color(0xFF6C63FF)
-                                      : null,
-                                ),
-                              ),
-                              Text(
-                                '${model.sizeMB}MB',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (isSelected)
-                          const Icon(Icons.check,
-                              size: 16, color: Color(0xFF6C63FF)),
-                      ],
-                    ),
-                  );
-                }),
-              ],
+            child: GestureDetector(
+              onTap: () => _showModelSelectorSheet(context),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(

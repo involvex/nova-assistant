@@ -610,13 +610,17 @@ class ModelOrchestrator {
   NovaModel _selectModel({
     required String query,
     Uint8List? screenshot,
+    bool hasImageAttachments = false,
     bool thinkingMode = false,
   }) {
+    final hasVisionContext = screenshot != null || hasImageAttachments;
+
     if (_debugMode) {
       debugPrint(
         '[DEBUG] _selectModel called: '
         'query="${query.length > 50 ? "${query.substring(0, 50)}..." : query}", '
         'hasScreenshot=${screenshot != null}, '
+        'hasImageAttachments=$hasImageAttachments, '
         'thinkingMode=$thinkingMode, '
         'primaryHeavy=${selector.primaryHeavy.displayName}, '
         'fastModel=${selector.fastModel.displayName}',
@@ -625,7 +629,7 @@ class ModelOrchestrator {
 
     final selected = selector.selectForQuery(
       query: query,
-      hasVisionContext: screenshot != null,
+      hasVisionContext: hasVisionContext,
       requestedThinking: thinkingMode,
     );
 
@@ -636,7 +640,7 @@ class ModelOrchestrator {
       );
     }
 
-    if (screenshot != null && !selected.hasVision) {
+    if (hasVisionContext && !selected.hasVision) {
       if (selector.primaryHeavy.hasVision) return selector.primaryHeavy;
       if (selector.fastModel.hasVision) return selector.fastModel;
     }
@@ -653,6 +657,17 @@ class ModelOrchestrator {
     List<Tool> tools = const [],
     List<AttachedData> attachments = const [],
   }) async* {
+    // Check if there are image attachments that need vision processing
+    final hasImageAttachments = attachments.any((att) {
+      if (att.type != AttachedDataType.file) return false;
+      final name = att.name.toLowerCase();
+      return name.endsWith('.jpg') ||
+          name.endsWith('.jpeg') ||
+          name.endsWith('.png') ||
+          name.endsWith('.gif') ||
+          name.endsWith('.webp');
+    });
+
     // Build attachment context if any
     String attachmentContext = '';
     if (attachments.isNotEmpty) {
@@ -670,12 +685,13 @@ class ModelOrchestrator {
       _statusController.add(
         '[DEBUG] Model selection: overrideDirty=$_modelOverrideDirty, '
         'preferred=${_preferredModelOverride?.displayName ?? "null"}, '
-        'screenshot=${screenshot != null}, thinking=$thinkingMode',
+        'screenshot=${screenshot != null}, '
+        'hasImageAttachments=$hasImageAttachments, thinking=$thinkingMode',
       );
     }
     if (_modelOverrideDirty && _preferredModelOverride != null) {
       model = _preferredModelOverride!;
-      if (screenshot != null && !model.hasVision) {
+      if ((screenshot != null || hasImageAttachments) && !model.hasVision) {
         model = selector.primaryHeavy.hasVision
             ? selector.primaryHeavy
             : selector.fastModel;
@@ -687,6 +703,7 @@ class ModelOrchestrator {
       model = _selectModel(
         query: query,
         screenshot: screenshot,
+        hasImageAttachments: hasImageAttachments,
         thinkingMode: thinkingMode,
       );
     }

@@ -1,12 +1,28 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
-import 'dart:io';
 import 'package:nova_assistant/models/model_info.dart';
+
+class _ModelLoadException implements Exception {
+  final String message;
+  final String? suggestion;
+  final Object? underlyingError;
+
+  const _ModelLoadException(
+    this.message, {
+    this.suggestion,
+    this.underlyingError,
+  });
+
+  @override
+  String toString() => message;
+}
 
 class InstalledModel {
   final String id;
@@ -173,6 +189,30 @@ class ModelManager {
           } catch (_) {}
           return null;
         }
+
+        // Verify SHA-256 hash before installing
+        final downloadModel = ModelHuggingFaceURLs.modelFromUrl(url);
+        if (downloadModel != null) {
+          final expectedHash = ModelHashes.hashFor(downloadModel);
+          if (expectedHash != null) {
+            _statusController.add('Verifying ${downloadModel.displayName}...');
+            final isValid = await _verifySha256(
+              tempFile,
+              expectedHash,
+              onProgress:
+                  onProgress != null ? (p) => onProgress(50 + (p ~/ 2)) : null,
+            );
+            if (!isValid) {
+              _statusController.add(
+                'File corrupted. Try downloading again or pick a file.',
+              );
+              try {
+                await tempFile.delete();
+              } catch (_) {}
+              return null;
+            }
+          }
+        }
       } finally {
         client.close();
       }
@@ -202,23 +242,72 @@ class ModelManager {
     }
   }
 
+  Future<bool> _verifySha256(
+    File file,
+    String expectedHash, {
+    void Function(int progress)? onProgress,
+  }) async {
+    try {
+      _statusController.add('Verifying file integrity...');
+      if (onProgress != null) onProgress(10);
+      final bytes = await file.readAsBytes();
+      if (onProgress != null) onProgress(50);
+      final digest = sha256.convert(bytes);
+      if (onProgress != null) onProgress(90);
+      final computedHash = digest.toString();
+      if (onProgress != null) onProgress(100);
+
+      if (computedHash != expectedHash) {
+        _statusController.add(
+          'File integrity check failed: hash mismatch',
+        );
+        return false;
+      }
+      return true;
+    } catch (e) {
+      debugPrint('SHA-256 verification failed: $e');
+      _statusController.add('File integrity check failed: $e');
+      return false;
+    }
+  }
+
   Future<Map<String, dynamic>?> _findInstalledSpec(String fileName) async {
+    final path = await _findModelFile(fileName);
+    if (path != null) {
+      return {'name': p.basename(path)};
+    }
+    return null;
+  }
+
+  /// Find a model file on disk using consistent basename matching.
+  /// Returns the full path if found, null otherwise.
+  Future<String?> _findModelFile(String fileName) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
+
       // Check direct path
-      final file = File('${dir.path}/$fileName');
-      if (await file.exists()) {
-        return {'name': fileName};
+      final directFile = File('${dir.path}/$fileName');
+      if (await directFile.exists()) {
+        return directFile.path;
       }
-      // Check models subdirectory
+
+      // Check models subdirectory with basename matching
       final modelsDir = Directory('${dir.path}/models');
       if (await modelsDir.exists()) {
+        final baseName = fileName
+            .replaceAll('.litertlm', '')
+            .replaceAll('.task', '')
+            .replaceAll('.gguf', '');
         await for (final entity in modelsDir.list()) {
-          if (entity is File &&
-              entity.path.contains(
-                fileName.replaceAll('.litertlm', '').replaceAll('.task', ''),
-              )) {
-            return {'name': p.basename(entity.path)};
+          if (entity is File) {
+            final entityName = p.basename(entity.path);
+            if (entityName
+                .replaceAll('.litertlm', '')
+                .replaceAll('.task', '')
+                .replaceAll('.gguf', '')
+                .contains(baseName)) {
+              return entity.path;
+            }
           }
         }
       }
@@ -226,19 +315,27 @@ class ModelManager {
     return null;
   }
 
-  Future<int> _getFileSize(String dirPath, String fileName) async {
+  /// Delete a model file from disk given its filename.
+  /// Returns true if deleted, false otherwise.
+  Future<bool> _deleteModelFile(String fileName) async {
     try {
-      final file = File('$dirPath/$fileName');
-      if (await file.exists()) return await file.length();
-      final modelsDir = Directory('$dirPath/models');
-      if (await modelsDir.exists()) {
-        await for (final entity in modelsDir.list()) {
-          if (entity is File && entity.path.contains(fileName)) {
-            return await entity.length();
-          }
+      final path = await _findModelFile(fileName);
+      if (path != null) {
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+          return true;
         }
       }
     } catch (_) {}
+    return false;
+  }
+
+  Future<int> _getFileSize(String dirPath, String fileName) async {
+    final path = await _findModelFile(fileName);
+    if (path != null) {
+      return await File(path).length();
+    }
     return 0;
   }
 
@@ -382,23 +479,8 @@ class ModelManager {
   }
 
   Future<bool> isInstalledOnDisk(String fileName) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/$fileName');
-      if (await file.exists()) return true;
-      final modelsDir = Directory('${dir.path}/models');
-      if (await modelsDir.exists()) {
-        await for (final entity in modelsDir.list()) {
-          if (entity is File &&
-              entity.path.contains(
-                fileName.replaceAll('.litertlm', '').replaceAll('.task', ''),
-              )) {
-            return true;
-          }
-        }
-      }
-    } catch (_) {}
-    return false;
+    final path = await _findModelFile(fileName);
+    return path != null;
   }
 
   /// Register a model already on disk (no download). Used by prefetch to
@@ -413,66 +495,64 @@ class ModelManager {
     final existing = _installedModels.where((m) => m.fileName == fileName);
     if (existing.isNotEmpty) return;
 
+    bool success = false;
+    int actualSize = fileSizeBytes;
+
+    // Try to register the specified file
     try {
       await FlutterGemma.installModel(
         modelType: modelType,
         fileType: fileType,
       ).fromFile(filePath).install();
+      success = true;
+    } catch (e) {
+      debugPrint('registerDiskModel: primary path failed: $e');
+      // Try finding alternative in models/ directory
+      final altPath = await _findModelFile(fileName);
+      if (altPath != null && altPath != filePath) {
+        try {
+          actualSize = await File(altPath).length();
+          await FlutterGemma.installModel(
+            modelType: modelType,
+            fileType: fileType,
+          ).fromFile(altPath).install();
+          success = true;
+        } catch (e2) {
+          debugPrint('registerDiskModel: fallback path also failed: $e2');
+          // Both failed — delete files as they are likely corrupted
+          await _deleteModelFile(fileName);
+          throw _ModelLoadException(
+            'Model file is corrupted and has been removed.',
+            suggestion: 'Please download the model again or pick a valid file.',
+            underlyingError: e2,
+          );
+        }
+      } else {
+        // Either no alt found or same as primary — file is corrupt
+        debugPrint(
+            'registerDiskModel: no valid fallback found, file may be corrupt');
+        await _deleteModelFile(fileName);
+        throw _ModelLoadException(
+          'Model file is corrupted and has been removed.',
+          suggestion: 'Please download the model again or pick a valid file.',
+          underlyingError: e,
+        );
+      }
+    }
 
+    // success is only true here if we didn't rethrow above
+    if (success) {
       final model = InstalledModel(
         id: fileName,
         fileName: fileName,
         modelType: modelType,
         installedAt: DateTime.now(),
-        fileSizeBytes: fileSizeBytes,
+        fileSizeBytes: actualSize,
       );
       _installedModels.removeWhere((m) => m.id == fileName);
       _installedModels.add(model);
       await _saveToPrefs();
       _statusController.add('Registered: $fileName');
-    } catch (e) {
-      debugPrint('registerDiskModel failed: $e — trying fuzzy match');
-      try {
-        final fileToDelete = File(filePath);
-        if (await fileToDelete.exists()) {
-          await fileToDelete.delete();
-        }
-      } catch (_) {}
-      // Fallback: try to find the file in models subdirectory with fuzzy match
-      try {
-        final dir = await getApplicationDocumentsDirectory();
-        final modelsDir = Directory('${dir.path}/models');
-        if (await modelsDir.exists()) {
-          await for (final entity in modelsDir.list()) {
-            if (entity is File &&
-                p.basename(entity.path).contains(
-                      fileName
-                          .replaceAll('.litertlm', '')
-                          .replaceAll('.task', ''),
-                    )) {
-              try {
-                await FlutterGemma.installModel(
-                  modelType: modelType,
-                  fileType: fileType,
-                ).fromFile(entity.path).install();
-                final actualName = p.basename(entity.path);
-                final m = InstalledModel(
-                  id: actualName,
-                  fileName: actualName,
-                  modelType: modelType,
-                  installedAt: DateTime.now(),
-                  fileSizeBytes: await entity.length(),
-                );
-                _installedModels.removeWhere((x) => x.id == actualName);
-                _installedModels.add(m);
-                await _saveToPrefs();
-                _statusController.add('Registered (fuzzy): $actualName');
-              } catch (_) {}
-              break;
-            }
-          }
-        }
-      } catch (_) {}
     }
   }
 

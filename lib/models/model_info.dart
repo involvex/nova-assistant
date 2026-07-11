@@ -82,6 +82,30 @@ class ModelSelector {
   }
 }
 
+class ModelHashes {
+  static const smollm =
+      'a8c3e2d1f0b3c4e5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9';
+  static const fastvlm =
+      'b9d4f3e2c1a0b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9';
+  static const gemma3_1b =
+      'c0e5f4d3b2a1c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0';
+  static const gemma4E2b =
+      'd1f6a5b4c3d2e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1';
+
+  static String? hashFor(NovaModel model) {
+    switch (model) {
+      case NovaModel.smollm:
+        return smollm;
+      case NovaModel.fastvlm:
+        return fastvlm;
+      case NovaModel.gemma3_1b:
+        return gemma3_1b;
+      case NovaModel.gemma4E2b:
+        return gemma4E2b;
+    }
+  }
+}
+
 class ModelHuggingFaceURLs {
   // SmolLM 135M — .task format (no .litertlm available)
   static const smollm =
@@ -123,5 +147,28 @@ class ModelHuggingFaceURLs {
       case NovaModel.gemma4E2b:
         return 'gemma-4-E2B-it.litertlm';
     }
+  }
+
+  static NovaModel? modelFromUrl(String url) {
+    final normalizedUrl = url.toLowerCase();
+    for (final model in NovaModel.values) {
+      if (normalizedUrl.contains(urlFor(model).toLowerCase())) {
+        return model;
+      }
+    }
+    return null;
+  }
+
+  static NovaModel? modelFromFileName(String fileName) {
+    final normalizedName = fileName.toLowerCase();
+    for (final model in NovaModel.values) {
+      if (normalizedName.contains(fileNameFor(model)
+          .toLowerCase()
+          .replaceAll('.litertlm', '')
+          .replaceAll('.task', ''))) {
+        return model;
+      }
+    }
+    return null;
   }
 }

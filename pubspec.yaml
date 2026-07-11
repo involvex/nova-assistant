@@ -37,6 +37,7 @@ dependencies:
 
   # Path utilities
   path: ^1.9.0
+  crypto: ^3.0.6
 
   # UI
   flutter_markdown: ^0.7.6

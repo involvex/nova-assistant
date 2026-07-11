@@ -776,24 +776,34 @@ class _AssistantScreenState extends State<AssistantScreen>
           // Model picker
           Tooltip(
             message: 'Select model',
-            child: PopupMenuButton<NovaModel>(
-              initialValue: ModelOrchestrator.instance.preferredModelType,
-              onSelected: (model) {
-                ModelOrchestrator.instance.preferredModelType = model;
+            child: PopupMenuButton<String>(
+              initialValue:
+                  ModelOrchestrator.instance.preferredModelType == null
+                      ? 'auto'
+                      : ModelOrchestrator.instance.preferredModelType!.name,
+              onSelected: (value) {
+                if (value == 'auto') {
+                  ModelOrchestrator.instance.clearModelOverride();
+                } else {
+                  final model = NovaModel.values.firstWhere(
+                    (m) => m.name == value,
+                    orElse: () => NovaModel.gemma4E2b,
+                  );
+                  ModelOrchestrator.instance.preferredModelType = model;
+                }
               },
-              itemBuilder: (context) => NovaModel.values.map((model) {
-                return PopupMenuItem<NovaModel>(
-                  value: model,
+              itemBuilder: (context) => [
+                PopupMenuItem<String>(
+                  value: 'auto',
                   child: Row(
                     children: [
                       Icon(
-                        model.hasThinking
-                            ? Icons.psychology
-                            : (model.hasVision
-                                ? Icons.image
-                                : Icons.chat_bubble_outline),
+                        Icons.auto_awesome,
                         size: 18,
-                        color: const Color(0xFF6C63FF),
+                        color: ModelOrchestrator.instance.preferredModelType ==
+                                null
+                            ? const Color(0xFF6C63FF)
+                            : Colors.grey,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -801,14 +811,23 @@ class _AssistantScreenState extends State<AssistantScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              model.displayName,
-                              style: const TextStyle(
+                              'Auto',
+                              style: TextStyle(
                                 fontSize: 13,
-                                fontWeight: FontWeight.w500,
+                                fontWeight: ModelOrchestrator
+                                            .instance.preferredModelType ==
+                                        null
+                                    ? FontWeight.bold
+                                    : FontWeight.w500,
+                                color: ModelOrchestrator
+                                            .instance.preferredModelType ==
+                                        null
+                                    ? const Color(0xFF6C63FF)
+                                    : null,
                               ),
                             ),
                             Text(
-                              '${model.sizeMB}MB',
+                              'Smart selection',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: Colors.grey[600],
@@ -817,10 +836,66 @@ class _AssistantScreenState extends State<AssistantScreen>
                           ],
                         ),
                       ),
+                      if (ModelOrchestrator.instance.preferredModelType == null)
+                        const Icon(Icons.check,
+                            size: 16, color: Color(0xFF6C63FF)),
                     ],
                   ),
-                );
-              }).toList(),
+                ),
+                const PopupMenuDivider(),
+                ...NovaModel.values.map((model) {
+                  final isSelected =
+                      ModelOrchestrator.instance.preferredModelType == model;
+                  return PopupMenuItem<String>(
+                    value: model.name,
+                    child: Row(
+                      children: [
+                        Icon(
+                          model.hasThinking
+                              ? Icons.psychology
+                              : (model.hasVision
+                                  ? Icons.image
+                                  : Icons.chat_bubble_outline),
+                          size: 18,
+                          color: isSelected
+                              ? const Color(0xFF6C63FF)
+                              : Colors.grey,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                model.displayName,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.w500,
+                                  color: isSelected
+                                      ? const Color(0xFF6C63FF)
+                                      : null,
+                                ),
+                              ),
+                              Text(
+                                '${model.sizeMB}MB',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isSelected)
+                          const Icon(Icons.check,
+                              size: 16, color: Color(0xFF6C63FF)),
+                      ],
+                    ),
+                  );
+                }),
+              ],
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -830,10 +905,12 @@ class _AssistantScreenState extends State<AssistantScreen>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
-                      Icons.account_tree,
+                    Icon(
+                      ModelOrchestrator.instance.preferredModelType == null
+                          ? Icons.auto_awesome
+                          : Icons.account_tree,
                       size: 16,
-                      color: Color(0xFF6C63FF),
+                      color: const Color(0xFF6C63FF),
                     ),
                     const SizedBox(width: 4),
                     Text(

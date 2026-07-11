@@ -113,6 +113,8 @@ class ModelOrchestrator {
   static final ModelOrchestrator instance = ModelOrchestrator._();
   ModelOrchestrator._();
 
+  static const _prefsKey = 'preferred_model_override';
+
   final ModelSelector selector = ModelSelector(
     primaryHeavy: NovaModel.gemma4E2b,
     fastModel: NovaModel.smollm,
@@ -160,6 +162,30 @@ class ModelOrchestrator {
             model != _activeModelType)) {
       _activeModel!.close().catchError((_) {});
       _activeModel = null;
+    }
+    _persistPreferredModel(model);
+  }
+
+  Future<void> _persistPreferredModel(NovaModel? model) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (model == null) {
+      await prefs.remove(_prefsKey);
+    } else {
+      await prefs.setString(_prefsKey, model.name);
+    }
+  }
+
+  Future<void> _loadPreferredModel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString(_prefsKey);
+    if (name != null) {
+      try {
+        _preferredModelOverride = NovaModel.values.firstWhere(
+          (m) => m.name == name,
+        );
+      } catch (_) {
+        _preferredModelOverride = null;
+      }
     }
   }
 
@@ -212,23 +238,23 @@ class ModelOrchestrator {
     for (final model in NovaModel.values) {
       final fileName = ModelHuggingFaceURLs.fileNameFor(model);
 
-      // Already tracked?
-      if (ModelManager.instance.isModelInstalled(fileName)) continue;
-
-      // Check disk directly
+      // Find the file on disk using the unified search
       File? foundFile;
-      final file = File('${dir.path}/$fileName');
-      if (await file.exists()) {
-        foundFile = file;
+      final directFile = File('${dir.path}/$fileName');
+      if (await directFile.exists()) {
+        foundFile = directFile;
       } else {
         final modelsDir = Directory('${dir.path}/models');
         if (await modelsDir.exists()) {
+          final baseName =
+              fileName.replaceAll('.litertlm', '').replaceAll('.task', '');
           await for (final entity in modelsDir.list()) {
             if (entity is File) {
-              final baseName = p.basename(entity.path);
-              if (baseName.contains(
-                fileName.replaceAll('.litertlm', '').replaceAll('.task', ''),
-              )) {
+              final entityName = p.basename(entity.path);
+              if (entityName
+                  .replaceAll('.litertlm', '')
+                  .replaceAll('.task', '')
+                  .contains(baseName)) {
                 foundFile = entity;
                 break;
               }
@@ -238,13 +264,37 @@ class ModelOrchestrator {
       }
 
       if (foundFile != null) {
-        await ModelManager.instance.registerDiskModel(
-          filePath: foundFile.path,
-          fileName: fileName,
-          modelType: model.modelType,
-          fileType: model.fileType,
-          fileSizeBytes: await foundFile.length(),
-        );
+        // Already tracked but file exists - verify it's not corrupted
+        if (ModelManager.instance.isModelInstalled(fileName)) {
+          try {
+            // Try to verify by calling flutter_gemma - this will throw if corrupt
+            await FlutterGemma.installModel(
+              modelType: model.modelType,
+              fileType: model.fileType,
+            ).fromFile(foundFile.path).install();
+          } catch (e) {
+            // Model is corrupt - remove from installed and delete file
+            debugPrint('Model health check failed for $fileName: $e');
+            await ModelManager.instance.uninstallModel(fileName);
+            try {
+              await foundFile.delete();
+              _statusController.add('Removed corrupt model: $fileName');
+            } catch (_) {}
+          }
+        } else {
+          // Not tracked yet - register it
+          await ModelManager.instance.registerDiskModel(
+            filePath: foundFile.path,
+            fileName: fileName,
+            modelType: model.modelType,
+            fileType: model.fileType,
+            fileSizeBytes: await foundFile.length(),
+          );
+        }
+      } else if (ModelManager.instance.isModelInstalled(fileName)) {
+        // Model is tracked but file doesn't exist - remove from tracking
+        debugPrint('Model file missing for $fileName, removing from installed');
+        await ModelManager.instance.uninstallModel(fileName);
       }
     }
   }
@@ -262,12 +312,15 @@ class ModelOrchestrator {
       return _activeModel!;
     }
 
-    // --- Switching models ---
-    // Close previous model AND clear flutter_gemma's active identity so
-    // getActiveModel() won't return the stale model from a prior session.
-    final switchingModel =
-        _activeModelType != null && _activeModelType != model;
-    if (switchingModel || (_activeModel != null && _activeModelType != model)) {
+    // --- Switching / Loading new model ---
+    // Close any previous model and clear flutter_gemma's active identity.
+    // We must ALWAYS do this when loading a new model because:
+    // 1. On restart, _activeModelType is null but flutter_gemma may have a
+    //    cached model from a prior session (wrong type for what we need)
+    // 2. flutter_gemma.getActiveModel() returns whatever is cached internally
+    //    — if it's a different model type, we get wrong behavior
+    // Clearing ensures getActiveModel() loads the correct model fresh.
+    if (_activeModel != null) {
       try {
         await _activeModel!.close();
       } catch (e) {
@@ -275,7 +328,14 @@ class ModelOrchestrator {
       }
       _activeModel = null;
       _activeChat = null;
-      // Reset flutter_gemma's active model so it doesn't return the old one
+    }
+
+    // Also clear flutter_gemma's internal cache so getActiveModel() loads
+    // the model we specify rather than returning a stale cached one.
+    final needsModelSwitch = _activeModelType == null ||
+        _activeModelType != model ||
+        !FlutterGemma.hasActiveModel();
+    if (needsModelSwitch) {
       try {
         await FlutterGemma.clearActiveInferenceIdentity();
       } catch (e) {
@@ -285,9 +345,8 @@ class ModelOrchestrator {
 
     final bool supportImage = needsImageSupport;
 
-    // If flutter_gemma has an active model (e.g., same model type restored on
-    // startup), try to use it directly.
-    if (FlutterGemma.hasActiveModel() && !switchingModel) {
+    // Try to use flutter_gemma's cached model if available
+    if (FlutterGemma.hasActiveModel()) {
       try {
         _statusController.add('Loading ${model.displayName}...');
         _activeModel = await FlutterGemma.getActiveModel(
@@ -1045,6 +1104,7 @@ class ModelOrchestrator {
 
   Future<void> initializeDefaultModel() async {
     await _loadAssistantRole();
+    await _loadPreferredModel();
     await _loadIdentity();
     try {
       await _getOrCreateModel(selector.fastModel);

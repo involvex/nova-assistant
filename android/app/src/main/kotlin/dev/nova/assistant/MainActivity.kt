@@ -107,20 +107,34 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val screenshotPath = intent.getStringExtra(AssistantActivity.EXTRA_SCREENSHOT_PATH)
-        val screenText = intent.getStringExtra(AssistantActivity.EXTRA_SCREEN_TEXT)
-        val timestamp = intent.getLongExtra(AssistantActivity.EXTRA_TIMESTAMP, 0L)
+        try {
+            val screenshotPath = intent.getStringExtra(AssistantActivity.EXTRA_SCREENSHOT_PATH)
+            val screenText = intent.getStringExtra(AssistantActivity.EXTRA_SCREEN_TEXT)
+            val timestamp = intent.getLongExtra(AssistantActivity.EXTRA_TIMESTAMP, 0L)
 
-        if (screenshotPath != null) {
-            val file = File(screenshotPath)
-            if (file.exists()) {
-                val bytes = file.readBytes()
-                AssistantActivity.latestScreenshot = bytes
-                AssistantActivity.latestScreenText = screenText
-                AssistantActivity.latestTimestamp = timestamp
-                Log.d("NovaMain", "Screenshot from assistant: ${bytes.size} bytes")
-                file.delete()
+            Log.d("NovaMain", "onCreate: screenshotPath=$screenshotPath, screenText=$screenText, timestamp=$timestamp")
+
+            if (screenshotPath != null) {
+                val file = File(screenshotPath)
+                if (file.exists()) {
+                    try {
+                        val bytes = file.readBytes()
+                        AssistantActivity.latestScreenshot = bytes
+                        AssistantActivity.latestScreenText = screenText
+                        AssistantActivity.latestTimestamp = timestamp
+                        Log.d("NovaMain", "Screenshot loaded from file: ${bytes.size} bytes")
+                        file.delete()
+                    } catch (e: Exception) {
+                        Log.e("NovaMain", "Failed to read screenshot file: ${e.message}")
+                    }
+                } else {
+                    Log.w("NovaMain", "Screenshot file does not exist: $screenshotPath")
+                }
+            } else {
+                Log.d("NovaMain", "No screenshot path in intent")
             }
+        } catch (e: Exception) {
+            Log.e("NovaMain", "Error in onCreate: ${e.message}")
         }
     }
 

@@ -41,6 +41,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       true; // Track if initial screenshot is loading
   String _status = 'Ready';
   bool _shouldPreserveScreenshot = false;
+  NovaModel? _selectedModel; // Track selected model for UI
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
   StreamSubscription<void>? _historyClearedSub;
 
@@ -48,6 +49,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _selectedModel = ModelOrchestrator.instance.preferredModelType;
     _loadThinkingMode();
     _loadInitialScreenshot();
     _loadHistory();
@@ -424,21 +426,23 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _showModelSelectorSheet(BuildContext context) async {
-    final isAutoMode = ModelOrchestrator.instance.preferredModelType == null;
+    final isAutoMode = _selectedModel == null;
 
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) => ModelSelectorSheet(
-        currentSelection: ModelOrchestrator.instance.preferredModelType,
+        currentSelection: _selectedModel,
         isAutoMode: isAutoMode,
         onModelSelected: (model) {
+          _selectedModel = model;
           ModelOrchestrator.instance.preferredModelType = model;
           setState(() {});
         },
         onAutoModeChanged: (auto) {
           if (auto) {
+            _selectedModel = null;
             ModelOrchestrator.instance.clearModelOverride();
           }
           setState(() {});
@@ -837,7 +841,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      ModelOrchestrator.instance.preferredModelType == null
+                      _selectedModel == null
                           ? Icons.auto_awesome
                           : Icons.account_tree,
                       size: 16,
@@ -845,9 +849,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      ModelOrchestrator
-                              .instance.preferredModelType?.displayName ??
-                          'Auto',
+                      _selectedModel?.displayName ?? 'Auto',
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 12,

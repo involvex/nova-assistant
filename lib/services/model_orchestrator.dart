@@ -125,6 +125,7 @@ class ModelOrchestrator {
   NovaModel? _activeModelType;
   bool _activeModelSupportsImage = false;
   NovaModel? _preferredModelOverride;
+  CustomModel? _preferredCustomModelOverride;
   bool _modelOverrideDirty = false;
   bool _isInitialized = false;
   bool _batteryOptimizationEnabled = true;
@@ -163,6 +164,7 @@ class ModelOrchestrator {
   set preferredModelType(NovaModel? model) {
     if (_preferredModelOverride == model) return;
     _preferredModelOverride = model;
+    _preferredCustomModelOverride = null;
     _modelOverrideDirty = true;
     _activeChat = null;
     if (_activeModel != null &&
@@ -173,6 +175,20 @@ class ModelOrchestrator {
       _activeModel = null;
     }
     _persistPreferredModel(model);
+  }
+
+  CustomModel? get preferredCustomModel => _preferredCustomModelOverride;
+
+  set preferredCustomModel(CustomModel? model) {
+    if (_preferredCustomModelOverride?.id == model?.id) return;
+    _preferredCustomModelOverride = model;
+    _preferredModelOverride = null;
+    _modelOverrideDirty = true;
+    _activeChat = null;
+    if (_activeModel != null) {
+      _activeModel!.close().catchError((_) {});
+      _activeModel = null;
+    }
   }
 
   Future<void> _persistPreferredModel(NovaModel? model) async {
@@ -200,6 +216,7 @@ class ModelOrchestrator {
 
   void clearModelOverride() {
     _preferredModelOverride = null;
+    _preferredCustomModelOverride = null;
     _modelOverrideDirty = false;
   }
 

@@ -17,6 +17,7 @@ import 'package:nova_assistant/widgets/chat_bubble.dart';
 import 'package:nova_assistant/widgets/voice_input.dart';
 import 'package:nova_assistant/screens/settings_screen.dart';
 import 'package:nova_assistant/screens/model_selector_sheet.dart';
+import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AssistantScreen extends StatefulWidget {
@@ -42,6 +43,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   String _status = 'Ready';
   bool _shouldPreserveScreenshot = false;
   NovaModel? _selectedModel; // Track selected model for UI
+  CustomModel? _selectedCustomModel; // Track selected custom model for UI
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
   StreamSubscription<void>? _historyClearedSub;
 
@@ -426,7 +428,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _showModelSelectorSheet(BuildContext context) async {
-    final isAutoMode = _selectedModel == null;
+    final isAutoMode = _selectedModel == null && _selectedCustomModel == null;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -434,18 +436,52 @@ class _AssistantScreenState extends State<AssistantScreen>
       isScrollControlled: true,
       builder: (context) => ModelSelectorSheet(
         currentSelection: _selectedModel,
+        currentCustomModel: _selectedCustomModel,
         isAutoMode: isAutoMode,
         onModelSelected: (model) {
           _selectedModel = model;
-          ModelOrchestrator.instance.preferredModelType = model;
+          _selectedCustomModel = null;
+          if (model != null) {
+            ModelOrchestrator.instance.preferredModelType = model;
+            ModelOrchestrator.instance.preferredCustomModel = null;
+          }
+          setState(() {});
+        },
+        onCustomModelSelected: (model) {
+          _selectedCustomModel = model;
+          _selectedModel = null;
+          if (model != null) {
+            ModelOrchestrator.instance.preferredCustomModel = model;
+            ModelOrchestrator.instance.preferredModelType = null;
+          }
           setState(() {});
         },
         onAutoModeChanged: (auto) {
           if (auto) {
             _selectedModel = null;
+            _selectedCustomModel = null;
             ModelOrchestrator.instance.clearModelOverride();
           }
           setState(() {});
+        },
+        onImportModel: () {
+          Navigator.pop(context);
+          _showCustomModelImportSheet();
+        },
+      ),
+    );
+  }
+
+  Future<void> _showCustomModelImportSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => CustomModelImportSheet(
+        onInstalled: (model) {
+          setState(() {
+            _selectedCustomModel = model;
+          });
         },
       ),
     );

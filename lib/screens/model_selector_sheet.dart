@@ -1,20 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/widgets/custom_model_card.dart';
 import 'package:nova_assistant/widgets/model_card.dart';
 
 class ModelSelectorSheet extends StatefulWidget {
   final NovaModel? currentSelection;
+  final CustomModel? currentCustomModel;
   final bool isAutoMode;
   final void Function(NovaModel?) onModelSelected;
+  final void Function(CustomModel?) onCustomModelSelected;
   final void Function(bool) onAutoModeChanged;
+  final VoidCallback? onImportModel;
 
   const ModelSelectorSheet({
     super.key,
     required this.currentSelection,
+    this.currentCustomModel,
     required this.isAutoMode,
     required this.onModelSelected,
+    required this.onCustomModelSelected,
     required this.onAutoModeChanged,
+    this.onImportModel,
   });
 
   @override
@@ -24,14 +31,18 @@ class ModelSelectorSheet extends StatefulWidget {
 class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
   late bool _isAutoMode;
   NovaModel? _selectedModel;
+  CustomModel? _selectedCustomModel;
   final Set<NovaModel> _installedModels = {};
+  List<CustomModel> _customModels = [];
 
   @override
   void initState() {
     super.initState();
     _isAutoMode = widget.isAutoMode;
     _selectedModel = widget.currentSelection;
+    _selectedCustomModel = widget.currentCustomModel;
     _loadInstalledModels();
+    _loadCustomModels();
   }
 
   Future<void> _loadInstalledModels() async {
@@ -48,12 +59,62 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
     }
   }
 
+  Future<void> _loadCustomModels() async {
+    if (mounted) {
+      setState(() {
+        _customModels = List.from(ModelManager.instance.customModels);
+      });
+    }
+  }
+
+  Future<void> _deleteCustomModel(CustomModel model) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove Custom Model?'),
+        content: Text(
+          'This will remove "${model.displayName}" from your device. '
+          'The model file will be deleted.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await ModelManager.instance.removeCustomModel(model.id);
+      if (mounted) {
+        setState(() {
+          _customModels.removeWhere((m) => m.id == model.id);
+          if (_selectedCustomModel?.id == model.id) {
+            _selectedCustomModel = null;
+            widget.onCustomModelSelected(null);
+          }
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
     return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E1E2E) : Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -66,7 +127,7 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
           const Divider(height: 1),
           _buildAutoToggle(theme),
           const SizedBox(height: 8),
-          _buildModelList(),
+          Flexible(child: _buildModelList()),
           const SizedBox(height: 16),
         ],
       ),
@@ -97,6 +158,12 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
             ),
           ),
           const Spacer(),
+          if (widget.onImportModel != null)
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: 'Import custom model',
+              onPressed: widget.onImportModel,
+            ),
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: () => Navigator.pop(context),
@@ -193,35 +260,138 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
   }
 
   Widget _buildModelList() {
-    return Flexible(
-      child: ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: [
-          if (_isAutoMode) _buildAutoExplanation(),
-          ...NovaModel.values.map((model) {
-            final isInstalled = _installedModels.contains(model);
-            final isSelected = _selectedModel == model;
+    return ListView(
+      shrinkWrap: true,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      children: [
+        if (_isAutoMode) _buildAutoExplanation(),
+
+        // Built-in models
+        ...NovaModel.values.map((model) {
+          final isInstalled = _installedModels.contains(model);
+          final isSelected =
+              _selectedModel == model && _selectedCustomModel == null;
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: ModelCard(
+              model: model,
+              isSelected: isSelected,
+              isInstalled: isInstalled,
+              onTap: () {
+                setState(() {
+                  _selectedModel = model;
+                  _selectedCustomModel = null;
+                  _isAutoMode = false;
+                });
+                widget.onModelSelected(model);
+                widget.onCustomModelSelected(null);
+                widget.onAutoModeChanged(false);
+              },
+            ),
+          );
+        }),
+
+        // Custom models section
+        if (_customModels.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Text(
+                'Custom Models',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade500,
+                ),
+              ),
+              const Spacer(),
+              if (widget.onImportModel != null)
+                TextButton.icon(
+                  onPressed: widget.onImportModel,
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Add'),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ..._customModels.map((model) {
+            final isSelected = _selectedCustomModel?.id == model.id;
 
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: ModelCard(
+              child: CustomModelCard(
                 model: model,
                 isSelected: isSelected,
-                isInstalled: isInstalled,
                 onTap: () {
                   setState(() {
-                    _selectedModel = model;
+                    _selectedModel = null;
+                    _selectedCustomModel = model;
                     _isAutoMode = false;
                   });
-                  widget.onModelSelected(model);
+                  widget.onModelSelected(null);
+                  widget.onCustomModelSelected(model);
                   widget.onAutoModeChanged(false);
                 },
+                onDelete: () => _deleteCustomModel(model),
               ),
             );
           }),
+        ] else if (widget.onImportModel != null) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.purple.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Colors.purple.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.extension, color: Colors.purple.shade300),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'No custom models yet',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        'Import your own .litertlm or .task models',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: widget.onImportModel,
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Import'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.purple,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
-      ),
+      ],
     );
   }
 

@@ -33,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _ragMemory = false;
   bool _batteryOptimization = true;
   bool _isAssistantRoleHeld = false;
+  bool _debugMode = false;
   AssistantRole _assistantRole = AssistantRole.helpful;
   String _installStatus = '';
   String _appVersion = '0.1.0';
@@ -77,6 +78,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _ragMemory = prefs.getBool('settings_rag_memory') ?? false;
         _batteryOptimization =
             prefs.getBool('settings_battery_optimization') ?? true;
+        _debugMode = prefs.getBool('settings_debug_mode') ?? false;
         _assistantRole = AssistantRole.fromString(
           prefs.getString('settings_assistant_role'),
         );
@@ -317,6 +319,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() => _batteryOptimization = v);
               _saveSetting('settings_battery_optimization', v);
               ModelOrchestrator.instance.setBatteryOptimization(v);
+            },
+          ),
+          _toggleTile(
+            icon: Icons.bug_report,
+            title: 'Debug mode',
+            subtitle: 'Enable verbose logging for troubleshooting',
+            value: _debugMode,
+            onChanged: (v) {
+              setState(() => _debugMode = v);
+              _saveSetting('settings_debug_mode', v);
+              ModelOrchestrator.instance.setDebugMode(v);
             },
           ),
           _actionTile(

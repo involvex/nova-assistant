@@ -128,6 +128,7 @@ class ModelOrchestrator {
   bool _modelOverrideDirty = false;
   bool _isInitialized = false;
   bool _batteryOptimizationEnabled = true;
+  bool _debugMode = false;
   Timer? _idleTimer;
   static const _defaultIdleTimeout = Duration(minutes: 5);
 
@@ -148,6 +149,12 @@ class ModelOrchestrator {
       _resetIdleTimer();
     }
   }
+
+  void setDebugMode(bool enabled) {
+    _debugMode = enabled;
+  }
+
+  bool get isDebugMode => _debugMode;
 
   NovaModel? get preferredModelType => _preferredModelOverride;
 
@@ -605,11 +612,29 @@ class ModelOrchestrator {
     Uint8List? screenshot,
     bool thinkingMode = false,
   }) {
+    if (_debugMode) {
+      debugPrint(
+        '[DEBUG] _selectModel called: '
+        'query="${query.length > 50 ? "${query.substring(0, 50)}..." : query}", '
+        'hasScreenshot=${screenshot != null}, '
+        'thinkingMode=$thinkingMode, '
+        'primaryHeavy=${selector.primaryHeavy.displayName}, '
+        'fastModel=${selector.fastModel.displayName}',
+      );
+    }
+
     final selected = selector.selectForQuery(
       query: query,
       hasVisionContext: screenshot != null,
       requestedThinking: thinkingMode,
     );
+
+    if (_debugMode) {
+      debugPrint(
+        '[DEBUG] _selectModel selected: ${selected.displayName} '
+        '(hasVision=${selected.hasVision})',
+      );
+    }
 
     if (screenshot != null && !selected.hasVision) {
       if (selector.primaryHeavy.hasVision) return selector.primaryHeavy;
@@ -641,6 +666,13 @@ class ModelOrchestrator {
     final ragContext = await MemoryService.retrieveContext(query);
 
     NovaModel model;
+    if (_debugMode) {
+      _statusController.add(
+        '[DEBUG] Model selection: overrideDirty=$_modelOverrideDirty, '
+        'preferred=${_preferredModelOverride?.displayName ?? "null"}, '
+        'screenshot=${screenshot != null}, thinking=$thinkingMode',
+      );
+    }
     if (_modelOverrideDirty && _preferredModelOverride != null) {
       model = _preferredModelOverride!;
       if (screenshot != null && !model.hasVision) {
@@ -656,6 +688,13 @@ class ModelOrchestrator {
         query: query,
         screenshot: screenshot,
         thinkingMode: thinkingMode,
+      );
+    }
+
+    if (_debugMode) {
+      _statusController.add(
+        '[DEBUG] Selected model: ${model.displayName} '
+        '(hasVision=${model.hasVision}, hasThinking=${model.hasThinking})',
       );
     }
 
@@ -935,6 +974,13 @@ class ModelOrchestrator {
     String toolName,
     Map<String, dynamic> toolResult,
   ) async {
+    // If _activeChat is null (e.g., due to model switch during tool execution),
+    // skip sending the response - the new model will handle things
+    if (_activeChat == null) {
+      debugPrint('Tool response skipped: _activeChat is null');
+      return;
+    }
+
     if (toolName == 'take_screenshot') {
       final data = toolResult['data'];
       Uint8List? imageBytes;

@@ -7,20 +7,28 @@ import 'package:nova_assistant/models/chat_message.dart';
 class ChatHistoryService {
   static const _key = 'chat_history';
   static SharedPreferences? _prefs;
+  static List<ChatMessage>? _cachedMessages;
+  static bool _cacheDirty = false;
 
   static Future<SharedPreferences> get _p async =>
       _prefs ??= await SharedPreferences.getInstance();
 
   static Future<List<ChatMessage>> load() async {
+    if (_cachedMessages != null) return List.unmodifiable(_cachedMessages!);
     try {
       final p = await _p;
       final json = p.getString(_key);
-      if (json == null || json.isEmpty) return [];
+      if (json == null || json.isEmpty) {
+        _cachedMessages = [];
+        return [];
+      }
       final list = jsonDecode(json) as List<dynamic>;
-      return list
+      _cachedMessages = list
           .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
           .toList();
+      return List.unmodifiable(_cachedMessages!);
     } catch (_) {
+      _cachedMessages = [];
       return [];
     }
   }
@@ -30,17 +38,29 @@ class ChatHistoryService {
       final p = await _p;
       final json = jsonEncode(messages.map((m) => m.toJson()).toList());
       await p.setString(_key, json);
+      _cacheDirty = false;
     } catch (_) {}
   }
 
+  static Future<void> _flush() async {
+    if (_cacheDirty && _cachedMessages != null) {
+      await save(_cachedMessages!);
+    }
+  }
+
   static Future<void> append(ChatMessage message) async {
-    final messages = await load();
-    messages.add(message);
-    await save(messages);
+    if (_cachedMessages == null) {
+      await load();
+    }
+    _cachedMessages!.add(message);
+    _cacheDirty = true;
+    await _flush();
   }
 
   static Future<void> clear() async {
     try {
+      _cachedMessages = [];
+      _cacheDirty = false;
       final p = await _p;
       await p.remove(_key);
     } catch (_) {}

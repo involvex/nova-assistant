@@ -250,13 +250,15 @@ class ModelManager {
         return directFile.path;
       }
 
-      // Check models subdirectory with exact basename matching (no extension)
+      // Check models subdirectory with single-pass matching
       final modelsDir = Directory('${dir.path}/models');
       if (await modelsDir.exists()) {
         final baseName = fileName
             .replaceAll('.litertlm', '')
             .replaceAll('.task', '')
             .replaceAll('.gguf', '');
+
+        String? partialMatch;
         await for (final entity in modelsDir.list()) {
           if (entity is File) {
             final entityName = p.basename(entity.path);
@@ -268,21 +270,17 @@ class ModelManager {
             if (entityBaseName == baseName) {
               return entity.path;
             }
-          }
-        }
-        // Second pass: partial match (entity name contains base name)
-        await for (final entity in modelsDir.list()) {
-          if (entity is File) {
-            final entityName = p.basename(entity.path);
-            final entityBaseName = entityName
-                .replaceAll('.litertlm', '')
-                .replaceAll('.task', '')
-                .replaceAll('.gguf', '');
-            if (entityBaseName.contains(baseName) ||
-                baseName.contains(entityBaseName)) {
-              return entity.path;
+            // Track first partial match for fallback
+            if (partialMatch == null &&
+                (entityBaseName.contains(baseName) ||
+                    baseName.contains(entityBaseName))) {
+              partialMatch = entity.path;
             }
           }
+        }
+        // Return partial match if no exact match found
+        if (partialMatch != null) {
+          return partialMatch;
         }
       }
     } catch (_) {}

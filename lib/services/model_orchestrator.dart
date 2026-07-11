@@ -130,6 +130,7 @@ class ModelOrchestrator {
   bool _batteryOptimizationEnabled = true;
   bool _debugMode = false;
   bool _isReleasing = false; // Guard against concurrent release operations
+  Completer<void>? _releaseCompleter; // Signals when release is complete
   Timer? _idleTimer;
   static const _defaultIdleTimeout = Duration(minutes: 5);
 
@@ -221,6 +222,7 @@ class ModelOrchestrator {
       return;
     }
     _isReleasing = true;
+    _releaseCompleter = Completer<void>();
 
     try {
       if (!_batteryOptimizationEnabled) return;
@@ -258,6 +260,8 @@ class ModelOrchestrator {
       debugPrint('Error releasing idle resources: $e');
     } finally {
       _isReleasing = false;
+      _releaseCompleter?.complete();
+      _releaseCompleter = null;
     }
   }
 
@@ -351,10 +355,10 @@ class ModelOrchestrator {
     NovaModel model, [
     Uint8List? screenshot,
   ]) async {
-    // Wait if resources are being released (to avoid race conditions)
-    while (_isReleasing) {
+    // Wait for any ongoing release to complete before loading new model
+    if (_isReleasing) {
       debugPrint('Waiting for resource release to complete...');
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await _releaseCompleter?.future;
     }
 
     final needsImageSupport = model.hasVision && screenshot != null;

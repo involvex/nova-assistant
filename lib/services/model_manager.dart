@@ -327,7 +327,7 @@ class ModelManager {
 
       // Minimum model file size: 1MB (reasonable for any model)
       if (fileSize < 1024 * 1024) {
-        return 'File is too small (${fileSize} bytes) - may be corrupted';
+        return 'File is too small ($fileSize bytes) - may be corrupted';
       }
 
       // Maximum reasonable model size: 5GB

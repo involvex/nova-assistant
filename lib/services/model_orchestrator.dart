@@ -129,6 +129,7 @@ class ModelOrchestrator {
   bool _isInitialized = false;
   bool _batteryOptimizationEnabled = true;
   bool _debugMode = false;
+  bool _isReleasing = false; // Guard against concurrent release operations
   Timer? _idleTimer;
   static const _defaultIdleTimeout = Duration(minutes: 5);
 
@@ -214,14 +215,50 @@ class ModelOrchestrator {
   }
 
   Future<void> _releaseIdleResources() async {
-    if (!_batteryOptimizationEnabled) return;
+    // Guard against concurrent release operations
+    if (_isReleasing) {
+      debugPrint('Release already in progress, skipping');
+      return;
+    }
+    _isReleasing = true;
+
     try {
-      await _activeModel?.close();
-    } catch (_) {}
-    _activeModel = null;
-    _activeChat = null;
-    _activeModelSupportsImage = false;
-    _statusController.add('Idle — model released to save battery');
+      if (!_batteryOptimizationEnabled) return;
+
+      // First, clear the chat to stop any ongoing streaming
+      // This must happen before closing the model
+      if (_activeChat != null) {
+        try {
+          _activeChat = null;
+        } catch (_) {}
+      }
+
+      // Small delay to let any ongoing operations cancel gracefully
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Now close the model
+      if (_activeModel != null) {
+        try {
+          await _activeModel!.close();
+        } catch (e) {
+          // Catch and ignore close errors to prevent crashes
+          debugPrint('Error closing model: $e');
+        }
+      }
+      _activeModel = null;
+      _activeModelSupportsImage = false;
+
+      // NOTE: We don't call clearActiveInferenceIdentity() here because:
+      // 1. The model is already being closed
+      // 2. Calling it while operations are pending can trigger CancelProcess() crash
+      // The flutter_gemma layer handles its own cleanup when the model is closed
+
+      _statusController.add('Idle — model released to save battery');
+    } catch (e) {
+      debugPrint('Error releasing idle resources: $e');
+    } finally {
+      _isReleasing = false;
+    }
   }
 
   Future<void> releaseIdleResources() => _releaseIdleResources();
@@ -314,6 +351,12 @@ class ModelOrchestrator {
     NovaModel model, [
     Uint8List? screenshot,
   ]) async {
+    // Wait if resources are being released (to avoid race conditions)
+    while (_isReleasing) {
+      debugPrint('Waiting for resource release to complete...');
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+
     final needsImageSupport = model.hasVision && screenshot != null;
 
     // Return cached model if same type AND image support setting matches

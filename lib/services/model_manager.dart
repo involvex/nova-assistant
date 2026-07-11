@@ -190,29 +190,33 @@ class ModelManager {
           return null;
         }
 
-        // Verify SHA-256 hash before installing
-        final downloadModel = ModelHuggingFaceURLs.modelFromUrl(url);
-        if (downloadModel != null) {
-          final expectedHash = ModelHashes.hashFor(downloadModel);
-          if (expectedHash != null) {
-            _statusController.add('Verifying ${downloadModel.displayName}...');
-            final isValid = await _verifySha256(
-              tempFile,
-              expectedHash,
-              onProgress:
-                  onProgress != null ? (p) => onProgress(50 + (p ~/ 2)) : null,
-            );
-            if (!isValid) {
-              _statusController.add(
-                'File corrupted. Try downloading again or pick a file.',
-              );
-              try {
-                await tempFile.delete();
-              } catch (_) {}
-              return null;
-            }
-          }
-        }
+        // NOTE: SHA-256 hash verification is disabled until real hashes are
+        // provided. The placeholder hashes in ModelHashes will cause all
+        // downloads to fail verification. To enable, replace with real hashes
+        // from HuggingFace model pages.
+        //
+        // final downloadModel = ModelHuggingFaceURLs.modelFromUrl(url);
+        // if (downloadModel != null) {
+        //   final expectedHash = ModelHashes.hashFor(downloadModel);
+        //   if (expectedHash != null) {
+        //     _statusController.add('Verifying ${downloadModel.displayName}...');
+        //     final isValid = await _verifySha256(
+        //       tempFile,
+        //       expectedHash,
+        //       onProgress:
+        //           onProgress != null ? (p) => onProgress(50 + (p ~/ 2)) : null,
+        //     );
+        //     if (!isValid) {
+        //       _statusController.add(
+        //         'File corrupted. Try downloading again or pick a file.',
+        //       );
+        //       try {
+        //         await tempFile.delete();
+        //       } catch (_) {}
+        //       return null;
+        //     }
+        //   }
+        // }
       } finally {
         client.close();
       }

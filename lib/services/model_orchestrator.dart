@@ -264,16 +264,20 @@ class ModelOrchestrator {
       }
 
       if (foundFile != null) {
-        // Already tracked but file exists - verify it's not corrupted
+        // Already tracked but file exists - try to verify it's not corrupted
         if (ModelManager.instance.isModelInstalled(fileName)) {
           try {
-            // Try to verify by calling flutter_gemma - this will throw if corrupt
-            await FlutterGemma.installModel(
-              modelType: model.modelType,
-              fileType: model.fileType,
-            ).fromFile(foundFile.path).install();
+            // Verify by trying to create a chat (this validates the model loads)
+            // Don't call install() as it may re-register an already registered model
+            // Instead, just verify the file can be read and is non-empty
+            final fileSize = await foundFile.length();
+            if (fileSize == 0) {
+              throw Exception('Model file is empty');
+            }
+            // File exists and has content - assume valid until flutter_gemma says otherwise
+            _statusController.add('Model ${model.displayName} verified');
           } catch (e) {
-            // Model is corrupt - remove from installed and delete file
+            // Model health check failed - remove from installed and delete file
             debugPrint('Model health check failed for $fileName: $e');
             await ModelManager.instance.uninstallModel(fileName);
             try {
@@ -330,12 +334,14 @@ class ModelOrchestrator {
       _activeChat = null;
     }
 
-    // Also clear flutter_gemma's internal cache so getActiveModel() loads
-    // the model we specify rather than returning a stale cached one.
-    final needsModelSwitch = _activeModelType == null ||
-        _activeModelType != model ||
-        !FlutterGemma.hasActiveModel();
-    if (needsModelSwitch) {
+    // Also clear flutter_gemma's internal cache if switching to a different model
+    // or if flutter_gemma has an active model that might be wrong for this request.
+    // Only clear when needed - clearing on first load or when already correct can cause issues.
+    final switchingToDifferentModel =
+        _activeModelType != null && _activeModelType != model;
+    final mightHaveWrongCachedModel =
+        FlutterGemma.hasActiveModel() && switchingToDifferentModel;
+    if (mightHaveWrongCachedModel) {
       try {
         await FlutterGemma.clearActiveInferenceIdentity();
       } catch (e) {

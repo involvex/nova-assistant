@@ -1,28 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import 'package:nova_assistant/models/model_info.dart';
-
-class _ModelLoadException implements Exception {
-  final String message;
-  final String? suggestion;
-  final Object? underlyingError;
-
-  const _ModelLoadException(
-    this.message, {
-    this.suggestion,
-    this.underlyingError,
-  });
-
-  @override
-  String toString() => message;
-}
 
 class InstalledModel {
   final String id;
@@ -243,35 +227,6 @@ class ModelManager {
       _statusController.add('Install failed: $e');
       debugPrint('ModelManager: installFromNetwork failed: $e');
       return null;
-    }
-  }
-
-  Future<bool> _verifySha256(
-    File file,
-    String expectedHash, {
-    void Function(int progress)? onProgress,
-  }) async {
-    try {
-      _statusController.add('Verifying file integrity...');
-      if (onProgress != null) onProgress(10);
-      final bytes = await file.readAsBytes();
-      if (onProgress != null) onProgress(50);
-      final digest = sha256.convert(bytes);
-      if (onProgress != null) onProgress(90);
-      final computedHash = digest.toString();
-      if (onProgress != null) onProgress(100);
-
-      if (computedHash != expectedHash) {
-        _statusController.add(
-          'File integrity check failed: hash mismatch',
-        );
-        return false;
-      }
-      return true;
-    } catch (e) {
-      debugPrint('SHA-256 verification failed: $e');
-      _statusController.add('File integrity check failed: $e');
-      return false;
     }
   }
 
@@ -497,12 +452,13 @@ class ModelManager {
     required int fileSizeBytes,
   }) async {
     final existing = _installedModels.where((m) => m.fileName == fileName);
-    if (existing.isNotEmpty) return;
+    final wasAlreadyInstalled = existing.isNotEmpty;
 
     bool success = false;
     int actualSize = fileSizeBytes;
 
-    // Try to register the specified file
+    // Always call install() - even if already tracked, we need to ensure
+    // flutter_gemma has the model active. The install() call is idempotent.
     try {
       await FlutterGemma.installModel(
         modelType: modelType,
@@ -510,8 +466,13 @@ class ModelManager {
       ).fromFile(filePath).install();
       success = true;
     } catch (e) {
-      debugPrint('registerDiskModel: primary path failed: $e');
+      debugPrint('registerDiskModel: install failed: $e');
       // Try finding alternative in models/ directory
+      if (wasAlreadyInstalled) {
+        // If we already had this model tracked but install failed,
+        // don't delete the file - it might just be a flutter_gemma state issue
+        rethrow;
+      }
       final altPath = await _findModelFile(fileName);
       if (altPath != null && altPath != filePath) {
         try {
@@ -523,24 +484,12 @@ class ModelManager {
           success = true;
         } catch (e2) {
           debugPrint('registerDiskModel: fallback path also failed: $e2');
-          // Both failed — delete files as they are likely corrupted
           await _deleteModelFile(fileName);
-          throw _ModelLoadException(
-            'Model file is corrupted and has been removed.',
-            suggestion: 'Please download the model again or pick a valid file.',
-            underlyingError: e2,
-          );
+          rethrow;
         }
       } else {
-        // Either no alt found or same as primary — file is corrupt
-        debugPrint(
-            'registerDiskModel: no valid fallback found, file may be corrupt');
         await _deleteModelFile(fileName);
-        throw _ModelLoadException(
-          'Model file is corrupted and has been removed.',
-          suggestion: 'Please download the model again or pick a valid file.',
-          underlyingError: e,
-        );
+        rethrow;
       }
     }
 

@@ -334,61 +334,26 @@ class ModelOrchestrator {
       _activeChat = null;
     }
 
-    // Also clear flutter_gemma's internal cache if switching to a different model
-    // or if flutter_gemma has an active model that might be wrong for this request.
-    // Only clear when needed - clearing on first load or when already correct can cause issues.
-    final switchingToDifferentModel =
-        _activeModelType != null && _activeModelType != model;
-    final mightHaveWrongCachedModel =
-        FlutterGemma.hasActiveModel() && switchingToDifferentModel;
-    if (mightHaveWrongCachedModel) {
-      try {
-        await FlutterGemma.clearActiveInferenceIdentity();
-      } catch (e) {
-        debugPrint('Error clearing active identity: $e');
+    // Clear flutter_gemma's internal state if we might have a different model cached
+    // This ensures getActiveModel() loads the correct model fresh
+    if (FlutterGemma.hasActiveModel()) {
+      // If we're loading a different model type, clear first
+      if (_activeModelType != model) {
+        try {
+          await FlutterGemma.clearActiveInferenceIdentity();
+        } catch (e) {
+          debugPrint('Error clearing active identity: $e');
+        }
       }
     }
 
     final bool supportImage = needsImageSupport;
 
-    // Try to use flutter_gemma's cached model if available
-    if (FlutterGemma.hasActiveModel()) {
-      try {
-        _statusController.add('Loading ${model.displayName}...');
-        _activeModel = await FlutterGemma.getActiveModel(
-          maxTokens: _tokenLimitFor(model),
-          preferredBackend: PreferredBackend.gpu,
-          supportImage: supportImage,
-        ).timeout(const Duration(seconds: 30));
-        _activeModelType = model;
-        _activeModelSupportsImage = supportImage;
-        _isInitialized = true;
-        _statusController.add('${model.displayName} ready');
-        _resetIdleTimer();
-        return _activeModel!;
-      } catch (e) {
-        debugPrint('getActiveModel failed: $e');
-        _statusController.add('Model load failed, trying local...');
-        _activeModel = null;
-        // Don't swallow — if this is a clear "no model" error, convert it
-        if (e is StateError && e.message.contains('No active')) {
-          throw ModelNotFoundException(
-            '${model.displayName} is not installed.',
-            model: model,
-            suggestion: 'Download it or pick a file from your device.',
-            underlyingError: e,
-          );
-        }
-      }
-    }
-
-    // Check if model exists on disk but wasn't restored (e.g., after app restart)
+    // First, ensure the model is registered with flutter_gemma
     final fileName = ModelHuggingFaceURLs.fileNameFor(model);
-    final existsOnDisk = await ModelManager.instance.isInstalledOnDisk(
-      fileName,
-    );
+    final existsOnDisk =
+        await ModelManager.instance.isInstalledOnDisk(fileName);
 
-    // If exists on disk, register it without downloading
     if (existsOnDisk) {
       _statusController.add(
         'Found ${model.displayName} on disk, registering...',
@@ -397,6 +362,7 @@ class ModelOrchestrator {
         final modelPath = await _findModelPath(fileName);
         if (modelPath != null) {
           final fileSize = await File(modelPath).length();
+          // Always call registerDiskModel to ensure model is properly registered
           await ModelManager.instance.registerDiskModel(
             filePath: modelPath,
             fileName: fileName,
@@ -404,6 +370,9 @@ class ModelOrchestrator {
             fileType: model.fileType,
             fileSizeBytes: fileSize,
           );
+
+          // Now get the active model
+          _statusController.add('Loading ${model.displayName}...');
           _activeModel = await FlutterGemma.getActiveModel(
             maxTokens: _tokenLimitFor(model),
             preferredBackend: PreferredBackend.gpu,

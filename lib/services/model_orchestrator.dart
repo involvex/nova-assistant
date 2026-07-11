@@ -234,7 +234,7 @@ class ModelOrchestrator {
       }
 
       // Small delay to let any ongoing operations cancel gracefully
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
 
       // Now close the model
       if (_activeModel != null) {
@@ -354,7 +354,7 @@ class ModelOrchestrator {
     // Wait if resources are being released (to avoid race conditions)
     while (_isReleasing) {
       debugPrint('Waiting for resource release to complete...');
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
     }
 
     final needsImageSupport = model.hasVision && screenshot != null;

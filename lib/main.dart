@@ -5,39 +5,36 @@ import 'package:flutter_gemma_mediapipe/flutter_gemma_mediapipe.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
+import 'package:nova_assistant/screens/assistant_screen_beginner.dart';
+import 'package:nova_assistant/screens/onboarding/onboarding_screen.dart';
 import 'package:nova_assistant/services/memory_service.dart';
+import 'package:nova_assistant/services/user_preferences_service.dart';
+import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    // Ensure SharedPreferences is initialized before any usage
     await SharedPreferences.getInstance();
 
-    // Initialize Flutter Gemma with all available inference engines
     await FlutterGemma.initialize(
       inferenceEngines: const [
-        LiteRtLmEngine(), // .litertlm models (Gemma 4, Qwen3, FastVLM, etc.)
-        MediaPipeEngine(), // .task models (Gemma3n, Gemma 3, DeepSeek, etc.)
+        LiteRtLmEngine(),
+        MediaPipeEngine(),
       ],
       maxDownloadRetries: 3,
     );
 
-    // Initialize model manager (restores installed models list from prefs)
     await ModelManager.instance.initialize();
 
-    // Repair any corrupted tracking data
     await _repairModels();
 
-    // Initialize RAG memory
     await MemoryService.initialize();
 
-    // Pre-download and initialize models in background
     _prefetchModels();
   } catch (e) {
     debugPrint('Initialization error: $e');
-    // Continue anyway - the app can still function in degraded mode
   }
 
   runApp(const NovaApp());
@@ -45,13 +42,11 @@ void main() async {
 
 Future<void> _repairModels() async {
   try {
-    // First, verify what we have tracked vs what's actually on disk
     final issues = await ModelManager.instance.verifyInstalledModels();
     if (issues.isNotEmpty) {
       debugPrint('Model verification found issues: $issues');
     }
 
-    // Repair any missing models from tracking
     final removed = await ModelManager.instance.repairInstalledModels();
     if (removed > 0) {
       debugPrint('Removed $removed invalid model entries');
@@ -117,7 +112,58 @@ class NovaApp extends StatelessWidget {
         ),
       ),
       themeMode: ThemeMode.dark,
-      home: const AssistantScreen(),
+      home: const AppLoader(),
     );
+  }
+}
+
+class AppLoader extends StatefulWidget {
+  const AppLoader({super.key});
+
+  @override
+  State<AppLoader> createState() => _AppLoaderState();
+}
+
+class _AppLoaderState extends State<AppLoader> {
+  bool _isLoading = true;
+  UserPreferences? _preferences;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    final prefs = await UserPreferencesService.instance.getPreferences();
+    if (mounted) {
+      setState(() {
+        _preferences = prefs;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Color(0xFF6C63FF),
+          ),
+        ),
+      );
+    }
+
+    if (_preferences == null || !_preferences!.onboardingComplete) {
+      return const OnboardingScreen();
+    }
+
+    if (_preferences!.mode == UserMode.beginner) {
+      return const AssistantScreenBeginner();
+    }
+
+    return const AssistantScreen();
   }
 }

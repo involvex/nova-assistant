@@ -6,6 +6,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
+import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:nova_assistant/platform/assistant_role_service.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/identity_config_screen.dart';
@@ -15,6 +16,7 @@ import 'package:nova_assistant/screens/conversation_search_screen.dart';
 import 'package:nova_assistant/screens/model_browser_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ignore_for_file: use_build_context_synchronously
@@ -266,6 +268,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
+
+          const SizedBox(height: 24),
+
+          _sectionHeader('Experience'),
+          _actionTile(
+            icon: Icons.tune_outlined,
+            title: 'Switch to Beginner Mode',
+            subtitle: 'Simplified UI with basic features',
+            onTap: () => _showModeSwitchDialog(context, UserMode.beginner),
+          ),
+          _actionTile(
+            icon: Icons.explore_outlined,
+            title: 'Browse & Download Models',
+            subtitle: 'Discover and download models from HuggingFace',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const ModelBrowserScreen(),
+                ),
+              );
+              if (context.mounted) {
+                setState(() {});
+              }
+            },
+          ),
 
           const SizedBox(height: 24),
 
@@ -667,6 +695,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (selected != null && selected != _assistantRole) {
       setState(() => _assistantRole = selected);
       await _saveAssistantRole(selected);
+    }
+  }
+
+  Future<void> _showModeSwitchDialog(
+    BuildContext context,
+    UserMode targetMode,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Text(
+          targetMode == UserMode.beginner
+              ? 'Switch to Beginner Mode?'
+              : 'Switch to Expert Mode?',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          targetMode == UserMode.beginner
+              ? 'You\'ll see a simplified UI with only the basics. '
+                  'You can switch back to Expert Mode anytime from Settings.'
+              : 'You\'ll have access to all features including screenshots, '
+                  'file attachments, and advanced settings.',
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey[400]),
+            ),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF6C63FF),
+            ),
+            child: const Text('Switch Mode'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await UserPreferencesService.instance.setMode(targetMode);
+      if (context.mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/app', (_) => false);
+      }
     }
   }
 

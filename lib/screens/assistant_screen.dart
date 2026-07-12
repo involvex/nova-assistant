@@ -336,8 +336,9 @@ class _AssistantScreenState extends State<AssistantScreen>
         thinkingMode: _thinkingMode,
         tools: NovaTools.all,
         attachments: _attachmentManager.attachments,
-        // Always force heavy model in assistant mode for reliability
-        forcePrimaryModel: true,
+        // Force heavy model only in auto mode; respect model overrides
+        forcePrimaryModel:
+            _selectedModel == null && _selectedCustomModel == null,
       )) {
         if (!mounted) break;
 

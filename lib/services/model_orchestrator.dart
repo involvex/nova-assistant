@@ -573,6 +573,264 @@ class ModelOrchestrator {
     }
   }
 
+  /// Process a message using a custom (user-imported) model.
+  Stream<InferenceResult> _processWithCustomModel({
+    required String query,
+    required Uint8List? screenshot,
+    required bool thinkingMode,
+    required List<Tool> tools,
+    String? ragContext,
+    String? attachmentContext,
+    required bool hasImageAttachments,
+  }) async* {
+    final customModel = _preferredCustomModelOverride!;
+    _statusController.add('Using custom model: ${customModel.displayName}');
+
+    // Find the custom model file on disk
+    final dir = await getApplicationDocumentsDirectory();
+    String? modelPath;
+
+    // Check direct path
+    final directFile = File('${dir.path}/${customModel.fileName}');
+    if (await directFile.exists()) {
+      modelPath = directFile.path;
+    } else {
+      // Check models subdirectory
+      final modelsDir = Directory('${dir.path}/models');
+      if (await modelsDir.exists()) {
+        final baseName = customModel.fileName
+            .replaceAll('.litertlm', '')
+            .replaceAll('.task', '')
+            .replaceAll('.gguf', '');
+        await for (final entity in modelsDir.list()) {
+          if (entity is File) {
+            final entityName = p.basename(entity.path);
+            final entityBaseName = entityName
+                .replaceAll('.litertlm', '')
+                .replaceAll('.task', '')
+                .replaceAll('.gguf', '');
+            if (entityBaseName.contains(baseName) ||
+                baseName.contains(entityBaseName)) {
+              modelPath = entity.path;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (modelPath == null) {
+      _statusController
+          .add('Custom model file not found: ${customModel.fileName}');
+      yield InferenceResult(
+        text: 'Custom model file not found: ${customModel.fileName}\n\n'
+            'The model may have been deleted. Try re-importing it.',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+      );
+      return;
+    }
+
+    // Register and load the custom model
+    InferenceModel inferenceModel;
+    try {
+      final fileSize = await File(modelPath).length();
+
+      // Ensure model is registered with flutter_gemma
+      await ModelManager.instance.registerDiskModel(
+        filePath: modelPath,
+        fileName: customModel.fileName,
+        modelType: customModel.modelType,
+        fileType: customModel.fileType,
+        fileSizeBytes: fileSize,
+      );
+
+      // Load the model
+      final needsImageSupport = customModel.hasVision && screenshot != null;
+      _statusController.add('Loading ${customModel.displayName}...');
+      inferenceModel = await FlutterGemma.getActiveModel(
+        maxTokens: 4096,
+        preferredBackend: PreferredBackend.gpu,
+        supportImage: needsImageSupport,
+      ).timeout(const Duration(seconds: 60));
+
+      _statusController.add('${customModel.displayName} ready');
+    } on TimeoutException {
+      yield InferenceResult(
+        text: 'Timed out loading ${customModel.displayName}. '
+            'The model may be too large for your device.',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+      );
+      return;
+    } catch (e) {
+      _statusController.add('Error loading custom model: $e');
+      yield InferenceResult(
+        text: 'Failed to load ${customModel.displayName}: $e',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+      );
+      return;
+    }
+
+    // Create chat with system prompt
+    final buffer = StringBuffer(_getAssistantRole().systemPrompt);
+
+    if (customModel.hasThinking) {
+      buffer.write(
+        ' When asked to think step by step, show your reasoning in <thinking> tags '
+        'before your final answer.',
+      );
+    }
+
+    if (ragContext != null && ragContext.isNotEmpty) {
+      buffer.write('\n\n$ragContext');
+    }
+    if (attachmentContext != null && attachmentContext.isNotEmpty) {
+      buffer.write('\n\n--- Attached Data ---\n$attachmentContext');
+    }
+
+    final chat = await inferenceModel.createChat(
+      systemInstruction: buffer.toString(),
+      tools: tools,
+      supportImage: customModel.hasVision,
+    );
+
+    // Add the user message
+    final Message message;
+    if (screenshot != null && customModel.hasVision) {
+      message = Message.withImage(
+        text: query,
+        imageBytes: screenshot,
+        isUser: true,
+      );
+    } else {
+      message = Message.text(text: query, isUser: true);
+    }
+
+    await chat.addQuery(message);
+
+    // Generate response
+    String fullResponse = '';
+    String? currentThinking;
+    final textBuffer = StringBuffer();
+    final inferenceStopwatch = Stopwatch()..start();
+
+    bool hasPendingToolCalls = true;
+    int toolRounds = 0;
+    final List<Map<String, dynamic>> allToolCalls = [];
+
+    while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
+      hasPendingToolCalls = false;
+      toolRounds++;
+
+      await for (final event in chat.generateChatResponseAsync()) {
+        if (event is TextResponse) {
+          final token = event.token;
+          fullResponse += token;
+          textBuffer.write(token);
+
+          final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
+          if (parsedCalls != null && parsedCalls.isNotEmpty) {
+            final toolText = textBuffer.toString();
+            final idx = fullResponse.lastIndexOf(toolText);
+            if (idx >= 0) {
+              fullResponse = fullResponse.substring(0, idx) +
+                  fullResponse.substring(idx + toolText.length);
+            }
+            textBuffer.clear();
+
+            for (final parsed in parsedCalls) {
+              final toolName = parsed['name'] as String;
+              final toolArgs = Map<String, dynamic>.from(parsed['args'] as Map);
+              _statusController.add('Executing $toolName...');
+
+              allToolCalls.add({
+                'name': toolName,
+                'args': toolArgs,
+                'status': 'executing',
+              });
+
+              ExternalToolResult? mcpResult;
+              if (McpService.instance.getTool(toolName) != null) {
+                mcpResult = await McpService.instance.executeTool(
+                  toolName,
+                  toolArgs,
+                );
+              }
+
+              final Map<String, dynamic> toolResult;
+              if (mcpResult != null) {
+                toolResult = mcpResult.toJson();
+              } else {
+                toolResult = await ToolExecutorService.instance.executeTool(
+                  toolName,
+                  toolArgs,
+                );
+              }
+
+              allToolCalls.add({
+                'name': toolName,
+                'args': toolArgs,
+                'result': toolResult,
+                'status': 'completed',
+              });
+
+              hasPendingToolCalls = true;
+            }
+          }
+
+          yield InferenceResult(
+            text: fullResponse,
+            model: selector.primaryHeavy,
+            isStreaming: true,
+            thinking: currentThinking,
+            toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+            inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+          );
+        } else if (event is ThinkingResponse) {
+          currentThinking = event.content;
+          yield InferenceResult(
+            text: fullResponse,
+            model: selector.primaryHeavy,
+            isStreaming: true,
+            thinking: currentThinking,
+            toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+            inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+          );
+        }
+      }
+
+      if (hasPendingToolCalls) {
+        final toolResultMessages = <Message>[];
+        for (final tc in allToolCalls.where(
+          (t) => t['status'] == 'completed' && t['result'] != null,
+        )) {
+          toolResultMessages.add(Message.text(
+            text: jsonEncode(tc['result']),
+            isUser: true,
+          ));
+        }
+        if (toolResultMessages.isNotEmpty) {
+          for (final msg in toolResultMessages) {
+            await chat.addQuery(msg);
+          }
+        }
+      }
+    }
+
+    inferenceStopwatch.stop();
+
+    yield InferenceResult(
+      text: fullResponse,
+      model: selector.primaryHeavy,
+      isStreaming: false,
+      thinking: currentThinking,
+      toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+      inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+    );
+  }
+
   /// Show a download consent dialog before downloading a model.
   /// Returns the user's choice.
   Future<DownloadConsent> _showDownloadConsent({
@@ -761,12 +1019,25 @@ class ModelOrchestrator {
 
     // Force primary model when requested - ensures heavy model is used for
     // reliability-critical scenarios like assistant mode
-    if (forcePrimaryModel) {
+    if (forcePrimaryModel && _preferredCustomModelOverride == null) {
       model = selector.primaryHeavy;
       if (_debugMode) {
         _statusController
             .add('[DEBUG] Force Primary Model: ${model.displayName}');
       }
+    } else if (_preferredCustomModelOverride != null) {
+      // Custom model selected - use it directly (bypasses NovaModel selection)
+      // Return early with custom model loading path
+      yield* _processWithCustomModel(
+        query: query,
+        screenshot: screenshot,
+        thinkingMode: thinkingMode,
+        tools: tools,
+        ragContext: ragContext,
+        attachmentContext: attachmentContext,
+        hasImageAttachments: hasImageAttachments,
+      );
+      return;
     } else if (_modelOverrideDirty && _preferredModelOverride != null) {
       model = _preferredModelOverride!;
       if ((screenshot != null || hasImageAttachments) && !model.hasVision) {

@@ -13,8 +13,8 @@ dependencies:
 
   # AI Inference — core + engines
   flutter_gemma: ^1.2.0
-  flutter_gemma_litertlm: 1.0.2
-  flutter_gemma_mediapipe: 1.0.3
+  flutter_gemma_litertlm: ^1.0.2
+  flutter_gemma_mediapipe: ^1.0.3
 
   # Permissions
   permission_handler: ^12.0.3
@@ -44,7 +44,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   file_picker: ^11.0.2
   image_picker: ^1.1.2
-  package_info_plus: 8.0.2
+  package_info_plus: ^8.0.2
 
 dev_dependencies:
   flutter_test:

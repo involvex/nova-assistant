@@ -131,6 +131,8 @@ class ModelOrchestrator {
   bool _debugMode = false;
   bool _isReleasing = false; // Guard against concurrent release operations
   Timer? _idleTimer;
+  bool _isStreaming = false;
+  Completer<void>? _streamingCompleter;
   static const _defaultIdleTimeout = Duration(minutes: 5);
 
   final _statusController = StreamController<String>.broadcast();
@@ -163,6 +165,9 @@ class ModelOrchestrator {
     if (_preferredModelOverride == model) return;
     _preferredModelOverride = model;
     _modelOverrideDirty = true;
+    if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+      _streamingCompleter!.complete();
+    }
     _activeChat = null;
     if (_activeModel != null &&
         (_activeModelType == null ||
@@ -215,7 +220,6 @@ class ModelOrchestrator {
   }
 
   Future<void> _releaseIdleResources() async {
-    // Guard against concurrent release operations
     if (_isReleasing) {
       debugPrint('Release already in progress, skipping');
       return;
@@ -225,33 +229,40 @@ class ModelOrchestrator {
     try {
       if (!_batteryOptimizationEnabled) return;
 
-      // First, clear the chat to stop any ongoing streaming
-      // This must happen before closing the model
+      // Signal any active stream to abort
+      if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+        _streamingCompleter!.complete();
+      }
+
+      // Clear the chat reference
       if (_activeChat != null) {
         try {
           _activeChat = null;
         } catch (_) {}
       }
 
-      // Small delay to let any ongoing operations cancel gracefully
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      // Wait for any ongoing stream iteration to finish
+      if (_isStreaming) {
+        debugPrint('Waiting for active stream to finish...');
+        final deadline = DateTime.now().add(const Duration(seconds: 3));
+        while (_isStreaming && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        if (_isStreaming) {
+          debugPrint('Stream did not finish in time, forcing release');
+        }
+      }
 
       // Now close the model
       if (_activeModel != null) {
         try {
           await _activeModel!.close();
         } catch (e) {
-          // Catch and ignore close errors to prevent crashes
           debugPrint('Error closing model: $e');
         }
       }
       _activeModel = null;
       _activeModelSupportsImage = false;
-
-      // NOTE: We don't call clearActiveInferenceIdentity() here because:
-      // 1. The model is already being closed
-      // 2. Calling it while operations are pending can trigger CancelProcess() crash
-      // The flutter_gemma layer handles its own cleanup when the model is closed
 
       _statusController.add('Idle — model released to save battery');
     } catch (e) {
@@ -819,110 +830,127 @@ class ModelOrchestrator {
     bool hasPendingToolCalls = true;
     int toolRounds = 0;
     final List<Map<String, dynamic>> allToolCalls = [];
-    while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
-      hasPendingToolCalls = false;
-      toolRounds++;
 
-      await for (final event in _activeChat!.generateChatResponseAsync()) {
-        if (event is TextResponse) {
-          final token = event.token;
-          fullResponse += token;
-          textBuffer.write(token);
+    _isStreaming = true;
+    _streamingCompleter = Completer<void>();
 
-          // Try to parse function calls from the accumulated buffer.
-          final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
-          if (parsedCalls != null && parsedCalls.isNotEmpty) {
-            // Remove the raw JSON tool call text from fullResponse
-            final toolText = textBuffer.toString();
-            final idx = fullResponse.lastIndexOf(toolText);
-            if (idx >= 0) {
-              fullResponse = fullResponse.substring(0, idx) +
-                  fullResponse.substring(idx + toolText.length);
+    try {
+      while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
+        hasPendingToolCalls = false;
+        toolRounds++;
+
+        await for (final event in _activeChat!.generateChatResponseAsync()) {
+          if (_streamingCompleter?.isCompleted ?? false) {
+            debugPrint('Stream aborted by releaseIdleResources');
+            break;
+          }
+          if (event is TextResponse) {
+            final token = event.token;
+            fullResponse += token;
+            textBuffer.write(token);
+
+            // Try to parse function calls from the accumulated buffer.
+            final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
+            if (parsedCalls != null && parsedCalls.isNotEmpty) {
+              // Remove the raw JSON tool call text from fullResponse
+              final toolText = textBuffer.toString();
+              final idx = fullResponse.lastIndexOf(toolText);
+              if (idx >= 0) {
+                fullResponse = fullResponse.substring(0, idx) +
+                    fullResponse.substring(idx + toolText.length);
+              }
+              textBuffer.clear();
+
+              // Execute all tool calls found in this response
+              for (final parsed in parsedCalls) {
+                final toolName = parsed['name'] as String;
+                final toolArgs =
+                    Map<String, dynamic>.from(parsed['args'] as Map);
+                _statusController.add('Executing $toolName...');
+
+                allToolCalls.add({
+                  'name': toolName,
+                  'args': toolArgs,
+                  'status': 'executing',
+                });
+
+                // Try MCP external tools first, then native tools
+                ExternalToolResult? mcpResult;
+                if (McpService.instance.getTool(toolName) != null) {
+                  mcpResult = await McpService.instance.executeTool(
+                    toolName,
+                    toolArgs,
+                  );
+                }
+
+                final Map<String, dynamic> toolResult;
+                if (mcpResult != null) {
+                  toolResult = mcpResult.toJson();
+                } else {
+                  toolResult = await ToolExecutorService.instance.executeTool(
+                    toolName,
+                    toolArgs,
+                  );
+                }
+
+                // Update the last tool call with result
+                if (allToolCalls.isNotEmpty) {
+                  allToolCalls.last['status'] = 'done';
+                  allToolCalls.last['result'] = toolResult;
+                }
+
+                await _sendToolResponse(toolName, toolResult);
+                hasPendingToolCalls = true;
+              }
+            } else {
+              yield InferenceResult(
+                text: fullResponse,
+                model: model,
+                isStreaming: true,
+                thinking: thinkingMode ? currentThinking : null,
+                toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+              );
             }
-            textBuffer.clear();
-
-            // Execute all tool calls found in this response
-            for (final parsed in parsedCalls) {
-              final toolName = parsed['name'] as String;
-              final toolArgs = Map<String, dynamic>.from(parsed['args'] as Map);
-              _statusController.add('Executing $toolName...');
-
-              allToolCalls.add({
-                'name': toolName,
-                'args': toolArgs,
-                'status': 'executing',
-              });
-
-              // Try MCP external tools first, then native tools
-              ExternalToolResult? mcpResult;
-              if (McpService.instance.getTool(toolName) != null) {
-                mcpResult = await McpService.instance.executeTool(
-                  toolName,
-                  toolArgs,
-                );
-              }
-
-              final Map<String, dynamic> toolResult;
-              if (mcpResult != null) {
-                toolResult = mcpResult.toJson();
-              } else {
-                toolResult = await ToolExecutorService.instance.executeTool(
-                  toolName,
-                  toolArgs,
-                );
-              }
-
-              // Update the last tool call with result
-              if (allToolCalls.isNotEmpty) {
-                allToolCalls.last['status'] = 'done';
-                allToolCalls.last['result'] = toolResult;
-              }
-
-              await _sendToolResponse(toolName, toolResult);
-              hasPendingToolCalls = true;
-            }
-          } else {
+          } else if (event is ThinkingResponse) {
+            currentThinking = event.content;
             yield InferenceResult(
               text: fullResponse,
               model: model,
               isStreaming: true,
-              thinking: thinkingMode ? currentThinking : null,
+              thinking: currentThinking,
               toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
             );
+          } else if (event is FunctionCallResponse) {
+            // Plugin-level function call detected
+            _statusController.add('Executing ${event.name}...');
+
+            allToolCalls.add({
+              'name': event.name,
+              'args': Map<String, dynamic>.from(event.args),
+              'status': 'executing',
+            });
+
+            final toolResult = await ToolExecutorService.instance.executeTool(
+              event.name,
+              Map<String, dynamic>.from(event.args),
+            );
+
+            if (allToolCalls.isNotEmpty) {
+              allToolCalls.last['status'] = 'done';
+              allToolCalls.last['result'] = toolResult;
+            }
+
+            await _sendToolResponse(event.name, toolResult);
+            hasPendingToolCalls = true;
           }
-        } else if (event is ThinkingResponse) {
-          currentThinking = event.content;
-          yield InferenceResult(
-            text: fullResponse,
-            model: model,
-            isStreaming: true,
-            thinking: currentThinking,
-            toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
-          );
-        } else if (event is FunctionCallResponse) {
-          // Plugin-level function call detected
-          _statusController.add('Executing ${event.name}...');
-
-          allToolCalls.add({
-            'name': event.name,
-            'args': Map<String, dynamic>.from(event.args),
-            'status': 'executing',
-          });
-
-          final toolResult = await ToolExecutorService.instance.executeTool(
-            event.name,
-            Map<String, dynamic>.from(event.args),
-          );
-
-          if (allToolCalls.isNotEmpty) {
-            allToolCalls.last['status'] = 'done';
-            allToolCalls.last['result'] = toolResult;
-          }
-
-          await _sendToolResponse(event.name, toolResult);
-          hasPendingToolCalls = true;
         }
       }
+    } finally {
+      _isStreaming = false;
+      if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+        _streamingCompleter!.complete();
+      }
+      _streamingCompleter = null;
     }
 
     if (toolRounds >= _maxToolRounds && hasPendingToolCalls) {
@@ -1164,6 +1192,9 @@ class ModelOrchestrator {
   }
 
   Future<void> clearHistory() async {
+    if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+      _streamingCompleter!.complete();
+    }
     _activeChat = null;
     _activeModelSupportsImage = false;
     _preferredModelOverride = null;

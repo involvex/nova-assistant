@@ -12,6 +12,7 @@ import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
 import 'package:nova_assistant/widgets/chat_bubble.dart';
 import 'package:nova_assistant/widgets/voice_input.dart';
@@ -262,6 +263,44 @@ class _AssistantScreenState extends State<AssistantScreen>
     _sendMessage();
   }
 
+  List<Tool> _toolsForQuery(String query) {
+    final tools = <Tool>[];
+    final q = query.toLowerCase();
+
+    // Always available: time, alarm, settings, screenshot, openApp
+    tools.addAll([
+      NovaTools.getTime,
+      NovaTools.setAlarm,
+      NovaTools.cancelAlarm,
+      NovaTools.openSettings,
+      NovaTools.takeScreenshot,
+      NovaTools.openApp,
+    ]);
+
+    // Weather only if explicitly asked
+    if (q.contains('weather') ||
+        q.contains('temperature') ||
+        q.contains('forecast')) {
+      tools.add(NovaTools.getWeather);
+    }
+
+    // SMS only if explicitly asked
+    if (q.contains('send') &&
+        (q.contains('sms') || q.contains('text') || q.contains('message'))) {
+      tools.add(NovaTools.sendSms);
+    }
+
+    // Web search only if explicitly asked
+    if (q.contains('search') ||
+        q.contains('look up') ||
+        q.contains('find online') ||
+        q.contains('google')) {
+      tools.add(NovaTools.searchWeb);
+    }
+
+    return tools;
+  }
+
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _isGenerating) return;
@@ -307,7 +346,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         query: text,
         screenshot: _currentScreenshot,
         thinkingMode: _thinkingMode,
-        tools: NovaTools.all,
+        tools: _toolsForQuery(text),
         attachments: _attachmentManager.attachments,
       )) {
         if (!mounted) break;

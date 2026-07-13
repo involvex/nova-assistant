@@ -21,7 +21,9 @@ class NovaTools {
 
   static final Tool getTime = Tool(
     name: 'get_time',
-    description: 'Get the current time, date, and day of the week',
+    description: 'Get the current time, date, and day of the week. '
+        'Use this ONLY when the user explicitly asks for the '
+        'current time, date, or what day it is.',
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},
@@ -30,7 +32,9 @@ class NovaTools {
 
   static final Tool setAlarm = Tool(
     name: 'set_alarm',
-    description: 'Set a device alarm',
+    description: 'Set an alarm on the device. '
+        'Use this ONLY when the user explicitly asks to set, '
+        'create, or schedule an alarm or timer.',
     parameters: {
       'type': 'object',
       'properties': {
@@ -44,7 +48,9 @@ class NovaTools {
 
   static final Tool cancelAlarm = Tool(
     name: 'cancel_alarm',
-    description: 'Cancel an existing alarm',
+    description: 'Cancel an existing alarm on the device. '
+        'Use this ONLY when the user explicitly asks to cancel '
+        'or remove an existing alarm.',
     parameters: {
       'type': 'object',
       'properties': {
@@ -63,7 +69,9 @@ class NovaTools {
 
   static final Tool openApp = Tool(
     name: 'open_app',
-    description: 'Open an application by its package name',
+    description: 'Open an application on the device. '
+        'Use this ONLY when the user explicitly asks to open '
+        'or launch a specific application.',
     parameters: {
       'type': 'object',
       'properties': {
@@ -78,7 +86,11 @@ class NovaTools {
 
   static final Tool searchWeb = Tool(
     name: 'search_web',
-    description: 'Open the browser with a web search',
+    description: 'Open a web browser and perform a search. '
+        'Use this ONLY when the user explicitly asks to search, '
+        'look up, find online, or check the internet for something. '
+        'Do NOT use this for general questions, greetings, or '
+        'conversations that can be answered from local knowledge.',
     parameters: {
       'type': 'object',
       'properties': {
@@ -90,7 +102,9 @@ class NovaTools {
 
   static final Tool getWeather = Tool(
     name: 'get_weather',
-    description: 'Get the current weather for a location',
+    description: 'Get current weather information for a specific location. '
+        'Use this ONLY when the user explicitly asks about weather, '
+        'temperature, or conditions for a specific place.',
     parameters: {
       'type': 'object',
       'properties': {
@@ -104,7 +118,9 @@ class NovaTools {
 
   static final Tool sendSms = Tool(
     name: 'send_sms',
-    description: 'Send an SMS message',
+    description: 'Send an SMS text message to a phone number. '
+        'Use this ONLY when the user explicitly asks to send '
+        'a text message or SMS to someone.',
     parameters: {
       'type': 'object',
       'properties': {
@@ -117,7 +133,9 @@ class NovaTools {
 
   static final Tool openSettings = Tool(
     name: 'open_settings',
-    description: 'Open the device Settings app',
+    description: 'Open the device Settings application. '
+        'Use this ONLY when the user explicitly asks to open '
+        'or go to device settings.',
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},
@@ -126,9 +144,9 @@ class NovaTools {
 
   static final Tool takeScreenshot = Tool(
     name: 'take_screenshot',
-    description:
-        'Capture the current screen and return the image bytes as base64. '
-        'Use this to see what is on the screen.',
+    description: 'Capture a screenshot of the current screen. '
+        'Use this ONLY when the user explicitly asks to take '
+        'a screenshot or capture the screen.',
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},

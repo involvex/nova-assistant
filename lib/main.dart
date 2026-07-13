@@ -5,6 +5,7 @@ import 'package:flutter_gemma_mediapipe/flutter_gemma_mediapipe.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
+import 'package:nova_assistant/screens/onboarding_screen.dart';
 import 'package:nova_assistant/services/memory_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -74,6 +75,49 @@ Future<void> _prefetchModels() async {
   }
 }
 
+class OnboardingRouter extends StatefulWidget {
+  const OnboardingRouter({super.key});
+
+  @override
+  State<OnboardingRouter> createState() => _OnboardingRouterState();
+}
+
+class _OnboardingRouterState extends State<OnboardingRouter> {
+  static const _prefsKey = 'onboarding_completed';
+  bool _isLoading = true;
+  bool _onboardingCompleted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkOnboarding();
+  }
+
+  Future<void> _checkOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    final completed = prefs.getBool(_prefsKey) ?? false;
+    if (mounted) {
+      setState(() {
+        _onboardingCompleted = completed;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!_onboardingCompleted) {
+      return const OnboardingScreen();
+    }
+    return const AssistantScreen();
+  }
+}
+
 class NovaApp extends StatelessWidget {
   const NovaApp({super.key});
 
@@ -117,7 +161,7 @@ class NovaApp extends StatelessWidget {
         ),
       ),
       themeMode: ThemeMode.dark,
-      home: const AssistantScreen(),
+      home: const OnboardingRouter(),
     );
   }
 }

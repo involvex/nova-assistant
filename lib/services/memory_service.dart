@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nova_assistant/services/semantic_search.dart';
 
 class MemoryService {
   static const _key = 'rag_conversations';
@@ -149,18 +150,26 @@ class MemoryService {
       final memories = await getCustomMemories();
       if (memories.isEmpty) return null;
 
-      final queryLower = query.toLowerCase();
-      final relevant = memories.where((m) {
-        final text = '${m['title']} ${m['content']}'.toLowerCase();
-        return queryLower
-            .split(' ')
-            .any((word) => word.isNotEmpty && text.contains(word));
+      final queryTokens = SemanticSearch.tokenize(query);
+      if (queryTokens.isEmpty) return null;
+
+      final docTokensList = memories.map((m) {
+        final text = '${m['title']} ${m['content']}';
+        return SemanticSearch.tokenize(text);
       }).toList();
 
-      if (relevant.isEmpty) return null;
+      final results = SemanticSearch.search(
+        queryTokens: queryTokens,
+        documents: docTokensList,
+        topK: 5,
+        minScore: 0.1,
+      );
+
+      if (results.isEmpty) return null;
 
       final buf = StringBuffer('Custom memories:\n');
-      for (final m in relevant) {
+      for (final r in results) {
+        final m = memories[r.index];
         buf.writeln('- ${m['title']}: ${m['content']}');
       }
       return buf.toString();
@@ -184,31 +193,38 @@ class MemoryService {
 
       if (entries.isEmpty) return null;
 
-      final queryWords = query.toLowerCase().split(RegExp(r'\s+')).toSet();
+      final queryTokens = SemanticSearch.tokenize(query);
+      if (queryTokens.isEmpty) return null;
 
-      final scored = entries.map((e) {
-        final text = '${e['query']} ${e['response']}'.toLowerCase();
-        final words = text.split(RegExp(r'\s+')).toSet();
-        final overlap = queryWords.intersection(words).length;
-        final normalized =
-            queryWords.isEmpty ? 0.0 : overlap / queryWords.length;
+      final docTokensList = entries.map((e) {
+        final text = '${e['query']} ${e['response']}';
+        return SemanticSearch.tokenize(text);
+      }).toList();
 
+      final results = SemanticSearch.search(
+        queryTokens: queryTokens,
+        documents: docTokensList,
+        topK: 5,
+        minScore: 0.1,
+      );
+
+      if (results.isEmpty) return null;
+
+      // Apply recency bonus to TF-IDF scores
+      final scored = results.map((r) {
+        final entry = entries[r.index];
         final ageInDays = DateTime.now()
-            .difference(DateTime.parse(e['time'] as String))
+            .difference(DateTime.parse(entry['time'] as String))
             .inDays;
         final recencyBonus =
-            ageInDays == 0 ? 2.0 : 1.0 / (1.0 + ageInDays * 0.1);
-
-        return MapEntry(e, normalized + recencyBonus);
+            ageInDays == 0 ? 1.5 : 1.0 / (1.0 + ageInDays * 0.05);
+        return MapEntry(entry, r.score * recencyBonus);
       }).toList();
 
       scored.sort((a, b) => b.value.compareTo(a.value));
-      final top = scored.take(3).where((s) => s.value > 0.5).toList();
-
-      if (top.isEmpty) return null;
 
       final buf = StringBuffer('Relevant past conversation:\n');
-      for (final entry in top) {
+      for (final entry in scored) {
         buf.writeln('- Q: ${entry.key['query']}');
         buf.writeln('  A: ${entry.key['response']}');
       }

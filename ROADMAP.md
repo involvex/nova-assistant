@@ -42,6 +42,12 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [x] HuggingFace token configuration for authenticated downloads
 - [x] External tool provider abstraction (HTTP, MCP, Local)
 - [x] Multi-turn tool call loop (up to 5 sequential rounds)
+- [x] Streaming tool results - Real-time progress via EventChannel (ToolProgress model, progress bars in ChatBubble)
+- [x] Task management - Task model, TaskService (CRUD, persistence, AI tools), TasksScreen with filters/sort/tags
+- [x] Note taking - Note model, NoteService (CRUD, search, pin, AI tools), NotesScreen with search/tags
+- [x] Document analysis - DocumentExtractor (text/PDF), DocumentChunker with relevance scoring
+- [x] MCP client - McpClient with JSON-RPC 2.0 over HTTP/SSE and stdio
+- [x] MCP server support - McpService server management, MCP Settings UI with add/connect/disconnect
 
 ---
 
@@ -82,14 +88,14 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [x] **Context window management** - Smart truncation via `clearHistory(replayHistory:)` when conversation exceeds 60% token budget
 - [x] **Multi-turn tool calls** - Sequential tool execution loop (up to 5 rounds) in `ModelOrchestrator.processMessage()`
 - [x] **Tool call visualization** - Tool call chips in `ChatBubble` show executing/done state
-- [ ] **Streaming tool results** - Real-time updates during tool execution via platform channels (see [doc/PLAN-features.md](doc/PLAN-features.md))
+- [x] **Streaming tool results** - Real-time progress via EventChannel (ToolProgress model, progress bars in ChatBubble)
 - [x] **Model performance metrics** - `Stopwatch`-based inference time tracking shown per response
 - [x] **MCP-like integration** - External tools via platform channels + JSON schema tool definitions
 - [x] **Auto-model selection** - `ModelSelector.selectForQuery` routes by length, vision, thinking mode
 
 ### Medium Priority
 
-- [ ] **Semantic search** - Vector-based conversation retrieval (currently keyword + recency scoring)
+- [x] **Semantic search** - TF-IDF scoring with stop-word filtering, IDF weighting, and recency bonus
 - [ ] **Conversation summaries** - Automatic conversation summarization
 - [ ] **Proactive suggestions** - AI-suggested quick actions based on context
 - [ ] **Multi-language support** - Detect and respond in user's language
@@ -123,7 +129,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [ ] **Multi-modal input** - Support for audio, video, and document input
 - [ ] **Plugin system** - User-created tools and integrations
 - [ ] **Cloud sync** - Optional encrypted sync across devices
-- [ ] **MCP client** - Full Model Context Protocol client for external tool servers
+- [x] **MCP client** - McpClient with JSON-RPC 2.0 over HTTP/SSE and stdio
 
 ### Medium Priority
 
@@ -138,16 +144,16 @@ This document outlines the planned features and improvements for Nova Assistant.
 ### High Priority
 
 - [ ] **Nova API** - Public API for third-party integrations
-- [ ] **MCP server support** - Model Context Protocol compatibility
+- [x] **MCP server support** - McpService server management, MCP Settings UI with add/connect/disconnect
 - [ ] **Home automation** - Smart home device control
 - [ ] **Calendar integration** - Event creation and management
 
 ### Medium Priority
 
 - [ ] **Email integration** - Read and compose emails
-- [ ] **Task management** - Create and track to-do items (see [doc/PLAN-features.md](doc/PLAN-features.md))
-- [ ] **Note taking** - Create and organize notes (see [doc/PLAN-features.md](doc/PLAN-features.md))
-- [ ] **Document analysis** - PDF and document understanding (see [doc/PLAN-features.md](doc/PLAN-features.md))
+- [x] **Task management** - Task model, TaskService (CRUD, persistence, AI tools), TasksScreen with filters/sort/tags
+- [x] **Note taking** - Note model, NoteService (CRUD, search, pin, AI tools), NotesScreen with search/tags
+- [x] **Document analysis** - DocumentExtractor (text/PDF), DocumentChunker with relevance scoring
 
 ---
 
@@ -230,10 +236,17 @@ This document outlines the planned features and improvements for Nova Assistant.
 - ~~Context window management~~ (token-budget truncation via `clearHistory(replayHistory:)`)
 - ~~Model performance metrics~~ (Stopwatch-based `inferenceTimeMs`)
 - ~~Multi-turn sequential tool execution~~ (5-round loop in `processMessage`)
-- Streaming tool results via platform channels
-- Semantic conversation search (vector-based RAG)
+- ~~Streaming tool results via platform channels~~ (ToolProgress model, EventChannel, progress bars)
+- ~~Task management~~ (Task model, TaskService, TasksScreen, AI tools)
+- ~~Note taking~~ (Note model, NoteService, NotesScreen, AI tools)
+- ~~Document analysis~~ (DocumentExtractor, DocumentChunker)
+- ~~MCP client~~ (McpClient with HTTP/SSE + stdio)
+- ~~MCP server support~~ (McpService, MCP Settings UI)
+- ~~Semantic search~~ (TF-IDF scoring in MemoryService, stop-word removal, IDF weighting)
 - CI testing workflow (automated flutter test + analyze)
 - Unit test coverage to 80%+
+- Widget tests for key screens (TasksScreen, NotesScreen, AssistantScreen)
+- Beginner mode tests (AssistantScreenBeginner, UserPreferencesService)
 
 ### v0.4.0
 - Windows support

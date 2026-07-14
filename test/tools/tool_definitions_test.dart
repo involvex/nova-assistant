@@ -7,8 +7,8 @@ void main() {
       expect(NovaTools.all, isNotEmpty);
     });
 
-    test('all tools list has 9 tools', () {
-      expect(NovaTools.all.length, 9);
+    test('all tools list has 15 tools', () {
+      expect(NovaTools.all.length, 15);
     });
 
     test('each tool has a unique name', () {

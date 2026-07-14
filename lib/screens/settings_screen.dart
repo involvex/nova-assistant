@@ -12,6 +12,8 @@ import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/identity_config_screen.dart';
 import 'package:nova_assistant/screens/mcp_settings_screen.dart';
 import 'package:nova_assistant/screens/memory_management_screen.dart';
+import 'package:nova_assistant/screens/tasks_screen.dart';
+import 'package:nova_assistant/screens/notes_screen.dart';
 import 'package:nova_assistant/screens/conversation_search_screen.dart';
 import 'package:nova_assistant/screens/model_browser_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
@@ -382,6 +384,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 context,
                 MaterialPageRoute<void>(
                   builder: (_) => const IdentityConfigScreen(),
+                ),
+              );
+            },
+          ),
+          _actionTile(
+            icon: Icons.task_alt,
+            title: 'Tasks',
+            subtitle: 'View and manage your tasks',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const TasksScreen(),
+                ),
+              );
+            },
+          ),
+          _actionTile(
+            icon: Icons.note_alt_outlined,
+            title: 'Notes',
+            subtitle: 'View and manage your notes',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const NotesScreen(),
                 ),
               );
             },

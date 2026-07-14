@@ -17,6 +17,12 @@ class NovaTools {
     sendSms,
     openSettings,
     takeScreenshot,
+    createTask,
+    listTasks,
+    completeTask,
+    createNote,
+    searchNotes,
+    listNotes,
   ];
 
   static final Tool getTime = Tool(
@@ -147,6 +153,101 @@ class NovaTools {
     description: 'Capture a screenshot of the current screen. '
         'Use this ONLY when the user explicitly asks to take '
         'a screenshot or capture the screen.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{},
+    },
+  );
+
+  static final Tool createTask = Tool(
+    name: 'create_task',
+    description: 'Create a new to-do task. '
+        'Use this ONLY when the user asks to create, add, or remember a task or to-do item.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{
+        'title': {'type': 'string', 'description': 'Task title'},
+        'description': {
+          'type': 'string',
+          'description': 'Task details or description',
+        },
+        'priority': {
+          'type': 'string',
+          'description': 'Priority level',
+        },
+        'due_date': {
+          'type': 'string',
+          'description': 'Due date in ISO 8601 format (YYYY-MM-DD)',
+        },
+        'tags': {
+          'type': 'string',
+          'description': 'Comma-separated tags',
+        },
+      },
+      'required': ['title'],
+    },
+  );
+
+  static final Tool listTasks = Tool(
+    name: 'list_tasks',
+    description: 'List pending to-do tasks. '
+        'Use this when the user asks about their tasks, to-dos, or what they need to do.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{},
+    },
+  );
+
+  static final Tool completeTask = Tool(
+    name: 'complete_task',
+    description: 'Mark a to-do task as completed. '
+        'Use this when the user wants to check off, finish, or complete a task.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{
+        'title': {
+          'type': 'string',
+          'description': 'Title of the task to complete (fuzzy match ok)',
+        },
+      },
+      'required': ['title'],
+    },
+  );
+
+  static final Tool createNote = Tool(
+    name: 'create_note',
+    description: 'Save a note. '
+        'Use this when the user asks to save, remember, or note something down.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{
+        'title': {'type': 'string', 'description': 'Note title'},
+        'content': {'type': 'string', 'description': 'Note content'},
+        'tags': {
+          'type': 'string',
+          'description': 'Comma-separated tags',
+        },
+      },
+      'required': ['title', 'content'],
+    },
+  );
+
+  static final Tool searchNotes = Tool(
+    name: 'search_notes',
+    description: 'Search through saved notes. '
+        'Use this when the user asks to find, look up, or recall saved notes.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{
+        'query': {'type': 'string', 'description': 'Search query'},
+      },
+      'required': ['query'],
+    },
+  );
+
+  static final Tool listNotes = Tool(
+    name: 'list_notes',
+    description: 'List recent or pinned notes.',
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},

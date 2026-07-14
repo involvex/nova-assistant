@@ -5,8 +5,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' as gemma;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import 'package:nova_assistant/models/external_tool.dart';
+import 'package:nova_assistant/services/mcp_client.dart';
 
 class McpService {
   static McpService? _instance;
@@ -15,6 +17,8 @@ class McpService {
 
   static const _prefsKey = 'nova_mcp_tools';
   static const _sourcesKey = 'nova_mcp_sources';
+  static const _serversKey = 'nova_mcp_servers';
+  static const _uuid = Uuid();
 
   final _toolsController = StreamController<List<ExternalTool>>.broadcast();
   Stream<List<ExternalTool>> get toolsStream => _toolsController.stream;
@@ -22,11 +26,18 @@ class McpService {
   final _sourcesController = StreamController<List<DataSource>>.broadcast();
   Stream<List<DataSource>> get sourcesStream => _sourcesController.stream;
 
+  final _serversController =
+      StreamController<List<McpServerConfig>>.broadcast();
+  Stream<List<McpServerConfig>> get serversStream => _serversController.stream;
+
   List<ExternalTool> _tools = [];
   List<DataSource> _sources = [];
+  List<McpServerConfig> _servers = [];
+  final Map<String, McpClient> _clients = {};
 
   List<ExternalTool> get tools => List.unmodifiable(_tools);
   List<DataSource> get sources => List.unmodifiable(_sources);
+  List<McpServerConfig> get servers => List.unmodifiable(_servers);
 
   final Map<ExternalToolType, ExternalToolProvider> _providers = {
     ExternalToolType.http: HttpToolProvider(),
@@ -36,8 +47,9 @@ class McpService {
   Future<void> initialize() async {
     await _loadTools();
     await _loadSources();
+    await _loadServers();
     debugPrint(
-      'MCP service initialized with ${_tools.length} tools, ${_sources.length} sources',
+      'MCP service initialized with ${_tools.length} tools, ${_sources.length} sources, ${_servers.length} servers',
     );
   }
 
@@ -89,6 +101,138 @@ class McpService {
     } catch (e) {
       debugPrint('Failed to save MCP sources: $e');
     }
+  }
+
+  // --- MCP Server Management ---
+
+  Future<void> _loadServers() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString(_serversKey);
+      if (jsonStr != null) {
+        final list = (jsonDecode(jsonStr) as List).cast<Map<String, dynamic>>();
+        _servers = list.map(McpServerConfig.fromJson).toList();
+        _serversController.add(_servers);
+      }
+    } catch (e) {
+      debugPrint('Failed to load MCP servers: $e');
+    }
+  }
+
+  Future<void> _saveServers() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final json = jsonEncode(_servers.map((e) => e.toJson()).toList());
+      await prefs.setString(_serversKey, json);
+      _serversController.add(_servers);
+    } catch (e) {
+      debugPrint('Failed to save MCP servers: $e');
+    }
+  }
+
+  Future<void> addServer(McpServerConfig server) async {
+    _servers.add(server);
+    await _saveServers();
+  }
+
+  Future<void> removeServer(String serverId) async {
+    await disconnectServer(serverId);
+    _servers.removeWhere((s) => s.id == serverId);
+    // Remove tools from this server
+    _tools.removeWhere((t) => t.config['serverId'] == serverId);
+    await _saveServers();
+    await _saveTools();
+  }
+
+  Future<void> toggleServer(String serverId, bool enabled) async {
+    final index = _servers.indexWhere((s) => s.id == serverId);
+    if (index >= 0) {
+      _servers[index].enabled = enabled;
+      if (!enabled) {
+        await disconnectServer(serverId);
+      }
+      await _saveServers();
+    }
+  }
+
+  McpServerConfig? getServer(String serverId) {
+    try {
+      return _servers.firstWhere((s) => s.id == serverId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> connectServer(String serverId) async {
+    final config = getServer(serverId);
+    if (config == null || !config.enabled) return false;
+
+    // Disconnect existing client
+    await disconnectServer(serverId);
+
+    final client = McpClient(config);
+    final connected = await client.connect();
+
+    if (connected) {
+      _clients[serverId] = client;
+      await _discoverTools(client);
+      debugPrint('Connected to MCP server: ${config.name}');
+      return true;
+    }
+
+    debugPrint('Failed to connect to MCP server: ${config.name}');
+    return false;
+  }
+
+  Future<void> disconnectServer(String serverId) async {
+    final client = _clients.remove(serverId);
+    if (client != null) {
+      await client.disconnect();
+      // Remove tools from this server
+      _tools.removeWhere((t) => t.config['serverId'] == serverId);
+      await _saveTools();
+    }
+  }
+
+  Future<void> _discoverTools(McpClient client) async {
+    final mcpTools = await client.listTools();
+
+    for (final toolInfo in mcpTools) {
+      // Check if tool already exists
+      final existing = _tools.where(
+        (t) =>
+            t.name == toolInfo.name && t.config['serverId'] == client.config.id,
+      );
+
+      if (existing.isEmpty) {
+        final externalTool = ExternalTool(
+          id: _uuid.v4(),
+          name: toolInfo.name,
+          description: toolInfo.description,
+          type: ExternalToolType.mcp,
+          parameters: Map<String, Object>.from(toolInfo.inputSchema),
+          config: {
+            'serverId': client.config.id,
+            'serverUrl': client.config.url,
+          },
+          enabled: true,
+        );
+        _tools.add(externalTool);
+      }
+    }
+
+    await _saveTools();
+  }
+
+  Future<Map<String, dynamic>?> executeMcpTool(
+    String serverId,
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    final client = _clients[serverId];
+    if (client == null) return null;
+
+    return client.callTool(toolName, args);
   }
 
   Future<void> addTool(ExternalTool tool) async {

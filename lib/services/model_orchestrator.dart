@@ -15,6 +15,8 @@ import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/memory_service.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
+import 'package:nova_assistant/services/task_service.dart';
+import 'package:nova_assistant/services/note_service.dart';
 import 'package:nova_assistant/platform/tool_executor_service.dart';
 
 enum DownloadConsent { download, pickFile, cancel }
@@ -1180,32 +1182,18 @@ class ModelOrchestrator {
                   'status': 'executing',
                 });
 
-                // Try MCP external tools first, then native tools
-                ExternalToolResult? mcpResult;
-                if (McpService.instance.getTool(toolName) != null) {
-                  mcpResult = await McpService.instance.executeTool(
-                    toolName,
-                    toolArgs,
-                  );
+                await for (final update in _executeToolWithProgress(
+                  toolName,
+                  toolArgs,
+                  allToolCalls,
+                  model,
+                  currentThinking,
+                  fullResponse,
+                  thinkingMode,
+                )) {
+                  yield update;
                 }
 
-                final Map<String, dynamic> toolResult;
-                if (mcpResult != null) {
-                  toolResult = mcpResult.toJson();
-                } else {
-                  toolResult = await ToolExecutorService.instance.executeTool(
-                    toolName,
-                    toolArgs,
-                  );
-                }
-
-                // Update the last tool call with result
-                if (allToolCalls.isNotEmpty) {
-                  allToolCalls.last['status'] = 'done';
-                  allToolCalls.last['result'] = toolResult;
-                }
-
-                await _sendToolResponse(toolName, toolResult);
                 hasPendingToolCalls = true;
               }
             } else {
@@ -1236,17 +1224,18 @@ class ModelOrchestrator {
               'status': 'executing',
             });
 
-            final toolResult = await ToolExecutorService.instance.executeTool(
+            await for (final update in _executeToolWithProgress(
               event.name,
               Map<String, dynamic>.from(event.args),
-            );
-
-            if (allToolCalls.isNotEmpty) {
-              allToolCalls.last['status'] = 'done';
-              allToolCalls.last['result'] = toolResult;
+              allToolCalls,
+              model,
+              currentThinking,
+              fullResponse,
+              thinkingMode,
+            )) {
+              yield update;
             }
 
-            await _sendToolResponse(event.name, toolResult);
             hasPendingToolCalls = true;
           }
         }
@@ -1358,6 +1347,100 @@ class ModelOrchestrator {
       if (decoded is Map<String, dynamic>) return decoded;
     } catch (_) {}
     return null;
+  }
+
+  /// Execute a tool with progress streaming. Returns a stream of
+  /// [InferenceResult] updates that the caller should yield from.
+  Stream<InferenceResult> _executeToolWithProgress(
+    String toolName,
+    Map<String, dynamic> toolArgs,
+    List<Map<String, dynamic>> allToolCalls,
+    NovaModel model,
+    String? currentThinking,
+    String fullResponse,
+    bool thinkingMode,
+  ) async* {
+    // Subscribe to native progress events
+    final progressSub = ToolExecutorService.instance.onProgress
+        .where((p) => p.toolName == toolName)
+        .listen((progress) {
+      // Update the tool call entry with progress info
+      if (allToolCalls.isNotEmpty) {
+        allToolCalls.last['progress'] = progress.message;
+        allToolCalls.last['progressPercent'] = progress.percent;
+        allToolCalls.last['progressStage'] = progress.stage.name;
+      }
+    });
+
+    // Also yield our own starting event
+    if (allToolCalls.isNotEmpty) {
+      allToolCalls.last['progress'] = 'Starting $toolName...';
+    }
+    yield InferenceResult(
+      text: fullResponse,
+      model: model,
+      isStreaming: true,
+      thinking: thinkingMode ? currentThinking : null,
+      toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+    );
+
+    Map<String, dynamic> toolResult;
+    try {
+      // Route task and note tools to Dart services
+      const dartTools = {
+        'create_task',
+        'list_tasks',
+        'complete_task',
+        'create_note',
+        'search_notes',
+        'list_notes',
+      };
+      if (dartTools.contains(toolName)) {
+        if (['create_task', 'list_tasks', 'complete_task'].contains(toolName)) {
+          toolResult =
+              await TaskService.instance.executeTool(toolName, toolArgs);
+        } else {
+          toolResult =
+              await NoteService.instance.executeTool(toolName, toolArgs);
+        }
+      } else {
+        // Try MCP external tools first, then native tools
+        ExternalToolResult? mcpResult;
+        if (McpService.instance.getTool(toolName) != null) {
+          mcpResult = await McpService.instance.executeTool(toolName, toolArgs);
+        }
+
+        if (mcpResult != null) {
+          toolResult = mcpResult.toJson();
+        } else {
+          toolResult = await ToolExecutorService.instance.executeTool(
+            toolName,
+            toolArgs,
+          );
+        }
+      }
+    } finally {
+      await progressSub.cancel();
+    }
+
+    // Update with completion
+    if (allToolCalls.isNotEmpty) {
+      allToolCalls.last['status'] = 'done';
+      allToolCalls.last['result'] = toolResult;
+      allToolCalls.last['progress'] = null;
+      allToolCalls.last['progressPercent'] = null;
+    }
+
+    // Yield final state with completed tool
+    yield InferenceResult(
+      text: fullResponse,
+      model: model,
+      isStreaming: true,
+      thinking: thinkingMode ? currentThinking : null,
+      toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+    );
+
+    await _sendToolResponse(toolName, toolResult);
   }
 
   /// Send a tool response to the model. For [take_screenshot], the image

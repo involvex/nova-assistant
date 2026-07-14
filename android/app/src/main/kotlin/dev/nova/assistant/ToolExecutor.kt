@@ -9,19 +9,34 @@ import android.os.Build
 import android.provider.AlarmClock
 import android.provider.Settings
 import android.util.Log
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 /**
  * ToolExecutor — executes function calls made by the Gemma model.
  * Called from Flutter via platform channel, runs in the native Android context.
+ * Supports progress streaming via EventChannel for long-running tools.
  */
 object ToolExecutor {
 
     private const val TAG = "NovaToolExecutor"
-    private val CHANNEL = "dev.nova.assistant/tools"
+    private const val CHANNEL = "dev.nova.assistant/tools"
+    private const val PROGRESS_CHANNEL = "dev.nova.assistant/tools_progress"
+
+    private var progressEventSink: EventChannel.EventSink? = null
 
     fun registerWith(messenger: io.flutter.plugin.common.BinaryMessenger, context: Context) {
+        EventChannel(messenger, PROGRESS_CHANNEL).setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                progressEventSink = events
+            }
+
+            override fun onCancel(arguments: Any?) {
+                progressEventSink = null
+            }
+        })
+
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
             val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
             val toolName = call.method
@@ -44,8 +59,23 @@ object ToolExecutor {
                 result.success(output)
             } catch (e: Exception) {
                 Log.e(TAG, "Tool execution failed: $toolName — ${e.message}")
+                sendProgress(toolName, "error", null, e.message)
                 result.error("TOOL_ERROR", e.message, null)
             }
+        }
+    }
+
+    fun sendProgress(toolName: String, stage: String, percent: Double?, message: String?) {
+        try {
+            val event = hashMapOf<String, Any?>(
+                "toolName" to toolName,
+                "stage" to stage,
+                "percent" to percent,
+                "message" to message,
+            )
+            progressEventSink?.success(event)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send progress: ${e.message}")
         }
     }
 
@@ -67,6 +97,7 @@ object ToolExecutor {
         val minute = args["minute"] as? Int ?: throw IllegalArgumentException("minute required")
         val message = args["message"] as? String ?: "Alarm"
 
+        sendProgress("set_alarm", "executing", 0.5, "Setting alarm for $hour:$minute...")
         val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
             putExtra(AlarmClock.EXTRA_HOUR, hour)
             putExtra(AlarmClock.EXTRA_MINUTES, minute)
@@ -75,6 +106,7 @@ object ToolExecutor {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
 
+        sendProgress("set_alarm", "done", 1.0, null)
         return mapOf("success" to true, "alarmSet" to "$hour:$minute — $message")
     }
 
@@ -110,25 +142,31 @@ object ToolExecutor {
         val query = args["query"] as? String
             ?: throw IllegalArgumentException("query required")
 
+        sendProgress("search_web", "executing", 0.3, "Opening browser for: $query")
         val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
             putExtra("query", query)
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
 
+        sendProgress("search_web", "done", 1.0, null)
         return mapOf("success" to true, "searched" to query)
     }
 
     private fun getWeather(args: Map<*, *>): Map<String, Any> {
         val location = args["location"] as? String ?: "current location"
-        // In a production app, you'd call a weather API here.
-        // For now, return a placeholder.
-        return mapOf(
+        sendProgress("get_weather", "executing", 0.3, "Fetching weather for $location...")
+
+        // Placeholder — in production, call a real weather API here.
+        val result = mapOf(
             "location" to location,
-            "temperature" to "22°C",
+            "temperature" to "22\u00B0C",
             "condition" to "Partly Cloudy",
-            "note" to "Weather API not connected — set up OpenWeatherMap or similar"
+            "note" to "Weather API not connected \u2014 set up OpenWeatherMap or similar"
         )
+
+        sendProgress("get_weather", "done", 1.0, null)
+        return result
     }
 
     private fun sendSms(context: Context, args: Map<*, *>): Map<String, Any> {
@@ -136,6 +174,7 @@ object ToolExecutor {
             ?: throw IllegalArgumentException("phone number required")
         val message = args["message"] as? String ?: ""
 
+        sendProgress("send_sms", "executing", 0.4, "Opening SMS for $phoneNumber...")
         val intent = Intent(Intent.ACTION_SENDTO).apply {
             data = Uri.parse("smsto:$phoneNumber")
             putExtra("sms_body", message)
@@ -143,6 +182,7 @@ object ToolExecutor {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
 
+        sendProgress("send_sms", "done", 1.0, null)
         return mapOf("success" to true, "sentTo" to phoneNumber)
     }
 

@@ -241,15 +241,18 @@ class ChatBubble extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 4,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: calls.map((call) {
           final name = call['name'] as String? ?? 'unknown';
           final status = call['status'] as String? ?? 'done';
+          final progress = call['progress'] as String?;
+          final progressPercent = (call['progressPercent'] as num?)?.toDouble();
           final isExecuting = status == 'executing';
+          final hasProgress = isExecuting && progress != null;
 
           return Container(
+            margin: const EdgeInsets.only(bottom: 4),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
               color: isExecuting
@@ -262,37 +265,63 @@ class ChatBubble extends StatelessWidget {
                     : Colors.white.withValues(alpha: 0.1),
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (isExecuting)
-                  const SizedBox(
-                    width: 10,
-                    height: 10,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Color(0xFF6C63FF),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isExecuting)
+                      const SizedBox(
+                        width: 10,
+                        height: 10,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Color(0xFF6C63FF),
+                          ),
+                        ),
+                      )
+                    else
+                      const Icon(
+                        Icons.check_circle_outline,
+                        size: 12,
+                        color: Colors.green,
+                      ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _formatToolName(name),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isExecuting
+                            ? const Color(0xFF6C63FF)
+                            : Colors.grey[400],
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                  )
-                else
-                  const Icon(
-                    Icons.check_circle_outline,
-                    size: 12,
-                    color: Colors.green,
-                  ),
-                const SizedBox(width: 4),
-                Text(
-                  _formatToolName(name),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isExecuting
-                        ? const Color(0xFF6C63FF)
-                        : Colors.grey[400],
-                    fontWeight: FontWeight.w500,
-                  ),
+                  ],
                 ),
+                if (hasProgress) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    progress,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                  if (progressPercent != null) ...[
+                    const SizedBox(height: 2),
+                    LinearProgressIndicator(
+                      value: progressPercent,
+                      backgroundColor: Colors.grey[800],
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Color(0xFF6C63FF),
+                      ),
+                      minHeight: 2,
+                    ),
+                  ],
+                ],
               ],
             ),
           );

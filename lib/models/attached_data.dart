@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:nova_assistant/services/document_extractor.dart';
+
 enum AttachedDataType { file, url, text }
 
 class AttachedData {
@@ -99,48 +101,16 @@ class AttachedData {
     final file = File(filePath!);
     if (!await file.exists()) return '[File: $name (not found)]';
 
-    final ext = name.split('.').last.toLowerCase();
-    switch (ext) {
-      case 'txt':
-      case 'md':
-      case 'json':
-      case 'csv':
-      case 'xml':
-      case 'yaml':
-      case 'yml':
-      case 'log':
-      case 'dart':
-      case 'js':
-      case 'ts':
-      case 'py':
-      case 'java':
-      case 'kt':
-      case 'swift':
-      case 'c':
-      case 'cpp':
-      case 'h':
-      case 'html':
-      case 'css':
-      case 'sql':
-      case 'sh':
-      case 'bat':
-      case 'ps1':
-        final content = await file.readAsString();
-        final preview = content.length > 5000
-            ? '${content.substring(0, 5000)}\n\n... (truncated, ${content.length} chars total)'
-            : content;
-        return '[File: $name]\n```\n$preview\n```';
-      case 'pdf':
-        return '[File: $name (PDF - ${fileSizeMB?.toStringAsFixed(1) ?? "?"}MB)]';
-      case 'jpg':
-      case 'jpeg':
-      case 'png':
-      case 'gif':
-      case 'webp':
-        return '[Image: $name]';
-      default:
-        return '[File: $name ($ext)]';
+    // Delegate to DocumentExtractor for all file types
+    final extracted = await DocumentExtractor.extractText(filePath!, name);
+
+    // For images, return as-is (handled by vision model)
+    if (DocumentExtractor.isImageFile(name)) {
+      return extracted;
     }
+
+    // For text/PDF/other, wrap in a context block
+    return '[File: $name]\n```\n$extracted\n```';
   }
 
   Future<String> _buildUrlContext() async {

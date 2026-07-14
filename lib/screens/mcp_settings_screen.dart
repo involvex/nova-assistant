@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:uuid/uuid.dart';
 
 import 'package:nova_assistant/models/external_tool.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
+import 'package:nova_assistant/services/mcp_client.dart';
 
 class McpSettingsScreen extends StatefulWidget {
   const McpSettingsScreen({super.key});
@@ -17,17 +19,22 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
   final _mcpService = McpService.instance;
   List<ExternalTool> _tools = [];
   List<DataSource> _sources = [];
+  List<McpServerConfig> _servers = [];
 
   @override
   void initState() {
     super.initState();
     _tools = _mcpService.tools;
     _sources = _mcpService.sources;
+    _servers = _mcpService.servers;
     _mcpService.toolsStream.listen((tools) {
       if (mounted) setState(() => _tools = tools);
     });
     _mcpService.sourcesStream.listen((sources) {
       if (mounted) setState(() => _sources = sources);
+    });
+    _mcpService.serversStream.listen((servers) {
+      if (mounted) setState(() => _servers = servers);
     });
   }
 
@@ -53,6 +60,15 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
           _buildAddButton(
             'Add MCP Server Tool',
             () => _showAddToolDialog(ExternalToolType.mcp),
+          ),
+          const SizedBox(height: 24),
+          _buildSectionHeader('Mcp Servers', Icons.dns_outlined),
+          if (_servers.isEmpty) _buildEmptyState('No MCP servers configured'),
+          ..._servers.map(_buildServerTile),
+          const SizedBox(height: 8),
+          _buildAddButton(
+            'Add MCP Server',
+            _showAddServerDialog,
           ),
           const SizedBox(height: 24),
           _buildSectionHeader('Data Sources', Icons.storage_outlined),
@@ -134,7 +150,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
               onChanged: (value) {
                 _mcpService.updateTool(tool.copyWith(enabled: value));
               },
-              activeThumbColor: const Color(0xFF6C63FF),
+              activeColor: const Color(0xFF6C63FF),
             ),
             PopupMenuButton<String>(
               onSelected: (action) {
@@ -145,6 +161,247 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
                 const PopupMenuItem(value: 'edit', child: Text('Edit')),
                 const PopupMenuItem(value: 'delete', child: Text('Delete')),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildServerTile(McpServerConfig server) {
+    return Card(
+      color: const Color(0xFF1A1A2E),
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: Icon(
+          Icons.dns_outlined,
+          color: server.connected ? Colors.green : Colors.grey,
+        ),
+        title: Text(
+          server.name,
+          style: const TextStyle(color: Colors.white),
+        ),
+        subtitle: Text(
+          server.connected ? 'Connected' : 'Disconnected',
+          style: TextStyle(
+            color: server.connected ? Colors.green : Colors.grey,
+            fontSize: 12,
+          ),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Switch(
+              value: server.enabled,
+              onChanged: (value) {
+                _mcpService.toggleServer(server.id, value);
+              },
+              activeColor: const Color(0xFF6C63FF),
+            ),
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'connect') {
+                  _mcpService.connectServer(server.id);
+                } else if (value == 'disconnect') {
+                  _mcpService.disconnectServer(server.id);
+                } else if (value == 'delete') {
+                  _showDeleteServerConfirm(server);
+                }
+              },
+              itemBuilder: (context) => [
+                if (!server.connected)
+                  const PopupMenuItem(
+                    value: 'connect',
+                    child: Text('Connect'),
+                  ),
+                if (server.connected)
+                  const PopupMenuItem(
+                    value: 'disconnect',
+                    child: Text('Disconnect'),
+                  ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Delete', style: TextStyle(color: Colors.red)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDeleteServerConfirm(McpServerConfig server) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2E),
+        title:
+            const Text('Delete Server', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Remove "${server.name}" and its discovered tools?',
+          style: const TextStyle(color: Colors.grey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              _mcpService.removeServer(server.id);
+              Navigator.pop(ctx);
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddServerDialog() {
+    final nameController = TextEditingController();
+    final urlController = TextEditingController();
+    final tokenController = TextEditingController();
+    final commandController = TextEditingController();
+    McpTransport transport = McpTransport.httpSse;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2E),
+          title: const Text(
+            'Add MCP Server',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _dialogTextField(nameController, 'Server name'),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setDialogState(
+                            () => transport = McpTransport.httpSse),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: transport == McpTransport.httpSse
+                                ? const Color(0xFF6C63FF).withValues(alpha: 0.2)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: transport == McpTransport.httpSse
+                                  ? const Color(0xFF6C63FF)
+                                  : Colors.grey[700]!,
+                            ),
+                          ),
+                          child: Text(
+                            'HTTP/SSE',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: transport == McpTransport.httpSse
+                                  ? const Color(0xFF6C63FF)
+                                  : Colors.grey,
+                              fontSize: 13,
+                              fontWeight: transport == McpTransport.httpSse
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setDialogState(
+                            () => transport = McpTransport.stdio),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: transport == McpTransport.stdio
+                                ? const Color(0xFF6C63FF).withValues(alpha: 0.2)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: transport == McpTransport.stdio
+                                  ? const Color(0xFF6C63FF)
+                                  : Colors.grey[700]!,
+                            ),
+                          ),
+                          child: Text(
+                            'Stdio',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: transport == McpTransport.stdio
+                                  ? const Color(0xFF6C63FF)
+                                  : Colors.grey,
+                              fontSize: 13,
+                              fontWeight: transport == McpTransport.stdio
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (transport == McpTransport.httpSse) ...[
+                  const SizedBox(height: 12),
+                  _dialogTextField(urlController, 'Server URL'),
+                  const SizedBox(height: 12),
+                  _dialogTextField(tokenController, 'Auth token (optional)'),
+                ] else ...[
+                  const SizedBox(height: 12),
+                  _dialogTextField(commandController, 'Command (e.g. npx)'),
+                  const SizedBox(height: 12),
+                  _dialogTextField(
+                      urlController, 'Arguments (comma-separated)'),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (nameController.text.isEmpty) return;
+
+                final args = transport == McpTransport.stdio
+                    ? urlController.text
+                        .split(',')
+                        .map((a) => a.trim())
+                        .where((a) => a.isNotEmpty)
+                        .toList()
+                    : <String>[];
+
+                final server = McpServerConfig(
+                  id: const Uuid().v4(),
+                  name: nameController.text.trim(),
+                  url: urlController.text.trim(),
+                  transport: transport,
+                  authToken: tokenController.text.isEmpty
+                      ? null
+                      : tokenController.text.trim(),
+                  command: transport == McpTransport.stdio
+                      ? commandController.text.trim()
+                      : null,
+                  args: args,
+                );
+
+                _mcpService.addServer(server);
+                Navigator.pop(ctx);
+              },
+              child: const Text('Add'),
             ),
           ],
         ),
@@ -178,7 +435,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
               onChanged: (value) {
                 _mcpService.updateSource(source.copyWith(enabled: value));
               },
-              activeThumbColor: const Color(0xFF6C63FF),
+              activeColor: const Color(0xFF6C63FF),
             ),
             PopupMenuButton<String>(
               onSelected: (action) {

@@ -8,6 +8,9 @@ import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/assistant_screen_beginner.dart';
 import 'package:nova_assistant/screens/onboarding/onboarding_screen.dart';
 import 'package:nova_assistant/services/memory_service.dart';
+import 'package:nova_assistant/services/task_service.dart';
+import 'package:nova_assistant/services/note_service.dart';
+import 'package:nova_assistant/services/notification_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,6 +34,12 @@ void main() async {
     await _repairModels();
 
     await MemoryService.initialize();
+
+    await TaskService.instance.initialize();
+    await NoteService.instance.initialize();
+
+    await NotificationService.instance.initialize();
+    await NotificationService.instance.requestPermission();
 
     _prefetchModels();
   } catch (e) {

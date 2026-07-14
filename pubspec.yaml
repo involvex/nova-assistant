@@ -46,6 +46,13 @@ dependencies:
   image_picker: ^1.1.2
   package_info_plus: 8.0.2
 
+  # Notifications
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.10.1
+
+  # Sharing
+  share_plus: ^10.1.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

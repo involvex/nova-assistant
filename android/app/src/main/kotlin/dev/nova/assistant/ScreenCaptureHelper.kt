@@ -50,7 +50,13 @@ object ScreenCaptureHelper {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getLatestScreenshot" -> {
-                    val frame = _latestFrame
+                    // First check our own captured frame
+                    var frame = _latestFrame
+                    // If no frame captured yet, check if AssistantActivity cached a screenshot
+                    // (this happens when launched via assistant button with screen capture)
+                    if (frame == null) {
+                        frame = AssistantActivity.latestScreenshot
+                    }
                     if (frame != null) {
                         Log.d(TAG, "Returning screenshot: ${frame.size} bytes")
                         result.success(frame)
@@ -176,6 +182,14 @@ object ScreenCaptureHelper {
     }
 
     fun stopCapture() {
+        // Just pause capturing - keep the projection alive to avoid re-prompting
+        // The permission persists until the app is closed or we explicitly release
+        isCapturing = false
+        Log.d(TAG, "Screen capture paused (projection kept alive)")
+    }
+
+    fun releaseProjection() {
+        // Truly release the projection - call this when cleaning up completely
         isCapturing = false
         try { mediaProjection?.stop() } catch (_: Exception) {}
         mediaProjection = null
@@ -184,7 +198,7 @@ object ScreenCaptureHelper {
         captureThread?.quitSafely()
         captureThread = null
         captureHandler = null
-        Log.d(TAG, "Screen capture stopped")
+        Log.d(TAG, "Screen capture fully released")
     }
 
     fun onScreenCapturePermissionResult(granted: Boolean) {

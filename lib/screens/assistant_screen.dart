@@ -17,6 +17,8 @@ import 'package:nova_assistant/tools/tool_definitions.dart';
 import 'package:nova_assistant/widgets/chat_bubble.dart';
 import 'package:nova_assistant/widgets/voice_input.dart';
 import 'package:nova_assistant/screens/settings_screen.dart';
+import 'package:nova_assistant/screens/model_selector_sheet.dart';
+import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AssistantScreen extends StatefulWidget {
@@ -37,8 +39,12 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _thinkingMode = false;
   bool _offlineMode = false;
   Uint8List? _currentScreenshot;
+  bool _isLoadingInitialScreenshot =
+      true; // Track if initial screenshot is loading
   String _status = 'Ready';
   bool _shouldPreserveScreenshot = false;
+  NovaModel? _selectedModel; // Track selected model for UI
+  CustomModel? _selectedCustomModel; // Track selected custom model for UI
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
   StreamSubscription<void>? _historyClearedSub;
 
@@ -46,6 +52,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _selectedModel = ModelOrchestrator.instance.preferredModelType;
     _loadThinkingMode();
     _loadInitialScreenshot();
     _loadHistory();
@@ -224,9 +231,19 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _loadInitialScreenshot() async {
-    final screenshot = await ScreenshotService.instance.getLatestScreenshot();
-    if (screenshot != null && mounted) {
-      setState(() => _currentScreenshot = screenshot);
+    _isLoadingInitialScreenshot = true;
+    try {
+      final screenshot = await ScreenshotService.instance.getLatestScreenshot();
+      if (mounted) {
+        setState(() {
+          _currentScreenshot = screenshot;
+          _isLoadingInitialScreenshot = false;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingInitialScreenshot = false);
+      }
     }
   }
 
@@ -305,6 +322,16 @@ class _AssistantScreenState extends State<AssistantScreen>
     final text = _inputController.text.trim();
     if (text.isEmpty || _isGenerating) return;
 
+    // Wait for initial screenshot to load if still loading (from assistant mode)
+    // This ensures screenshot is captured before model selection happens
+    if (_isLoadingInitialScreenshot && _currentScreenshot == null) {
+      debugPrint('Waiting for initial screenshot to load...');
+      while (_isLoadingInitialScreenshot && _currentScreenshot == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      debugPrint('Screenshot loaded: ${_currentScreenshot != null}');
+    }
+
     _inputController.clear();
     _inputFocus.unfocus();
 
@@ -348,6 +375,9 @@ class _AssistantScreenState extends State<AssistantScreen>
         thinkingMode: _thinkingMode,
         tools: _toolsForQuery(text),
         attachments: _attachmentManager.attachments,
+        // Force heavy model only in auto mode; respect model overrides
+        forcePrimaryModel:
+            _selectedModel == null && _selectedCustomModel == null,
       )) {
         if (!mounted) break;
 
@@ -435,6 +465,66 @@ class _AssistantScreenState extends State<AssistantScreen>
         ),
       );
     }
+  }
+
+  Future<void> _showModelSelectorSheet(BuildContext context) async {
+    final isAutoMode = _selectedModel == null && _selectedCustomModel == null;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => ModelSelectorSheet(
+        currentSelection: _selectedModel,
+        currentCustomModel: _selectedCustomModel,
+        isAutoMode: isAutoMode,
+        onModelSelected: (model) {
+          _selectedModel = model;
+          _selectedCustomModel = null;
+          if (model != null) {
+            ModelOrchestrator.instance.preferredModelType = model;
+            ModelOrchestrator.instance.preferredCustomModel = null;
+          }
+          setState(() {});
+        },
+        onCustomModelSelected: (model) {
+          _selectedCustomModel = model;
+          _selectedModel = null;
+          if (model != null) {
+            ModelOrchestrator.instance.preferredCustomModel = model;
+            ModelOrchestrator.instance.preferredModelType = null;
+          }
+          setState(() {});
+        },
+        onAutoModeChanged: (auto) {
+          if (auto) {
+            _selectedModel = null;
+            _selectedCustomModel = null;
+            ModelOrchestrator.instance.clearModelOverride();
+          }
+          setState(() {});
+        },
+        onImportModel: () {
+          Navigator.pop(context);
+          _showCustomModelImportSheet();
+        },
+      ),
+    );
+  }
+
+  Future<void> _showCustomModelImportSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => CustomModelImportSheet(
+        onInstalled: (model) {
+          setState(() {
+            _selectedCustomModel = model;
+          });
+        },
+      ),
+    );
   }
 
   Future<void> _pickImageFromGallery() async {
@@ -812,129 +902,11 @@ class _AssistantScreenState extends State<AssistantScreen>
             ),
           ),
 
-          // Model picker
+          // Model picker - opens bottom sheet
           Tooltip(
             message: 'Select model',
-            child: PopupMenuButton<String>(
-              initialValue:
-                  ModelOrchestrator.instance.preferredModelType == null
-                      ? 'auto'
-                      : ModelOrchestrator.instance.preferredModelType!.name,
-              onSelected: (value) {
-                if (value == 'auto') {
-                  ModelOrchestrator.instance.clearModelOverride();
-                } else {
-                  final model = NovaModel.values.firstWhere(
-                    (m) => m.name == value,
-                    orElse: () => NovaModel.gemma4E2b,
-                  );
-                  ModelOrchestrator.instance.preferredModelType = model;
-                }
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem<String>(
-                  value: 'auto',
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.auto_awesome,
-                        size: 18,
-                        color: ModelOrchestrator.instance.preferredModelType ==
-                                null
-                            ? const Color(0xFF6C63FF)
-                            : Colors.grey,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Auto',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: ModelOrchestrator
-                                            .instance.preferredModelType ==
-                                        null
-                                    ? FontWeight.bold
-                                    : FontWeight.w500,
-                                color: ModelOrchestrator
-                                            .instance.preferredModelType ==
-                                        null
-                                    ? const Color(0xFF6C63FF)
-                                    : null,
-                              ),
-                            ),
-                            Text(
-                              'Smart selection',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (ModelOrchestrator.instance.preferredModelType == null)
-                        const Icon(Icons.check,
-                            size: 16, color: Color(0xFF6C63FF)),
-                    ],
-                  ),
-                ),
-                const PopupMenuDivider(),
-                ...NovaModel.values.map((model) {
-                  final isSelected =
-                      ModelOrchestrator.instance.preferredModelType == model;
-                  return PopupMenuItem<String>(
-                    value: model.name,
-                    child: Row(
-                      children: [
-                        Icon(
-                          model.hasThinking
-                              ? Icons.psychology
-                              : (model.hasVision
-                                  ? Icons.image
-                                  : Icons.chat_bubble_outline),
-                          size: 18,
-                          color: isSelected
-                              ? const Color(0xFF6C63FF)
-                              : Colors.grey,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                model.displayName,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.w500,
-                                  color: isSelected
-                                      ? const Color(0xFF6C63FF)
-                                      : null,
-                                ),
-                              ),
-                              Text(
-                                '${model.sizeMB}MB',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (isSelected)
-                          const Icon(Icons.check,
-                              size: 16, color: Color(0xFF6C63FF)),
-                      ],
-                    ),
-                  );
-                }),
-              ],
+            child: GestureDetector(
+              onTap: () => _showModelSelectorSheet(context),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -945,7 +917,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      ModelOrchestrator.instance.preferredModelType == null
+                      _selectedModel == null
                           ? Icons.auto_awesome
                           : Icons.account_tree,
                       size: 16,
@@ -953,9 +925,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      ModelOrchestrator
-                              .instance.preferredModelType?.displayName ??
-                          'Auto',
+                      _selectedModel?.displayName ?? 'Auto',
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 12,

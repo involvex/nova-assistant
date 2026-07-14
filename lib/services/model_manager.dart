@@ -51,14 +51,18 @@ class ModelManager {
   ModelManager._();
 
   static const _prefsKey = 'installed_models';
+  static const _customModelsPrefsKey = 'custom_models';
   static const _hfTokenKey = 'hf_token';
   final List<InstalledModel> _installedModels = [];
+  final List<CustomModel> _customModels = [];
 
   final _statusController = StreamController<String>.broadcast();
   Stream<String> get statusStream => _statusController.stream;
 
   List<InstalledModel> get installedModels =>
       List.unmodifiable(_installedModels);
+
+  List<CustomModel> get customModels => List.unmodifiable(_customModels);
 
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
@@ -72,6 +76,17 @@ class ModelManager {
         } catch (_) {}
       }
     }
+
+    final customJsonList = prefs.getStringList(_customModelsPrefsKey);
+    if (customJsonList != null) {
+      _customModels.clear();
+      for (final json in customJsonList) {
+        try {
+          final map = jsonDecode(json) as Map<String, dynamic>;
+          _customModels.add(CustomModel.fromJson(map));
+        } catch (_) {}
+      }
+    }
   }
 
   Future<void> _saveToPrefs() async {
@@ -79,6 +94,12 @@ class ModelManager {
     final jsonList =
         _installedModels.map((m) => jsonEncode(m.toJson())).toList();
     await prefs.setStringList(_prefsKey, jsonList);
+  }
+
+  Future<void> _saveCustomModelsToPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonList = _customModels.map((m) => jsonEncode(m.toJson())).toList();
+    await prefs.setStringList(_customModelsPrefsKey, jsonList);
   }
 
   Future<InstalledModel?> installFromNetwork({
@@ -250,13 +271,15 @@ class ModelManager {
         return directFile.path;
       }
 
-      // Check models subdirectory with exact basename matching (no extension)
+      // Check models subdirectory with single-pass matching
       final modelsDir = Directory('${dir.path}/models');
       if (await modelsDir.exists()) {
         final baseName = fileName
             .replaceAll('.litertlm', '')
             .replaceAll('.task', '')
             .replaceAll('.gguf', '');
+
+        String? partialMatch;
         await for (final entity in modelsDir.list()) {
           if (entity is File) {
             final entityName = p.basename(entity.path);
@@ -268,21 +291,17 @@ class ModelManager {
             if (entityBaseName == baseName) {
               return entity.path;
             }
-          }
-        }
-        // Second pass: partial match (entity name contains base name)
-        await for (final entity in modelsDir.list()) {
-          if (entity is File) {
-            final entityName = p.basename(entity.path);
-            final entityBaseName = entityName
-                .replaceAll('.litertlm', '')
-                .replaceAll('.task', '')
-                .replaceAll('.gguf', '');
-            if (entityBaseName.contains(baseName) ||
-                baseName.contains(entityBaseName)) {
-              return entity.path;
+            // Track first partial match for fallback
+            if (partialMatch == null &&
+                (entityBaseName.contains(baseName) ||
+                    baseName.contains(entityBaseName))) {
+              partialMatch = entity.path;
             }
           }
+        }
+        // Return partial match if no exact match found
+        if (partialMatch != null) {
+          return partialMatch;
         }
       }
     } catch (_) {}
@@ -470,6 +489,72 @@ class ModelManager {
     }
   }
 
+  Future<CustomModel?> installCustomModel({
+    required String filePath,
+    required String displayName,
+    required ModelType modelType,
+    required ModelFileType fileType,
+    bool hasVision = false,
+    bool hasThinking = false,
+    bool supportsFunctionCalling = true,
+    void Function(int progress)? onProgress,
+  }) async {
+    try {
+      final sourceFile = File(filePath);
+      if (!await sourceFile.exists()) {
+        _statusController.add('File not found: $filePath');
+        return null;
+      }
+
+      final fileName = p.basename(filePath);
+      final ext = p.extension(fileName).toLowerCase();
+
+      if (ext != '.litertlm' && ext != '.task' && ext != '.gguf') {
+        _statusController.add(
+          'Unsupported format: $ext — only .litertlm, .task, and .gguf are supported',
+        );
+        return null;
+      }
+
+      // Call installFromFile to copy and register with flutter_gemma
+      final installed = await installFromFile(
+        filePath: filePath,
+        modelType: modelType,
+        fileType: fileType,
+        onProgress: onProgress,
+      );
+
+      if (installed == null) {
+        return null;
+      }
+
+      final customModel = CustomModel(
+        id: displayName,
+        displayName: displayName,
+        fileName: installed.fileName,
+        modelType: modelType,
+        fileType: fileType,
+        hasVision: hasVision,
+        hasThinking: hasThinking,
+        supportsFunctionCalling: supportsFunctionCalling,
+        fileSizeBytes: installed.fileSizeBytes,
+        installedAt: DateTime.now(),
+      );
+
+      _customModels.removeWhere(
+          (m) => m.id == displayName || m.fileName == installed.fileName);
+      _customModels.add(customModel);
+      await _saveCustomModelsToPrefs();
+
+      _statusController.add('Custom model installed: $displayName');
+      return customModel;
+    } catch (e) {
+      _statusController.add('Custom model install failed: $e');
+      debugPrint('ModelManager: installCustomModel failed: $e');
+      return null;
+    }
+  }
+
   /// Replicates flutter_gemma's filename base-name extraction so we can
   /// compute the canonical install path BEFORE calling into flutter_gemma.
   /// This avoids a post-install rename that would invalidate flutter_gemma's
@@ -528,6 +613,25 @@ class ModelManager {
     }
   }
 
+  Future<bool> removeCustomModel(String modelId) async {
+    try {
+      final customModel = _customModels.firstWhere(
+        (m) => m.id == modelId,
+        orElse: () => throw Exception('Model not found'),
+      );
+
+      // Uninstall from flutter_gemma using the fileName
+      await FlutterGemma.uninstallModel(customModel.fileName);
+      _customModels.removeWhere((m) => m.id == modelId);
+      await _saveCustomModelsToPrefs();
+      _statusController.add('Custom model removed: $modelId');
+      return true;
+    } catch (e) {
+      debugPrint('ModelManager: removeCustomModel failed: $e');
+      return false;
+    }
+  }
+
   bool isModelInstalled(String fileName) {
     return _installedModels.any((m) => m.fileName == fileName);
   }
@@ -535,6 +639,18 @@ class ModelManager {
   Future<bool> isInstalledOnDisk(String fileName) async {
     final path = await _findModelFile(fileName);
     return path != null;
+  }
+
+  bool isCustomModelInstalled(String fileName) {
+    return _customModels.any((m) => m.fileName == fileName);
+  }
+
+  CustomModel? getCustomModelByFileName(String fileName) {
+    try {
+      return _customModels.firstWhere((m) => m.fileName == fileName);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Register a model already on disk (no download). Used by prefetch to

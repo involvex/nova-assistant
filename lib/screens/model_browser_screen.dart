@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 
 class ModelBrowserScreen extends StatefulWidget {
@@ -251,6 +252,13 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         title: const Text('Model Browser'),
         backgroundColor: const Color(0xFF0D0D1A),
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.downloading),
+            tooltip: 'Import from file',
+            onPressed: _showImportSheet,
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -634,5 +642,23 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  Future<void> _showImportSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => CustomModelImportSheet(
+        onInstalled: (model) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Imported: ${model.displayName}'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        },
+      ),
+    );
   }
 }

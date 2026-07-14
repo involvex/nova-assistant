@@ -172,3 +172,100 @@ class ModelHuggingFaceURLs {
     return null;
   }
 }
+
+extension NovaModelExtensions on NovaModel {
+  String get capabilitySummary {
+    final caps = <String>[];
+    if (hasVision) caps.add('Vision');
+    if (hasThinking) caps.add('Thinking');
+    return caps.isEmpty ? 'Text only' : caps.join(' + ');
+  }
+
+  String get sizeLabel => '$sizeMB MB';
+
+  bool get supportsFunctionCalling => true;
+
+  List<String> get capabilityList {
+    final list = <String>['Function Calling'];
+    if (hasVision) list.insert(0, 'Vision');
+    if (hasThinking) list.insert(0, 'Thinking');
+    return list;
+  }
+}
+
+class CustomModel {
+  final String id;
+  final String displayName;
+  final String fileName;
+  final ModelType modelType;
+  final ModelFileType fileType;
+  final bool hasVision;
+  final bool hasThinking;
+  final bool supportsFunctionCalling;
+  final int fileSizeBytes;
+  final DateTime installedAt;
+
+  const CustomModel({
+    required this.id,
+    required this.displayName,
+    required this.fileName,
+    required this.modelType,
+    required this.fileType,
+    this.hasVision = false,
+    this.hasThinking = false,
+    this.supportsFunctionCalling = true,
+    required this.fileSizeBytes,
+    required this.installedAt,
+  });
+
+  double get fileSizeMB => fileSizeBytes / (1024 * 1024);
+
+  String get sizeLabel => '${fileSizeMB.toStringAsFixed(0)} MB';
+
+  String get capabilitySummary {
+    final caps = <String>[];
+    if (hasVision) caps.add('Vision');
+    if (hasThinking) caps.add('Thinking');
+    return caps.isEmpty ? 'Text only' : caps.join(' + ');
+  }
+
+  List<String> get capabilityList {
+    final list = <String>['Function Calling'];
+    if (hasVision) list.insert(0, 'Vision');
+    if (hasThinking) list.insert(0, 'Thinking');
+    return list;
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'displayName': displayName,
+        'fileName': fileName,
+        'modelType': modelType.name,
+        'fileType': fileType.name,
+        'hasVision': hasVision,
+        'hasThinking': hasThinking,
+        'supportsFunctionCalling': supportsFunctionCalling,
+        'fileSizeBytes': fileSizeBytes,
+        'installedAt': installedAt.toIso8601String(),
+      };
+
+  factory CustomModel.fromJson(Map<String, dynamic> json) => CustomModel(
+        id: json['id'] as String,
+        displayName: json['displayName'] as String,
+        fileName: json['fileName'] as String,
+        modelType: ModelType.values.firstWhere(
+          (e) => e.name == json['modelType'],
+          orElse: () => ModelType.general,
+        ),
+        fileType: ModelFileType.values.firstWhere(
+          (e) => e.name == json['fileType'],
+          orElse: () => ModelFileType.litertlm,
+        ),
+        hasVision: json['hasVision'] as bool? ?? false,
+        hasThinking: json['hasThinking'] as bool? ?? false,
+        supportsFunctionCalling:
+            json['supportsFunctionCalling'] as bool? ?? true,
+        fileSizeBytes: json['fileSizeBytes'] as int,
+        installedAt: DateTime.parse(json['installedAt'] as String),
+      );
+}

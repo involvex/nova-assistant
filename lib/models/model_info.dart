@@ -204,6 +204,7 @@ class CustomModel {
   final bool supportsFunctionCalling;
   final int fileSizeBytes;
   final DateTime installedAt;
+  final bool isGguf;
 
   const CustomModel({
     required this.id,
@@ -216,6 +217,7 @@ class CustomModel {
     this.supportsFunctionCalling = true,
     required this.fileSizeBytes,
     required this.installedAt,
+    this.isGguf = false,
   });
 
   double get fileSizeMB => fileSizeBytes / (1024 * 1024);
@@ -226,6 +228,7 @@ class CustomModel {
     final caps = <String>[];
     if (hasVision) caps.add('Vision');
     if (hasThinking) caps.add('Thinking');
+    if (isGguf) caps.add('GGUF');
     return caps.isEmpty ? 'Text only' : caps.join(' + ');
   }
 
@@ -233,6 +236,7 @@ class CustomModel {
     final list = <String>['Function Calling'];
     if (hasVision) list.insert(0, 'Vision');
     if (hasThinking) list.insert(0, 'Thinking');
+    if (isGguf) list.insert(0, 'GGUF');
     return list;
   }
 
@@ -241,31 +245,40 @@ class CustomModel {
         'displayName': displayName,
         'fileName': fileName,
         'modelType': modelType.name,
-        'fileType': fileType.name,
+        'fileType': isGguf ? 'gguf' : fileType.name,
         'hasVision': hasVision,
         'hasThinking': hasThinking,
         'supportsFunctionCalling': supportsFunctionCalling,
         'fileSizeBytes': fileSizeBytes,
         'installedAt': installedAt.toIso8601String(),
+        'isGguf': isGguf,
       };
 
-  factory CustomModel.fromJson(Map<String, dynamic> json) => CustomModel(
-        id: json['id'] as String,
-        displayName: json['displayName'] as String,
-        fileName: json['fileName'] as String,
-        modelType: ModelType.values.firstWhere(
-          (e) => e.name == json['modelType'],
-          orElse: () => ModelType.general,
-        ),
-        fileType: ModelFileType.values.firstWhere(
-          (e) => e.name == json['fileType'],
-          orElse: () => ModelFileType.litertlm,
-        ),
-        hasVision: json['hasVision'] as bool? ?? false,
-        hasThinking: json['hasThinking'] as bool? ?? false,
-        supportsFunctionCalling:
-            json['supportsFunctionCalling'] as bool? ?? true,
-        fileSizeBytes: json['fileSizeBytes'] as int,
-        installedAt: DateTime.parse(json['installedAt'] as String),
-      );
+  factory CustomModel.fromJson(Map<String, dynamic> json) {
+    final isGguf = json['isGguf'] as bool? ?? false;
+    return CustomModel(
+      id: json['id'] as String,
+      displayName: json['displayName'] as String,
+      fileName: json['fileName'] as String,
+      modelType: ModelType.values.firstWhere(
+        (e) => e.name == json['modelType'],
+        orElse: () => ModelType.general,
+      ),
+      fileType: isGguf
+          ? ModelFileType.values.firstWhere(
+              (e) => e.name == 'binary',
+              orElse: () => ModelFileType.binary,
+            )
+          : ModelFileType.values.firstWhere(
+              (e) => e.name == json['fileType'],
+              orElse: () => ModelFileType.litertlm,
+            ),
+      hasVision: json['hasVision'] as bool? ?? false,
+      hasThinking: json['hasThinking'] as bool? ?? false,
+      supportsFunctionCalling: json['supportsFunctionCalling'] as bool? ?? true,
+      fileSizeBytes: json['fileSizeBytes'] as int,
+      installedAt: DateTime.parse(json['installedAt'] as String),
+      isGguf: isGguf,
+    );
+  }
 }

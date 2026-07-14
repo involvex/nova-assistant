@@ -25,7 +25,14 @@ class ScreenshotService {
       }
       return result;
     } on PlatformException catch (e) {
-      debugPrint('ScreenshotService: failed to get screenshot — ${e.message}');
+      debugPrint('ScreenshotService: PlatformException — ${e.message}');
+      return null;
+    } on MissingPluginException {
+      debugPrint(
+          'ScreenshotService: Screenshot channel not available (not launched via MainActivity)');
+      return null;
+    } catch (e) {
+      debugPrint('ScreenshotService: failed to get screenshot — $e');
       return null;
     }
   }
@@ -42,6 +49,10 @@ class ScreenshotService {
     try {
       final result = await _channel.invokeMethod<bool>('requestCapture');
       return result ?? false;
+    } on MissingPluginException {
+      debugPrint(
+          'ScreenshotService: Capture not available — channel not registered');
+      return false;
     } catch (_) {
       return false;
     }

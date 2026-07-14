@@ -599,6 +599,20 @@ class ModelOrchestrator {
     final customModel = _preferredCustomModelOverride!;
     _statusController.add('Using custom model: ${customModel.displayName}');
 
+    // Check if this is a GGUF model - route to GgufService
+    if (customModel.isGguf) {
+      yield* _processGgufModel(
+        query: query,
+        screenshot: screenshot,
+        thinkingMode: thinkingMode,
+        tools: tools,
+        ragContext: ragContext,
+        attachmentContext: attachmentContext,
+        hasImageAttachments: hasImageAttachments,
+      );
+      return;
+    }
+
     // Find the custom model file on disk
     final dir = await getApplicationDocumentsDirectory();
     String? modelPath;
@@ -841,6 +855,29 @@ class ModelOrchestrator {
       thinking: currentThinking,
       toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
       inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+    );
+  }
+
+  /// Process a message using a GGUF model via GgufService.
+  Stream<InferenceResult> _processGgufModel({
+    required String query,
+    required Uint8List? screenshot,
+    required bool thinkingMode,
+    required List<Tool> tools,
+    String? ragContext,
+    String? attachmentContext,
+    required bool hasImageAttachments,
+  }) async* {
+    // GGUF support requires llamadart package, which currently conflicts with
+    // flutter_gemma_litertlm native libraries. Show a clear error message.
+    yield InferenceResult(
+      text: 'GGUF model support is not yet available.\n\n'
+          'The GGUF format requires additional integration work that is pending.\n\n'
+          'In the meantime, please use .litertlm or .task model formats.\n'
+          'You can convert GGUF models to supported formats or download\n'
+          'models in .litertlm/.task format from Hugging Face.',
+      model: selector.primaryHeavy,
+      isStreaming: false,
     );
   }
 

@@ -497,6 +497,7 @@ class ModelManager {
     bool hasVision = false,
     bool hasThinking = false,
     bool supportsFunctionCalling = true,
+    bool isGguf = false,
     void Function(int progress)? onProgress,
   }) async {
     try {
@@ -514,6 +515,42 @@ class ModelManager {
           'Unsupported format: $ext — only .litertlm, .task, and .gguf are supported',
         );
         return null;
+      }
+
+      // For GGUF files, don't try to register with flutter_gemma - just copy
+      if (ext == '.gguf' && isGguf) {
+        // Just copy the file, don't register with flutter_gemma
+        final documentsDir = await getApplicationDocumentsDirectory();
+        final modelsDir = Directory(p.join(documentsDir.path, 'models'));
+        if (!await modelsDir.exists()) {
+          await modelsDir.create(recursive: true);
+        }
+        final destPath = p.join(modelsDir.path, fileName);
+        await sourceFile.copy(destPath);
+
+        final fileSize = await File(destPath).length();
+
+        final customModel = CustomModel(
+          id: displayName,
+          displayName: displayName,
+          fileName: fileName,
+          modelType: modelType,
+          fileType: ModelFileType.binary,
+          hasVision: hasVision,
+          hasThinking: hasThinking,
+          supportsFunctionCalling: supportsFunctionCalling,
+          fileSizeBytes: fileSize,
+          installedAt: DateTime.now(),
+          isGguf: true,
+        );
+
+        _customModels
+            .removeWhere((m) => m.id == displayName || m.fileName == fileName);
+        _customModels.add(customModel);
+        await _saveCustomModelsToPrefs();
+
+        _statusController.add('GGUF model installed: $displayName');
+        return customModel;
       }
 
       // Call installFromFile to copy and register with flutter_gemma

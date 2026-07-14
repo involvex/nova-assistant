@@ -123,8 +123,10 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
       final fileType = _fileExtension == '.task'
           ? ModelFileType.task
           : _fileExtension == '.gguf'
-              ? ModelFileType.task
+              ? ModelFileType.binary
               : ModelFileType.litertlm;
+
+      final isGguf = _fileExtension == '.gguf';
 
       final customModel = await ModelManager.instance.installCustomModel(
         filePath: _selectedFilePath!,
@@ -134,6 +136,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
         hasVision: _hasVision,
         hasThinking: _hasThinking,
         supportsFunctionCalling: _supportsFunctionCalling,
+        isGguf: isGguf,
         onProgress: (progress) {
           if (mounted) {
             setState(() => _status = 'Installing: $progress%');

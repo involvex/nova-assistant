@@ -150,9 +150,10 @@ class NovaTools {
 
   static final Tool takeScreenshot = Tool(
     name: 'take_screenshot',
-    description: 'Capture a screenshot of the current screen. '
+    description: 'Capture a single screenshot of the current screen. '
         'Use this ONLY when the user explicitly asks to take '
-        'a screenshot or capture the screen.',
+        'a screenshot or capture what is on screen. '
+        'This captures ONE static image, not a video or stream.',
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},

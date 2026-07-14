@@ -18,11 +18,14 @@ android {
         ndk {
             abiFilters.addAll(listOf("arm64-v8a"))
         }
+
+        multiDexEnabled = true
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     sourceSets {
@@ -54,4 +57,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

@@ -178,7 +178,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 ### Build and CI/CD
 
 - [x] **Release workflow** - GitHub Actions release.yml for tag-based APK builds
-- [ ] **CI testing workflow** - GitHub Actions for automated `flutter test` and `flutter analyze` on PRs
+- [x] **CI testing workflow** - GitHub Actions: analyze, test, coverage check, build on PR/push
 - [ ] **Automated releases** - Streamlined release process (currently manual tag trigger)
 - [ ] **Crash reporting** - Optional crash analytics (opt-in)
 
@@ -243,7 +243,7 @@ This document outlines the planned features and improvements for Nova Assistant.
 - ~~MCP client~~ (McpClient with HTTP/SSE + stdio)
 - ~~MCP server support~~ (McpService, MCP Settings UI)
 - ~~Semantic search~~ (TF-IDF scoring in MemoryService, stop-word removal, IDF weighting)
-- CI testing workflow (automated flutter test + analyze)
+- ~~CI testing workflow~~ (GitHub Actions: analyze, test, coverage, build on PR/push; release workflow for tags)
 - Unit test coverage to 80%+
 - Widget tests for key screens (TasksScreen, NotesScreen, AssistantScreen)
 - Beginner mode tests (AssistantScreenBeginner, UserPreferencesService)

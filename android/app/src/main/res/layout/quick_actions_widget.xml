@@ -1,17 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<GridLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_container"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/widget_background"
-    android:orientation="grid"
     android:padding="8dp"
     android:columnCount="2"
     android:rowCount="2"
-    android:alignmentMode="alignBounds"
-    android:useDefaultMargins="true">
+    android:alignmentMode="alignBounds">
 
-    <!-- Row 1 -->
+    <!-- Row 1, Col 1: New Chat -->
     <LinearLayout
         android:id="@+id/btn_new_chat"
         android:layout_width="0dp"
@@ -42,6 +40,7 @@
             android:textSize="11sp" />
     </LinearLayout>
 
+    <!-- Row 1, Col 2: Voice -->
     <LinearLayout
         android:id="@+id/btn_voice"
         android:layout_width="0dp"
@@ -72,7 +71,7 @@
             android:textSize="11sp" />
     </LinearLayout>
 
-    <!-- Row 2 -->
+    <!-- Row 2, Col 1: Screenshot -->
     <LinearLayout
         android:id="@+id/btn_screenshot"
         android:layout_width="0dp"
@@ -103,6 +102,7 @@
             android:textSize="11sp" />
     </LinearLayout>
 
+    <!-- Row 2, Col 2: Quick Ask -->
     <LinearLayout
         android:id="@+id/btn_quick_ask"
         android:layout_width="0dp"
@@ -133,4 +133,4 @@
             android:textSize="11sp" />
     </LinearLayout>
 
-</LinearLayout>
+</GridLayout>

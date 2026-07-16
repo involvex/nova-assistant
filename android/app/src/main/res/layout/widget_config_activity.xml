@@ -60,8 +60,8 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="@color/widget_text_secondary"
-            android:alpha="0.2" />
+            android:alpha="0.2"
+            android:background="@color/widget_text_secondary" />
 
         <CheckBox
             android:id="@+id/check_voice"
@@ -77,8 +77,8 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="@color/widget_text_secondary"
-            android:alpha="0.2" />
+            android:alpha="0.2"
+            android:background="@color/widget_text_secondary" />
 
         <CheckBox
             android:id="@+id/check_screenshot"
@@ -94,8 +94,8 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="@color/widget_text_secondary"
-            android:alpha="0.2" />
+            android:alpha="0.2"
+            android:background="@color/widget_text_secondary" />
 
         <CheckBox
             android:id="@+id/check_quick_ask"
@@ -120,24 +120,22 @@
         android:gravity="end"
         android:orientation="horizontal">
 
-        <com.google.android.material.button.MaterialButton
+        <Button
             android:id="@+id/btn_cancel"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="48dp"
             android:layout_marginEnd="8dp"
+            android:background="@drawable/widget_button_bg"
             android:text="Cancel"
-            android:textColor="@color/widget_text_secondary"
-            app:rippleColor="@color/widget_button_pressed" />
+            android:textColor="@color/widget_text_secondary" />
 
-        <com.google.android.material.button.MaterialButton
+        <Button
             android:id="@+id/btn_save"
             android:layout_width="wrap_content"
             android:layout_height="48dp"
-            android:backgroundTint="@color/widget_primary"
+            android:background="@drawable/widget_primary_button_bg"
             android:text="Save"
-            android:textColor="@android:color/white"
-            app:cornerRadius="24dp" />
+            android:textColor="@android:color/white" />
     </LinearLayout>
 
 </LinearLayout>

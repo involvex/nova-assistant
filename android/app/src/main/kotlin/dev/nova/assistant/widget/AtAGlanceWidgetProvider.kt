@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -124,10 +125,7 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
             ACTION_UPDATE_TIME -> {
                 val appWidgetManager = AppWidgetManager.getInstance(context)
                 val appWidgetIds = appWidgetManager.getAppWidgetIds(
-                    context.packageManager.resolveActivity(
-                        context.packageManager.getLaunchIntentForPackage(context.packageName)!!,
-                        0
-                    )!!.activityInfo
+                    ComponentName(context, AtAGlanceWidgetProvider::class.java)
                 )
                 for (appWidgetId in appWidgetIds) {
                     updateWidget(context, appWidgetManager, appWidgetId)

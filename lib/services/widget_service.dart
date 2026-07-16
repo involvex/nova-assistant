@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:home_widget/home_widget.dart';
 
 import 'package:nova_assistant/models/task.dart';
@@ -16,29 +15,28 @@ class WidgetService {
   WidgetService._();
 
   static const _appGroupId = 'dev.nova.assistant.widget';
-  static const _widgetChannel = 'dev.nova.assistant/widget';
 
   static const _tasksCountKey = 'tasks_count';
   static const _notesCountKey = 'notes_count';
   static const _memoryCountKey = 'memory_count';
   static const _modelStatusKey = 'model_status';
+  static const _widgetActionKey = 'home_widget_action';
 
   StreamSubscription<List<Task>>? _tasksSubscription;
   StreamSubscription<List<Note>>? _notesSubscription;
-  StreamSubscription<dynamic>? _widgetChannelSubscription;
 
   final _widgetActionController = StreamController<String>.broadcast();
   Stream<String> get widgetActionStream => _widgetActionController.stream;
 
-  bool _widgetChannelInitialized = false;
+  bool _initialized = false;
 
   Future<void> initialize() async {
+    if (_initialized) return;
+    _initialized = true;
+
     await HomeWidget.setAppGroupId(_appGroupId);
 
-    if (!_widgetChannelInitialized) {
-      _widgetChannelInitialized = true;
-      _setupWidgetChannelListener();
-    }
+    _listenForWidgetActions();
 
     await _updateAllStats();
     await _updateModelStatus('Ready');
@@ -52,30 +50,28 @@ class WidgetService {
     });
   }
 
-  Future<void> _setupWidgetChannelListener() async {
-    try {
-      const eventChannel = EventChannel(_widgetChannel);
-      _widgetChannelSubscription = eventChannel.receiveBroadcastStream().listen(
-        (dynamic event) {
-          if (event is String) {
-            _widgetActionController.add(event);
-          }
-        },
-        onError: (Object error) {
-          debugPrint('Widget channel error: $error');
-        },
-      );
+  bool _isSystemAction(String action) {
+    return action.startsWith('android.') ||
+        action == 'android.appwidget.action.APPWIDGET_UPDATE' ||
+        action.startsWith('com.android.') ||
+        action.startsWith('com.google.') ||
+        action.isEmpty;
+  }
 
-      const methodChannel = MethodChannel(_widgetChannel);
-      final initialAction = await methodChannel.invokeMethod<String>(
-        'getInitialWidgetAction',
-      );
-      if (initialAction != null) {
-        _widgetActionController.add(initialAction);
-      }
-    } catch (e) {
-      debugPrint('Widget channel setup error: $e');
-    }
+  void _listenForWidgetActions() {
+    Timer.periodic(const Duration(milliseconds: 500), (timer) async {
+      try {
+        final action = await HomeWidget.getWidgetData<String>(_widgetActionKey);
+        if (action != null && action.isNotEmpty && !_isSystemAction(action)) {
+          _widgetActionController.add(action);
+          await HomeWidget.saveWidgetData<String>(_widgetActionKey, '');
+        } else if (action != null &&
+            action.isNotEmpty &&
+            _isSystemAction(action)) {
+          await HomeWidget.saveWidgetData<String>(_widgetActionKey, '');
+        }
+      } catch (_) {}
+    });
   }
 
   Future<int> _getMemoryCount() async {
@@ -99,14 +95,10 @@ class WidgetService {
     });
   }
 
-  Future<void> updateStatsWidget({
-    int? tasksCount,
-    int? notesCount,
-    int? memoryCount,
-  }) async {
-    final actualTasksCount = tasksCount ?? TaskService.instance.tasks.length;
-    final actualNotesCount = notesCount ?? NoteService.instance.notes.length;
-    final actualMemoryCount = memoryCount ?? await _getMemoryCount();
+  Future<void> updateStatsWidget() async {
+    final actualTasksCount = TaskService.instance.tasks.length;
+    final actualNotesCount = NoteService.instance.notes.length;
+    final actualMemoryCount = await _getMemoryCount();
 
     await _saveWidgetData({
       _tasksCountKey: actualTasksCount,
@@ -125,8 +117,8 @@ class WidgetService {
   }
 
   Future<void> _updateModelStatus(String status) async {
-    await HomeWidget.saveWidgetData<String>(_modelStatusKey, status);
     try {
+      await HomeWidget.saveWidgetData<String>(_modelStatusKey, status);
       await HomeWidget.updateWidget(
         androidName: 'widget.AtAGlanceWidgetProvider',
         iOSName: 'AtAGlanceWidget',
@@ -171,7 +163,6 @@ class WidgetService {
   void dispose() {
     _tasksSubscription?.cancel();
     _notesSubscription?.cancel();
-    _widgetChannelSubscription?.cancel();
     _widgetActionController.close();
   }
 

@@ -23,13 +23,12 @@ class MainActivity : FlutterActivity() {
         private const val REQUEST_ASSISTANT_ROLE = 1002
         private const val METHOD_CHANNEL = "dev.nova.assistant/main"
         private const val EVENT_CHANNEL = "dev.nova.assistant/main_events"
-        private const val WIDGET_CHANNEL = "dev.nova.assistant/widget"
+        private const val WIDGET_ACTION_KEY = "home_widget_action"
+        const val WIDGET_PREFS_NAME = "HomeWidgetPreferences"
     }
 
     private var assistantRoleEventSink: EventChannel.EventSink? = null
     private var screenCapturePendingResult: MethodChannel.Result? = null
-    private var pendingWidgetAction: String? = null
-    private var widgetEventSink: EventChannel.EventSink? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -95,34 +94,6 @@ class MainActivity : FlutterActivity() {
                     assistantRoleEventSink = null
                 }
             })
-
-        EventChannel(flutterEngine.dartExecutor.binaryMessenger, WIDGET_CHANNEL)
-            .setStreamHandler(object : EventChannel.StreamHandler {
-                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                    widgetEventSink = events
-                    pendingWidgetAction?.let { action ->
-                        runOnUiThread {
-                            widgetEventSink?.success(action)
-                            pendingWidgetAction = null
-                        }
-                    }
-                }
-
-                override fun onCancel(arguments: Any?) {
-                    widgetEventSink = null
-                }
-            })
-
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, WIDGET_CHANNEL)
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "getInitialWidgetAction" -> {
-                        result.success(pendingWidgetAction)
-                        pendingWidgetAction = null
-                    }
-                    else -> result.notImplemented()
-                }
-            }
     }
 
     private fun isAssistantRoleHeld(): Boolean {
@@ -158,9 +129,11 @@ class MainActivity : FlutterActivity() {
         val dataString = intent.dataString ?: return
         if (dataString.startsWith("nova://widget/")) {
             val action = dataString.removePrefix("nova://widget/")
+            // Guard against system broadcasts that set their own action field
+            if (action.startsWith("android.")) return
             Log.d("NovaMain", "Widget action received: $action")
-            pendingWidgetAction = action
-            widgetEventSink?.success(action)
+            val prefs = getSharedPreferences(WIDGET_PREFS_NAME, 0)
+            prefs.edit().putString(WIDGET_ACTION_KEY, action).apply()
         }
     }
 

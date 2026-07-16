@@ -10,18 +10,19 @@ import android.net.Uri
 import android.widget.RemoteViews
 import dev.nova.assistant.MainActivity
 import dev.nova.assistant.R
+import dev.nova.assistant.WidgetTrampolineActivity
 
 class StatsWidgetProvider : AppWidgetProvider() {
 
     companion object {
-        const val PREFS_NAME = "dev.nova.assistant.widget.stats"
-        const val KEY_TASKS_COUNT = "tasks_count"
-        const val KEY_NOTES_COUNT = "notes_count"
-        const val KEY_MEMORY_COUNT = "memory_count"
+        private const val PREFS_NAME = "dev.nova.assistant.widget.stats"
+        private const val KEY_TASKS_COUNT = "tasks_count"
+        private const val KEY_NOTES_COUNT = "notes_count"
+        private const val KEY_MEMORY_COUNT = "memory_count"
 
-        const val ACTION_OPEN_TASKS = "dev.nova.assistant.widget.ACTION_OPEN_TASKS"
-        const val ACTION_OPEN_NOTES = "dev.nova.assistant.widget.ACTION_OPEN_NOTES"
-        const val ACTION_OPEN_MEMORY = "dev.nova.assistant.widget.ACTION_OPEN_MEMORY"
+        private const val ACTION_OPEN_TASKS = "dev.nova.assistant.widget.ACTION_OPEN_TASKS"
+        private const val ACTION_OPEN_NOTES = "dev.nova.assistant.widget.ACTION_OPEN_NOTES"
+        private const val ACTION_OPEN_MEMORY = "dev.nova.assistant.widget.ACTION_OPEN_MEMORY"
 
         fun updateWidget(
             context: Context,
@@ -46,9 +47,8 @@ class StatsWidgetProvider : AppWidgetProvider() {
         }
 
         private fun createPendingIntent(context: Context, action: String, requestCode: Int): PendingIntent {
-            val intent = Intent(context, MainActivity::class.java).apply {
+            val intent = Intent(context, WidgetTrampolineActivity::class.java).apply {
                 this.action = action
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 data = Uri.parse("nova://widget/$action")
             }
             return PendingIntent.getActivity(
@@ -81,27 +81,15 @@ class StatsWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-
-        val action = intent.action
-        if (action == ACTION_OPEN_TASKS || action == ACTION_OPEN_NOTES || action == ACTION_OPEN_MEMORY || action == "tap") {
-            val targetIntent = Intent(context, MainActivity::class.java).apply {
-                this.action = action
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                data = Uri.parse("nova://widget/$action")
-            }
-            context.startActivity(targetIntent)
-        }
+        // Only handle our own custom widget actions — ignore system broadcasts like APPWIDGET_UPDATE
     }
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
-        // Clean up if needed
     }
 
     override fun onEnabled(context: Context) {
-        // First widget added
     }
 
     override fun onDisabled(context: Context) {
-        // Last widget removed
     }
 }

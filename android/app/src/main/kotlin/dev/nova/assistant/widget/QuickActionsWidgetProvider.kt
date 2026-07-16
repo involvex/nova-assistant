@@ -7,26 +7,20 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.RemoteViews
-import android.widget.RemoteViews.RemoteView
 import dev.nova.assistant.MainActivity
 import dev.nova.assistant.R
+import dev.nova.assistant.WidgetTrampolineActivity
 
 class QuickActionsWidgetProvider : AppWidgetProvider() {
 
     companion object {
-        const val ACTION_NEW_CHAT = "dev.nova.assistant.widget.ACTION_NEW_CHAT"
-        const val ACTION_VOICE = "dev.nova.assistant.widget.ACTION_VOICE"
-        const val ACTION_SCREENSHOT = "dev.nova.assistant.widget.ACTION_SCREENSHOT"
-        const val ACTION_QUICK_ASK = "dev.nova.assistant.widget.ACTION_QUICK_ASK"
-
-        private const val ACTION_PREFIX = "dev.nova.assistant.widget.ACTION_"
+        private const val ACTION_NEW_CHAT = "dev.nova.assistant.widget.ACTION_NEW_CHAT"
+        private const val ACTION_VOICE = "dev.nova.assistant.widget.ACTION_VOICE"
+        private const val ACTION_SCREENSHOT = "dev.nova.assistant.widget.ACTION_SCREENSHOT"
+        private const val ACTION_QUICK_ASK = "dev.nova.assistant.widget.ACTION_QUICK_ASK"
 
         fun updateWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
             val views = RemoteViews(context.packageName, R.layout.quick_actions_widget)
-
-            val clickIntent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
 
             views.setOnClickPendingIntent(R.id.btn_new_chat, createPendingIntent(context, ACTION_NEW_CHAT))
             views.setOnClickPendingIntent(R.id.btn_voice, createPendingIntent(context, ACTION_VOICE))
@@ -37,9 +31,8 @@ class QuickActionsWidgetProvider : AppWidgetProvider() {
         }
 
         private fun createPendingIntent(context: Context, action: String): PendingIntent {
-            val intent = Intent(context, MainActivity::class.java).apply {
+            val intent = Intent(context, WidgetTrampolineActivity::class.java).apply {
                 this.action = action
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 data = Uri.parse("nova://widget/$action")
             }
             return PendingIntent.getActivity(
@@ -61,26 +54,9 @@ class QuickActionsWidgetProvider : AppWidgetProvider() {
         }
     }
 
-    override fun onReceive(context: Context, intent: Intent) {
-        super.onReceive(context, intent)
-
-        val action = intent.action ?: return
-
-        if (action.startsWith(ACTION_PREFIX)) {
-            val targetIntent = Intent(context, MainActivity::class.java).apply {
-                this.action = action
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                data = Uri.parse("nova://widget/$action")
-            }
-            context.startActivity(targetIntent)
-        }
-    }
-
     override fun onEnabled(context: Context) {
-        // First widget added
     }
 
     override fun onDisabled(context: Context) {
-        // Last widget removed
     }
 }

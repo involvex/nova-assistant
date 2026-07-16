@@ -13,9 +13,9 @@ import android.os.Build
 import android.widget.RemoteViews
 import dev.nova.assistant.MainActivity
 import dev.nova.assistant.R
+import dev.nova.assistant.WidgetTrampolineActivity
 import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 
 class AtAGlanceWidgetProvider : AppWidgetProvider() {
@@ -88,9 +88,8 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
         }
 
         private fun createPendingIntent(context: Context, action: String): PendingIntent {
-            val intent = Intent(context, MainActivity::class.java).apply {
-                this.action = "widget_tap_at_glance"
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            val intent = Intent(context, WidgetTrampolineActivity::class.java).apply {
+                this.action = "tap_at_glance"
                 data = Uri.parse("nova://widget/$action")
             }
             return PendingIntent.getActivity(
@@ -131,13 +130,7 @@ class AtAGlanceWidgetProvider : AppWidgetProvider() {
                     updateWidget(context, appWidgetManager, appWidgetId)
                 }
             }
-            else -> {
-                val targetIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    data = Uri.parse("nova://widget/${intent.action}")
-                }
-                context.startActivity(targetIntent)
-            }
+            // Only handle our own custom widget actions — ignore system broadcasts like APPWIDGET_UPDATE
         }
     }
 

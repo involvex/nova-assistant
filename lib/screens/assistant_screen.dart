@@ -47,6 +47,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   CustomModel? _selectedCustomModel; // Track selected custom model for UI
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
   StreamSubscription<void>? _historyClearedSub;
+  StreamSubscription<String>? _statusSub;
 
   @override
   void initState() {
@@ -90,7 +91,8 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   void _listenToModelStatus() {
-    ModelOrchestrator.instance.statusStream.listen((status) {
+    _statusSub?.cancel();
+    _statusSub = ModelOrchestrator.instance.statusStream.listen((status) {
       if (!mounted) return;
       setState(() => _status = status);
       _checkModelAvailability();
@@ -215,6 +217,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _historyClearedSub?.cancel();
+    _statusSub?.cancel();
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();

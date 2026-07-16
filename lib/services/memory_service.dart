@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/services/semantic_search.dart';
 
@@ -47,7 +48,9 @@ class MemoryService {
       }
 
       await p.setString(_key, jsonEncode(entries));
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('MemoryService.storeConversation error: $e');
+    }
   }
 
   static Future<List<Map<String, dynamic>>> getCustomMemories() async {
@@ -58,7 +61,8 @@ class MemoryService {
       return (jsonDecode(existing) as List<dynamic>)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('MemoryService.getCustomMemories error: $e');
       return [];
     }
   }
@@ -81,7 +85,9 @@ class MemoryService {
       });
 
       await p.setString(_customMemoriesKey, jsonEncode(memories));
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('MemoryService.addCustomMemory error: $e');
+    }
   }
 
   static Future<void> updateCustomMemory(
@@ -107,7 +113,9 @@ class MemoryService {
         };
         await p.setString(_customMemoriesKey, jsonEncode(memories));
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('MemoryService.updateCustomMemory error: $e');
+    }
   }
 
   static Future<void> deleteCustomMemory(String id) async {
@@ -122,7 +130,9 @@ class MemoryService {
 
       memories.removeWhere((m) => m['id'] == id);
       await p.setString(_customMemoriesKey, jsonEncode(memories));
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('MemoryService.deleteCustomMemory error: $e');
+    }
   }
 
   static Future<String?> retrieveContext(String query) async {
@@ -248,14 +258,18 @@ class MemoryService {
     try {
       final p = await _p;
       await p.remove(_key);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('MemoryService.clearConversationHistory error: $e');
+    }
   }
 
   static Future<void> clearCustomMemories() async {
     try {
       final p = await _p;
       await p.remove(_customMemoriesKey);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('MemoryService.clearCustomMemories error: $e');
+    }
   }
 
   static Future<void> clear() async {

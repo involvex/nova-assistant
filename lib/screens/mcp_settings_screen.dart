@@ -1,4 +1,5 @@
 // ignore_for_file: deprecated_member_use
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -20,6 +21,9 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
   List<ExternalTool> _tools = [];
   List<DataSource> _sources = [];
   List<McpServerConfig> _servers = [];
+  StreamSubscription<List<ExternalTool>>? _toolsSub;
+  StreamSubscription<List<DataSource>>? _sourcesSub;
+  StreamSubscription<List<McpServerConfig>>? _serversSub;
 
   @override
   void initState() {
@@ -27,15 +31,23 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
     _tools = _mcpService.tools;
     _sources = _mcpService.sources;
     _servers = _mcpService.servers;
-    _mcpService.toolsStream.listen((tools) {
+    _toolsSub = _mcpService.toolsStream.listen((tools) {
       if (mounted) setState(() => _tools = tools);
     });
-    _mcpService.sourcesStream.listen((sources) {
+    _sourcesSub = _mcpService.sourcesStream.listen((sources) {
       if (mounted) setState(() => _sources = sources);
     });
-    _mcpService.serversStream.listen((servers) {
+    _serversSub = _mcpService.serversStream.listen((servers) {
       if (mounted) setState(() => _servers = servers);
     });
+  }
+
+  @override
+  void dispose() {
+    _toolsSub?.cancel();
+    _sourcesSub?.cancel();
+    _serversSub?.cancel();
+    super.dispose();
   }
 
   @override

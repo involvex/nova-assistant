@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/note.dart';
 import 'package:nova_assistant/services/note_service.dart';
@@ -15,18 +16,20 @@ class _NotesScreenState extends State<NotesScreen> {
   List<Note> _notes = [];
   String _searchQuery = '';
   final _searchController = TextEditingController();
+  StreamSubscription<List<Note>>? _notesSub;
 
   @override
   void initState() {
     super.initState();
     _notes = _noteService.notes;
-    _noteService.notesStream.listen((notes) {
+    _notesSub = _noteService.notesStream.listen((notes) {
       if (mounted) setState(() => _notes = notes);
     });
   }
 
   @override
   void dispose() {
+    _notesSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }

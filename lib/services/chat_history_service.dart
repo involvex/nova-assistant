@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/models/chat_message.dart';
@@ -39,7 +40,9 @@ class ChatHistoryService {
       final json = jsonEncode(messages.map((m) => m.toJson()).toList());
       await p.setString(_key, json);
       _cacheDirty = false;
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('ChatHistoryService.save error: $e');
+    }
   }
 
   static Future<void> _flush() async {
@@ -63,7 +66,9 @@ class ChatHistoryService {
       _cacheDirty = false;
       final p = await _p;
       await p.remove(_key);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('ChatHistoryService.clear error: $e');
+    }
   }
 
   static Future<String?> exportAsText() async {

@@ -423,6 +423,17 @@ class McpService {
     if (current is String) return current;
     return jsonEncode(current);
   }
+
+  /// Dispose resources
+  Future<void> dispose() async {
+    for (final client in _clients.values) {
+      await client.disconnect();
+    }
+    _clients.clear();
+    await _toolsController.close();
+    await _sourcesController.close();
+    await _serversController.close();
+  }
 }
 
 enum SourceType { file, url, api }

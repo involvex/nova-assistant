@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_gemma_litertlm/flutter_gemma_litertlm.dart';
@@ -12,6 +14,10 @@ import 'package:nova_assistant/services/task_service.dart';
 import 'package:nova_assistant/services/note_service.dart';
 import 'package:nova_assistant/services/notification_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
+import 'package:nova_assistant/services/mcp_service.dart';
+import 'package:nova_assistant/services/download_progress_service.dart';
+import 'package:nova_assistant/services/model_update_service.dart';
+import 'package:nova_assistant/services/parallel_session_manager.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -121,8 +127,69 @@ class _OnboardingRouterState extends State<OnboardingRouter> {
   }
 }
 
-class NovaApp extends StatelessWidget {
+class NovaApp extends StatefulWidget {
   const NovaApp({super.key});
+
+  @override
+  State<NovaApp> createState() => _NovaAppState();
+}
+
+class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _disposeServices();
+    super.dispose();
+  }
+
+  Future<void> _disposeServices() async {
+    try {
+      await ModelOrchestrator.instance.close();
+    } catch (e) {
+      debugPrint('Error disposing ModelOrchestrator: $e');
+    }
+    try {
+      await ModelManager.instance.dispose();
+    } catch (e) {
+      debugPrint('Error disposing ModelManager: $e');
+    }
+    try {
+      await McpService.instance.dispose();
+    } catch (e) {
+      debugPrint('Error disposing McpService: $e');
+    }
+    try {
+      await TaskService.instance.dispose();
+    } catch (e) {
+      debugPrint('Error disposing TaskService: $e');
+    }
+    try {
+      await NoteService.instance.dispose();
+    } catch (e) {
+      debugPrint('Error disposing NoteService: $e');
+    }
+    try {
+      await ParallelSessionManager.instance.dispose();
+    } catch (e) {
+      debugPrint('Error disposing ParallelSessionManager: $e');
+    }
+    try {
+      DownloadProgressService.instance.dispose();
+    } catch (e) {
+      debugPrint('Error disposing DownloadProgressService: $e');
+    }
+    try {
+      ModelUpdateService.instance.dispose();
+    } catch (e) {
+      debugPrint('Error disposing ModelUpdateService: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -57,6 +57,7 @@ dev_dependencies:
   mockito: ^5.4.4
   build_runner: ^2.4.13
   dart_code_linter: ^4.1.6
+  coverage: ^1.7.0
 
 flutter:
   uses-material-design: true

@@ -43,6 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _appVersion = '0.1.0';
   String _hfTokenStatus = 'Not configured';
   StreamSubscription<Map<String, dynamic>>? _assistantRoleSub;
+  StreamSubscription<String>? _modelStatusSub;
 
   @override
   void initState() {
@@ -55,7 +56,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         setState(() => _isAssistantRoleHeld = event['held'] as bool);
       }
     });
-    ModelManager.instance.statusStream.listen((status) {
+    _modelStatusSub = ModelManager.instance.statusStream.listen((status) {
       if (mounted) setState(() => _installStatus = status);
     });
     _loadAppVersion();
@@ -64,6 +65,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _assistantRoleSub?.cancel();
+    _modelStatusSub?.cancel();
     super.dispose();
   }
 
@@ -177,7 +179,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         setState(() => _appVersion = '${info.version}+${info.buildNumber}');
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SettingsScreen._loadAppVersion error: $e');
+    }
   }
 
   Future<void> _saveAssistantRole(AssistantRole role) async {

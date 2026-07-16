@@ -259,7 +259,9 @@ class ModelOrchestrator {
       if (_activeChat != null) {
         try {
           _activeChat = null;
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('ModelOrchestrator: error clearing active chat: $e');
+        }
       }
 
       // Wait for any ongoing stream iteration to finish
@@ -361,7 +363,10 @@ class ModelOrchestrator {
             try {
               await foundFile.delete();
               _statusController.add('Removed corrupt model: $fileName');
-            } catch (_) {}
+            } catch (e) {
+              debugPrint(
+                  'ModelOrchestrator: failed to delete corrupt model file: $e');
+            }
           }
         } else {
           // Not tracked yet - register it
@@ -1353,7 +1358,10 @@ class ModelOrchestrator {
       try {
         final decoded = jsonDecode(raw);
         if (decoded is Map) return Map<String, dynamic>.from(decoded);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('ModelOrchestrator._parseJsonString error: $e');
+      }
+      return <String, dynamic>{};
     }
     return <String, dynamic>{};
   }
@@ -1382,7 +1390,9 @@ class ModelOrchestrator {
       }
       final decoded = jsonDecode(candidate);
       if (decoded is Map<String, dynamic>) return decoded;
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('ModelOrchestrator._extractJsonFromText error: $e');
+    }
     return null;
   }
 
@@ -1632,11 +1642,16 @@ class ModelOrchestrator {
   Future<void> close() async {
     try {
       await _activeModel?.close();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('ModelOrchestrator.close: error closing active model: $e');
+    }
     _activeModel = null;
     _activeChat = null;
     _activeModelSupportsImage = false;
     _isInitialized = false;
+    _idleTimer?.cancel();
+    _idleTimer = null;
+    await _statusController.close();
     await _historyClearedController.close();
   }
 

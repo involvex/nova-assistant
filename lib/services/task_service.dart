@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -179,7 +180,10 @@ class TaskService {
     if (args['due_date'] != null) {
       try {
         dueDate = DateTime.parse(args['due_date'] as String);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint(
+            'TaskService.createTask: invalid due_date format: ${args['due_date']}');
+      }
     }
 
     final tagsStr = args['tags'] as String?;

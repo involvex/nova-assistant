@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 enum McpTransport { httpSse, stdio }
 
@@ -173,7 +174,9 @@ class McpClient {
       try {
         final json = jsonDecode(data) as Map<String, dynamic>;
         _handleMessage(json);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('McpClient._handleSseLine error parsing SSE data: $e');
+      }
     }
   }
 

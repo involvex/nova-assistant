@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/task.dart';
 import 'package:nova_assistant/services/task_service.dart';
@@ -15,14 +16,21 @@ class _TasksScreenState extends State<TasksScreen> {
   List<Task> _tasks = [];
   String _filter = 'all';
   String _sortBy = 'created';
+  StreamSubscription<List<Task>>? _tasksSub;
 
   @override
   void initState() {
     super.initState();
     _tasks = _taskService.tasks;
-    _taskService.tasksStream.listen((tasks) {
+    _tasksSub = _taskService.tasksStream.listen((tasks) {
       if (mounted) setState(() => _tasks = tasks);
     });
+  }
+
+  @override
+  void dispose() {
+    _tasksSub?.cancel();
+    super.dispose();
   }
 
   List<Task> get _filteredTasks {

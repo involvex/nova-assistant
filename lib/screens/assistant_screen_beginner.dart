@@ -31,6 +31,7 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
   String _status = 'Ready';
   String _userName = '';
   StreamSubscription<void>? _historyClearedSub;
+  StreamSubscription<String>? _statusSub;
 
   @override
   void initState() {
@@ -68,7 +69,8 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
   }
 
   void _listenToModelStatus() {
-    ModelOrchestrator.instance.statusStream.listen((status) {
+    _statusSub?.cancel();
+    _statusSub = ModelOrchestrator.instance.statusStream.listen((status) {
       if (!mounted) return;
       setState(() => _status = status);
     });
@@ -222,6 +224,7 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
   @override
   void dispose() {
     _historyClearedSub?.cancel();
+    _statusSub?.cancel();
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();

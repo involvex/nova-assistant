@@ -73,7 +73,9 @@ class ModelManager {
         try {
           final map = jsonDecode(json) as Map<String, dynamic>;
           _installedModels.add(InstalledModel.fromJson(map));
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('ModelManager: failed to parse installed model entry: $e');
+        }
       }
     }
 
@@ -84,7 +86,9 @@ class ModelManager {
         try {
           final map = jsonDecode(json) as Map<String, dynamic>;
           _customModels.add(CustomModel.fromJson(map));
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('ModelManager: failed to parse custom model entry: $e');
+        }
       }
     }
   }
@@ -191,7 +195,10 @@ class ModelManager {
           );
           try {
             await tempFile.delete();
-          } catch (_) {}
+          } catch (e) {
+            debugPrint(
+                'ModelManager: failed to delete temp file after incomplete download: $e');
+          }
           return null;
         }
 
@@ -238,8 +245,10 @@ class ModelManager {
       // Clean up temp file
       try {
         await tempFile.delete();
-      } catch (_) {}
-
+      } catch (e) {
+        debugPrint(
+            'ModelManager: failed to delete temp file after install: $e');
+      }
       if (installed != null) {
         _statusController.add('Model installed: ${installed.fileName}');
       }
@@ -304,7 +313,9 @@ class ModelManager {
           return partialMatch;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('ModelManager._findModelFile error: $e');
+    }
     return null;
   }
 
@@ -326,7 +337,9 @@ class ModelManager {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('ModelManager._findAllModelFiles error: $e');
+    }
     return results;
   }
 
@@ -379,7 +392,9 @@ class ModelManager {
           return true;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('ModelManager._deleteModelFile error: $e');
+    }
     return false;
   }
 
@@ -478,7 +493,9 @@ class ModelManager {
               await copiedFile.delete();
               debugPrint('Cleaned up failed install: $canonicalPath');
             }
-          } catch (_) {}
+          } catch (e) {
+            debugPrint('ModelManager: failed to clean up failed install: $e');
+          }
         }
         rethrow; // Re-throw to let caller handle the install error
       }
@@ -873,5 +890,10 @@ class ModelManager {
     }
 
     return info;
+  }
+
+  /// Dispose resources
+  Future<void> dispose() async {
+    await _statusController.close();
   }
 }

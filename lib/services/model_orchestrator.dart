@@ -372,13 +372,14 @@ class ModelOrchestrator {
             }
           }
         } else {
-          // Not tracked yet - register it
+          // Not tracked yet - register it (lazy, don't load into GPU)
           await ModelManager.instance.registerDiskModel(
             filePath: foundFile.path,
             fileName: fileName,
             modelType: model.modelType,
             fileType: model.fileType,
             fileSizeBytes: await foundFile.length(),
+            deferInstall: true,
           );
         }
       } else if (ModelManager.instance.isModelInstalled(fileName)) {
@@ -1672,15 +1673,16 @@ class ModelOrchestrator {
     await _historyClearedController.close();
   }
 
+  /// Initialize settings without loading any model.
+  /// Model loading is deferred until first use to prevent startup resource exhaustion.
   Future<void> initializeDefaultModel() async {
     await _loadAssistantRole();
     await _loadPreferredModel();
     await _loadIdentity();
-    try {
-      await _getOrCreateModel(selector.fastModel);
-    } catch (e) {
-      debugPrint('Default model init failed (will retry on first use): $e');
-    }
+    // NOTE: We deliberately do NOT load a model here.
+    // Loading a 2.4GB model at startup causes memory/CPU exhaustion
+    // on some devices, leading to crashes. Models are loaded lazily
+    // when the user actually sends a message.
   }
 
   Future<void> _loadIdentity() async {

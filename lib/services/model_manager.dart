@@ -714,23 +714,64 @@ class ModelManager {
     }
   }
 
-  /// Register a model already on disk (no download). Used by prefetch to
-  /// register existing files without triggering network requests.
+  /// Register a model already on disk (no download).
+  ///
+  /// If [deferInstall] is false (default), registers with flutter_gemma
+  /// immediately by calling `FlutterGemma.installModel().fromFile().install()`.
+  /// This makes the model available for inference.
+  ///
+  /// If [deferInstall] is true, skips the flutter_gemma registration and just
+  /// tracks the model in Nova's internal list. Use this during prefetch to
+  /// avoid loading models into GPU memory at startup. The model will be
+  /// properly registered when actually needed.
   Future<void> registerDiskModel({
     required String filePath,
     required String fileName,
     required ModelType modelType,
     required ModelFileType fileType,
     required int fileSizeBytes,
+    bool deferInstall = false,
   }) async {
     final existing = _installedModels.where((m) => m.fileName == fileName);
     final wasAlreadyInstalled = existing.isNotEmpty;
 
-    bool success = false;
-    int actualSize = fileSizeBytes;
+    // Verify the file exists and has content
+    final file = File(filePath);
+    if (!await file.exists()) {
+      if (!wasAlreadyInstalled) {
+        await _deleteModelFile(fileName);
+      }
+      throw Exception('Model file not found: $filePath');
+    }
 
-    // Always call install() - even if already tracked, we need to ensure
-    // flutter_gemma has the model active. The install() call is idempotent.
+    final actualSize = await file.length();
+    if (actualSize == 0) {
+      if (!wasAlreadyInstalled) {
+        await _deleteModelFile(fileName);
+      }
+      throw Exception('Model file is empty: $filePath');
+    }
+
+    // If deferring install, just track the model without loading it
+    if (deferInstall) {
+      final model = InstalledModel(
+        id: fileName,
+        fileName: fileName,
+        modelType: modelType,
+        installedAt: DateTime.now(),
+        fileSizeBytes: actualSize,
+      );
+      _installedModels.removeWhere((m) => m.id == fileName);
+      _installedModels.add(model);
+      await _saveToPrefs();
+      _statusController.add('Registered (lazy): $fileName');
+      return;
+    }
+
+    // Actually install with flutter_gemma (loads model into memory)
+    bool success = false;
+    int registeredSize = actualSize;
+
     try {
       await FlutterGemma.installModel(
         modelType: modelType,
@@ -748,7 +789,7 @@ class ModelManager {
       final altPath = await _findModelFile(fileName);
       if (altPath != null && altPath != filePath) {
         try {
-          actualSize = await File(altPath).length();
+          registeredSize = await File(altPath).length();
           await FlutterGemma.installModel(
             modelType: modelType,
             fileType: fileType,
@@ -772,7 +813,7 @@ class ModelManager {
         fileName: fileName,
         modelType: modelType,
         installedAt: DateTime.now(),
-        fileSizeBytes: actualSize,
+        fileSizeBytes: registeredSize,
       );
       _installedModels.removeWhere((m) => m.id == fileName);
       _installedModels.add(model);

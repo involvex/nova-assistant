@@ -170,13 +170,11 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
         _lastWidgetActionTime != null &&
         now.difference(_lastWidgetActionTime!).inMilliseconds <
             _widgetActionDebounceMs) {
-      debugPrint('Ignoring duplicate widget action: $action');
       return;
     }
 
     _lastWidgetAction = action;
     _lastWidgetActionTime = now;
-    debugPrint('Widget action received in NovaApp: $action');
 
     Widget? screen;
     final shortAction = action.startsWith('dev.nova.assistant.widget.')
@@ -203,17 +201,16 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
         screen = const AssistantScreen();
         break;
       default:
-        debugPrint('Unknown widget action: $action');
+        return;
     }
 
-    if (screen != null) {
-      final navigator = _navigatorKey.currentState;
-      if (navigator != null) {
-        navigator.pushAndRemoveUntil<void>(
-          MaterialPageRoute<void>(builder: (_) => screen!),
-          (route) => route.isFirst,
-        );
-      }
+    // screen is always non-null here due to switch having default:return
+    final navigator = _navigatorKey.currentState;
+    if (navigator != null) {
+      navigator.pushAndRemoveUntil<void>(
+        MaterialPageRoute<void>(builder: (_) => screen!),
+        (route) => route.isFirst,
+      );
     }
   }
 

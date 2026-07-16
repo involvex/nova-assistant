@@ -7,6 +7,7 @@ import 'package:nova_assistant/screens/onboarding/beginner/name_setup_screen.dar
 import 'package:nova_assistant/screens/onboarding/beginner/permissions_screen.dart';
 import 'package:nova_assistant/screens/onboarding/beginner/model_download_screen.dart';
 import 'package:nova_assistant/screens/onboarding/beginner/ready_screen.dart';
+import 'package:nova_assistant/screens/chat_history_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -32,14 +33,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void _onModeSelected(UserMode mode) {
     UserPreferencesService.instance.setMode(mode);
     setState(() {
-      _currentStep = 1;
+      _currentStep = 2; // Advance to NameSetupScreen (step 2)
     });
   }
 
   Future<void> _onOnboardingComplete() async {
     await UserPreferencesService.instance.setOnboardingComplete(true);
     if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/app');
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => const ChatHistoryScreen()),
+      );
     }
   }
 

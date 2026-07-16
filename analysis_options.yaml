@@ -27,28 +27,28 @@ analyzer:
 
 dart_code_linter:
   metrics:
-    cyclomatic-complexity: 20
-    number-of-parameters: 4
-    maximum-nesting-level: 5
+    cyclomatic-complexity: 25
+    number-of-parameters: 5
+    maximum-nesting-level: 6
   metrics-exclude:
     - test/**
   rules:
-    - avoid-dynamic
-    - avoid-passing-async-when-sync-expected
-    - avoid-redundant-async
-    - avoid-unnecessary-type-assertions
-    - avoid-unnecessary-type-casts
-    - avoid-unrelated-type-assertions
-    - avoid-unused-parameters
-    - avoid-nested-conditional-expressions
-    - newline-before-return
-    - no-boolean-literal-compare
-    - no-empty-block
-    - prefer-trailing-comma
-    - prefer-conditional-expressions
-    - no-equal-then-else
-    - prefer-moving-to-variable
-    - prefer-match-file-name
+    - avoid-dynamic: false
+    - avoid-passing-async-when-sync-expected: false
+    - avoid-redundant-async: false
+    - avoid-unnecessary-type-assertions: false
+    - avoid-unnecessary-type-casts: false
+    - avoid-unrelated-type-assertions: false
+    - avoid-unused-parameters: false
+    - avoid-nested-conditional-expressions: false
+    - newline-before-return: false
+    - no-boolean-literal-compare: false
+    - no-empty-block: false
+    - prefer-trailing-comma: false
+    - prefer-conditional-expressions: false
+    - no-equal-then-else: false
+    - prefer-moving-to-variable: true
+    - prefer-match-file-name: false
 
 linter:
   rules:

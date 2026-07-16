@@ -15,7 +15,7 @@ import dev.nova.assistant.WidgetTrampolineActivity
 class StatsWidgetProvider : AppWidgetProvider() {
 
     companion object {
-        private const val PREFS_NAME = "dev.nova.assistant.widget.stats"
+        internal const val PREFS_NAME = "HomeWidgetPreferences"
         private const val KEY_TASKS_COUNT = "tasks_count"
         private const val KEY_NOTES_COUNT = "notes_count"
         private const val KEY_MEMORY_COUNT = "memory_count"

@@ -179,7 +179,10 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     debugPrint('Widget action received in NovaApp: $action');
 
     Widget? screen;
-    switch (action) {
+    final shortAction = action.startsWith('dev.nova.assistant.widget.')
+        ? action.substring('dev.nova.assistant.widget.'.length)
+        : action;
+    switch (shortAction) {
       case 'ACTION_NEW_CHAT':
       case 'ACTION_QUICK_ASK':
       case 'ACTION_VOICE':

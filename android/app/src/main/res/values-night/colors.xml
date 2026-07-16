@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#1a1a2e</color>
-
-    <!-- Widget Theme Colors -->
+    <!-- Widget Theme Colors - Dark Theme (default) -->
     <color name="widget_background">#0D0D1A</color>
     <color name="widget_card_background">#1A1A2E</color>
     <color name="widget_primary">#6C63FF</color>

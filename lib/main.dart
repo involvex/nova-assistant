@@ -9,6 +9,9 @@ import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/onboarding/onboarding_screen.dart';
 import 'package:nova_assistant/screens/chat_history_screen.dart';
+import 'package:nova_assistant/screens/tasks_screen.dart';
+import 'package:nova_assistant/screens/notes_screen.dart';
+import 'package:nova_assistant/screens/memory_management_screen.dart';
 import 'package:nova_assistant/services/memory_service.dart';
 import 'package:nova_assistant/services/task_service.dart';
 import 'package:nova_assistant/services/note_service.dart';
@@ -19,6 +22,7 @@ import 'package:nova_assistant/services/download_progress_service.dart';
 import 'package:nova_assistant/services/model_update_service.dart';
 import 'package:nova_assistant/services/parallel_session_manager.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
+import 'package:nova_assistant/services/widget_service.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -42,6 +46,7 @@ void main() async {
 
     await TaskService.instance.initialize();
     await NoteService.instance.initialize();
+    await WidgetService.instance.initialize();
 
     await NotificationService.instance.initialize();
     await NotificationService.instance.requestPermission();
@@ -133,10 +138,64 @@ class NovaApp extends StatefulWidget {
 }
 
 class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  StreamSubscription<String>? _widgetActionSub;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _setupWidgetNavigation();
+  }
+
+  void _setupWidgetNavigation() {
+    _widgetActionSub = WidgetService.instance.widgetActionStream.listen(
+      (String action) {
+        _handleWidgetAction(action);
+      },
+      onError: (Object error) {
+        debugPrint('Widget navigation error: $error');
+      },
+    );
+  }
+
+  void _handleWidgetAction(String action) {
+    debugPrint('Widget action received in NovaApp: $action');
+
+    Widget? screen;
+    switch (action) {
+      case 'ACTION_NEW_CHAT':
+      case 'ACTION_QUICK_ASK':
+      case 'ACTION_VOICE':
+      case 'ACTION_SCREENSHOT':
+      case 'tap':
+        screen = const AssistantScreen();
+        break;
+      case 'ACTION_OPEN_TASKS':
+        screen = const TasksScreen();
+        break;
+      case 'ACTION_OPEN_NOTES':
+        screen = const NotesScreen();
+        break;
+      case 'ACTION_OPEN_MEMORY':
+        screen = const MemoryManagementScreen();
+        break;
+      case 'tap_at_glance':
+        screen = const AssistantScreen();
+        break;
+      default:
+        debugPrint('Unknown widget action: $action');
+    }
+
+    if (screen != null) {
+      final navigator = _navigatorKey.currentState;
+      if (navigator != null) {
+        navigator.pushAndRemoveUntil<void>(
+          MaterialPageRoute<void>(builder: (_) => screen!),
+          (route) => route.isFirst,
+        );
+      }
+    }
   }
 
   @override
@@ -187,6 +246,12 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('Error disposing ModelUpdateService: $e');
     }
+    try {
+      WidgetService.instance.dispose();
+    } catch (e) {
+      debugPrint('Error disposing WidgetService: $e');
+    }
+    _widgetActionSub?.cancel();
   }
 
   @override
@@ -229,6 +294,7 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
         ),
       ),
       themeMode: ThemeMode.dark,
+      navigatorKey: _navigatorKey,
       home: const AppLoader(),
     );
   }

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_actions_widget_description">Quick actions for Nova - New Chat, Voice, Screenshot, Quick Ask</string>
+    <string name="at_a_glance_widget_description">At-a-glance info - Time, date, and Nova status</string>
+    <string name="stats_widget_description">Nova stats - Tasks, notes, and memory count</string>
+
+    <!-- Widget Actions -->
+    <string name="action_new_chat">New Chat</string>
+    <string name="action_voice_input">Voice</string>
+    <string name="action_screenshot">Screenshot</string>
+    <string name="action_quick_ask">Quick Ask</string>
+
+    <!-- Widget Stats -->
+    <string name="stats_tasks">Tasks</string>
+    <string name="stats_notes">Notes</string>
+    <string name="stats_memory">Memory</string>
+
+    <!-- Widget Labels -->
+    <string name="widget_time_format">%1$s</string>
+    <string name="widget_date_format">%1$s, %2$s</string>
+    <string name="widget_stats_count">%1$d</string>
+</resources>

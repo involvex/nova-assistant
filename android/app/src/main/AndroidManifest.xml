@@ -44,6 +44,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Deep link handler for widget actions -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nova" />
+            </intent-filter>
         </activity>
 
         <!-- Assistant Activity — triggered by system assistant button -->
@@ -80,6 +87,63 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- ==================== WIDGET RECEIVERS ==================== -->
+
+        <!-- Quick Actions Widget -->
+        <receiver
+            android:name=".widget.QuickActionsWidgetProvider"
+            android:exported="true"
+            android:label="@string/quick_actions_widget_description">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="dev.nova.assistant.widget.ACTION_NEW_CHAT" />
+                <action android:name="dev.nova.assistant.widget.ACTION_VOICE" />
+                <action android:name="dev.nova.assistant.widget.ACTION_SCREENSHOT" />
+                <action android:name="dev.nova.assistant.widget.ACTION_QUICK_ASK" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/quick_actions_widget_info" />
+        </receiver>
+
+        <!-- At-a-Glance Widget -->
+        <receiver
+            android:name=".widget.AtAGlanceWidgetProvider"
+            android:exported="true"
+            android:label="@string/at_a_glance_widget_description">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/at_a_glance_widget_info" />
+        </receiver>
+
+        <!-- Stats Widget -->
+        <receiver
+            android:name=".widget.StatsWidgetProvider"
+            android:exported="true"
+            android:label="@string/stats_widget_description">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/stats_widget_info" />
+        </receiver>
+
+        <!-- Widget Configuration Activity -->
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true"
+            android:theme="@style/LaunchTheme">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
 
     </application>
 </manifest>

@@ -110,7 +110,7 @@ class WidgetService {
 
     try {
       await HomeWidget.updateWidget(
-        androidName: 'StatsWidgetProvider',
+        androidName: 'dev.nova.assistant.widget.StatsWidgetProvider',
         iOSName: 'StatsWidget',
       );
     } catch (e) {
@@ -122,7 +122,7 @@ class WidgetService {
     await HomeWidget.saveWidgetData<String>(_modelStatusKey, status);
     try {
       await HomeWidget.updateWidget(
-        androidName: 'AtAGlanceWidgetProvider',
+        androidName: 'dev.nova.assistant.widget.AtAGlanceWidgetProvider',
         iOSName: 'AtAGlanceWidget',
       );
     } catch (e) {
@@ -135,15 +135,15 @@ class WidgetService {
     try {
       await Future.wait([
         HomeWidget.updateWidget(
-          androidName: 'QuickActionsWidgetProvider',
+          androidName: 'dev.nova.assistant.widget.QuickActionsWidgetProvider',
           iOSName: 'QuickActionsWidget',
         ),
         HomeWidget.updateWidget(
-          androidName: 'AtAGlanceWidgetProvider',
+          androidName: 'dev.nova.assistant.widget.AtAGlanceWidgetProvider',
           iOSName: 'AtAGlanceWidget',
         ),
         HomeWidget.updateWidget(
-          androidName: 'StatsWidgetProvider',
+          androidName: 'dev.nova.assistant.widget.StatsWidgetProvider',
           iOSName: 'StatsWidget',
         ),
       ]);

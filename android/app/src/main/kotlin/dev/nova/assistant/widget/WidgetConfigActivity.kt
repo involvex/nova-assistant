@@ -4,8 +4,8 @@ import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Button
 import android.widget.CheckBox
-import com.google.android.material.button.MaterialButton
 import dev.nova.assistant.R
 
 class WidgetConfigActivity : Activity() {
@@ -52,8 +52,8 @@ class WidgetConfigActivity : Activity() {
         checkScreenshot = findViewById(R.id.check_screenshot)
         checkQuickAsk = findViewById(R.id.check_quick_ask)
 
-        val btnSave: MaterialButton = findViewById(R.id.btn_save)
-        val btnCancel: MaterialButton = findViewById(R.id.btn_cancel)
+        val btnSave: Button = findViewById(R.id.btn_save)
+        val btnCancel: Button = findViewById(R.id.btn_cancel)
 
         btnSave.setOnClickListener { onSaveClicked() }
         btnCancel.setOnClickListener { onCancelClicked() }

@@ -51,7 +51,7 @@ dependencies:
   timezone: ^0.10.1
 
   # Home Screen Widgets
-  home_widget: ^0.6.0
+  home_widget: ^0.9.3
 
 dev_dependencies:
   flutter_test:

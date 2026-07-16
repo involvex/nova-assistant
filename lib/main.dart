@@ -18,6 +18,8 @@ import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/download_progress_service.dart';
 import 'package:nova_assistant/services/model_update_service.dart';
 import 'package:nova_assistant/services/parallel_session_manager.dart';
+import 'package:nova_assistant/services/chat_history_service.dart';
+import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -271,6 +273,54 @@ class _AppLoaderState extends State<AppLoader> {
 
     if (_preferences == null || !_preferences!.onboardingComplete) {
       return const OnboardingScreen();
+    }
+
+    return const _LastConversationLoader();
+  }
+}
+
+class _LastConversationLoader extends StatefulWidget {
+  const _LastConversationLoader();
+
+  @override
+  State<_LastConversationLoader> createState() =>
+      _LastConversationLoaderState();
+}
+
+class _LastConversationLoaderState extends State<_LastConversationLoader> {
+  bool _isLoading = true;
+  Conversation? _lastConversation;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLastConversation();
+  }
+
+  Future<void> _loadLastConversation() async {
+    final conversations = await ChatHistoryService.loadConversations();
+    if (mounted) {
+      setState(() {
+        _lastConversation = conversations.isNotEmpty
+            ? conversations.first
+            : null;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF6C63FF)),
+        ),
+      );
+    }
+
+    if (_lastConversation != null) {
+      return AssistantScreen(conversationId: _lastConversation!.id);
     }
 
     return const ChatHistoryScreen();

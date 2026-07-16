@@ -924,123 +924,149 @@ class _AssistantScreenState extends State<AssistantScreen>
               ),
             ),
           const SizedBox(width: 8),
-
-          // Thinking mode toggle
-          Tooltip(
-            message: 'Thinking mode (show reasoning)',
-            child: IconButton(
-              onPressed: () async {
-                setState(() => _thinkingMode = !_thinkingMode);
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setBool('settings_thinking_mode', _thinkingMode);
-              },
-              icon: Icon(
-                Icons.psychology_outlined,
-                color: _thinkingMode ? const Color(0xFF6C63FF) : Colors.grey,
-              ),
-            ),
-          ),
-
-          // Model picker - opens bottom sheet
-          Tooltip(
-            message: 'Select model',
-            child: GestureDetector(
-              onTap: () => _showModelSelectorSheet(context),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _selectedModel == null
-                          ? Icons.auto_awesome
-                          : Icons.account_tree,
-                      size: 16,
-                      color: const Color(0xFF6C63FF),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _selectedModel?.displayName ?? 'Auto',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  // Thinking mode toggle
+                  Tooltip(
+                    message: 'Thinking mode (show reasoning)',
+                    child: IconButton(
+                      onPressed: () async {
+                        setState(() => _thinkingMode = !_thinkingMode);
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setBool(
+                          'settings_thinking_mode',
+                          _thinkingMode,
+                        );
+                      },
+                      icon: Icon(
+                        Icons.psychology_outlined,
+                        color: _thinkingMode
+                            ? const Color(0xFF6C63FF)
+                            : Colors.grey,
                       ),
                     ),
-                    const Icon(Icons.arrow_drop_down, color: Colors.grey),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Screenshot capture
-          Tooltip(
-            message: 'Capture screen',
-            child: IconButton(
-              onPressed: _captureAndAttachScreenshot,
-              icon: const Icon(
-                Icons.screenshot_monitor_outlined,
-                color: Colors.grey,
-              ),
-            ),
-          ),
-
-          // Conversation export
-          PopupMenuButton<String>(
-            tooltip: 'Export conversation',
-            onSelected: (format) async {
-              String? path;
-              path = format == 'text'
-                  ? await ChatHistoryService.exportAsText()
-                  : await ChatHistoryService.exportAsJson();
-              if (path != null && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Exported to:\n$path'),
-                    duration: const Duration(seconds: 4),
                   ),
-                );
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem<String>(
-                value: 'text',
-                child: Text('Export as Text'),
-              ),
-              const PopupMenuItem<String>(
-                value: 'json',
-                child: Text('Export as JSON'),
-              ),
-            ],
-            child: const Tooltip(
-              message: 'Export conversation',
-              child: Icon(Icons.download_outlined, color: Colors.grey),
-            ),
-          ),
 
-          // Chat history
-          IconButton(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(
-                builder: (_) => const ChatHistoryScreen(),
+                  // Model picker - opens bottom sheet
+                  Tooltip(
+                    message: 'Select model',
+                    child: GestureDetector(
+                      onTap: () => _showModelSelectorSheet(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Colors.grey.withValues(alpha: 0.3),
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _selectedModel == null
+                                  ? Icons.auto_awesome
+                                  : Icons.account_tree,
+                              size: 16,
+                              color: const Color(0xFF6C63FF),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _selectedModel?.displayName ?? 'Auto',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const Icon(
+                              Icons.arrow_drop_down,
+                              color: Colors.grey,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Screenshot capture
+                  Tooltip(
+                    message: 'Capture screen',
+                    child: IconButton(
+                      onPressed: _captureAndAttachScreenshot,
+                      icon: const Icon(
+                        Icons.screenshot_monitor_outlined,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ),
+
+                  // Conversation export
+                  PopupMenuButton<String>(
+                    tooltip: 'Export conversation',
+                    onSelected: (format) async {
+                      String? path;
+                      path = format == 'text'
+                          ? await ChatHistoryService.exportAsText()
+                          : await ChatHistoryService.exportAsJson();
+                      if (path != null && mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Exported to:\n$path'),
+                            duration: const Duration(seconds: 4),
+                          ),
+                        );
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem<String>(
+                        value: 'text',
+                        child: Text('Export as Text'),
+                      ),
+                      const PopupMenuItem<String>(
+                        value: 'json',
+                        child: Text('Export as JSON'),
+                      ),
+                    ],
+                    child: const Tooltip(
+                      message: 'Export conversation',
+                      child: Icon(Icons.download_outlined, color: Colors.grey),
+                    ),
+                  ),
+
+                  // Chat history
+                  IconButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ChatHistoryScreen(),
+                      ),
+                    ),
+                    icon: const Icon(Icons.history, color: Colors.grey),
+                    tooltip: 'Chat history',
+                  ),
+
+                  // Settings
+                  IconButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const SettingsScreen(),
+                      ),
+                    ),
+                    icon: const Icon(
+                      Icons.settings_outlined,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
               ),
             ),
-            icon: const Icon(Icons.history, color: Colors.grey),
-            tooltip: 'Chat history',
-          ),
-
-          // Settings
-          IconButton(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
-            ),
-            icon: const Icon(Icons.settings_outlined, color: Colors.grey),
           ),
         ],
       ),

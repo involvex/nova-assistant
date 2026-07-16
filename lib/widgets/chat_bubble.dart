@@ -12,6 +12,7 @@ class ChatBubble extends StatelessWidget {
   final VoidCallback? onCopy;
   final VoidCallback? onReactionRequest;
   final ValueChanged<String>? onReactionChipTap;
+  final VoidCallback? onRegenerate;
 
   const ChatBubble({
     super.key,
@@ -22,6 +23,7 @@ class ChatBubble extends StatelessWidget {
     this.onCopy,
     this.onReactionRequest,
     this.onReactionChipTap,
+    this.onRegenerate,
   });
 
   @override
@@ -165,6 +167,29 @@ class ChatBubble extends StatelessWidget {
                         onTap: onSettingsTap!,
                       ),
                   ],
+                ),
+              ),
+
+            // Regenerate button (for non-error, non-streaming assistant messages)
+            if (!isUser &&
+                !message.isError &&
+                !message.isStreaming &&
+                onRegenerate != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 12),
+                child: GestureDetector(
+                  onTap: onRegenerate,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.refresh, size: 14, color: Colors.grey[500]),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Regenerate',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 

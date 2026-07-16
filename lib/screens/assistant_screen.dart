@@ -21,6 +21,8 @@ import 'package:nova_assistant/screens/chat_history_screen.dart';
 import 'package:nova_assistant/screens/settings_screen.dart';
 import 'package:nova_assistant/screens/model_selector_sheet.dart';
 import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
+import 'package:nova_assistant/screens/prompt_presets_screen.dart';
+import 'package:nova_assistant/services/prompt_presets_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AssistantScreen extends StatefulWidget {
@@ -309,6 +311,42 @@ class _AssistantScreenState extends State<AssistantScreen>
     // Re-send
     _inputController.text = userText;
     _sendMessage();
+  }
+
+  void _regenerateResponse(int assistantIndex) {
+    // Find the user message that preceded this assistant response
+    String? userText;
+    for (var i = assistantIndex - 1; i >= 0; i--) {
+      if (_messages[i].isUser) {
+        userText = _messages[i].text;
+        break;
+      }
+    }
+    if (userText == null || userText.isEmpty) return;
+
+    // Remove the assistant message and any following messages
+    setState(() {
+      _messages.removeRange(assistantIndex, _messages.length);
+    });
+
+    // Re-send the user message
+    _inputController.text = userText;
+    _sendMessage();
+  }
+
+  void _showPromptPresets() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => PromptPresetsScreen(
+          selectMode: true,
+          onPresetSelected: (preset) {
+            _inputController.text = preset.prompt;
+            PromptPresetsService.instance.incrementUseCount(preset.id);
+          },
+        ),
+      ),
+    );
   }
 
   List<Tool> _toolsForQuery(String query) {
@@ -869,6 +907,10 @@ class _AssistantScreenState extends State<AssistantScreen>
                           onReactionRequest: () => _showReactionPicker(index),
                           onReactionChipTap: (emoji) =>
                               _toggleReaction(index, emoji),
+                          onRegenerate:
+                              !msg.isUser && !msg.isError && !msg.isStreaming
+                              ? () => _regenerateResponse(index)
+                              : null,
                         );
                       },
                     ),
@@ -1457,6 +1499,12 @@ class _AssistantScreenState extends State<AssistantScreen>
                 onPressed: _showUrlDialog,
                 icon: const Icon(Icons.link, color: Colors.grey),
                 tooltip: 'Attach URL',
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: _showPromptPresets,
+                icon: const Icon(Icons.lightbulb_outline, color: Colors.grey),
+                tooltip: 'Prompt presets',
               ),
             ],
           ),

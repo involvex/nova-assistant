@@ -48,6 +48,8 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [x] Document analysis - DocumentExtractor (text/PDF), DocumentChunker with relevance scoring
 - [x] MCP client - McpClient with JSON-RPC 2.0 over HTTP/SSE and stdio
 - [x] MCP server support - McpService server management, MCP Settings UI with add/connect/disconnect
+- [x] Parallel session management - Up to 3 concurrent chat sessions
+- [x] Platform adaptation - Web-specific workarounds for vision, thinking, function calling
 
 ---
 
@@ -100,7 +102,12 @@ This document outlines the planned features and improvements for Nova Assistant.
 - [ ] **Proactive suggestions** - AI-suggested quick actions based on context
 - [ ] **Multi-language support** - Detect and respond in user's language
 - [x] **Code syntax highlighting** - Enhanced code block rendering via `MarkdownStyleSheet`
-- [ ] **Custom knowledge bases** - Load and query custom document collections
+- [x] **Custom knowledge bases** - DocumentExtractor and DocumentChunker implemented; knowledge base UI pending
+- [ ] **Prompt presets** - Context-based prompt templates that adapt to conversation type
+- [ ] **Conversation branching** - Start new chat from any previous message
+- [ ] **Response regeneration** - Reroll/regenerate AI responses (not just retry on error)
+- [x] **Parallel session management** - Up to 3 concurrent chat sessions
+- [x] **Platform adaptation** - Web-specific workarounds for vision, thinking, function calling
 
 ---
 
@@ -244,9 +251,16 @@ This document outlines the planned features and improvements for Nova Assistant.
 - ~~MCP server support~~ (McpService, MCP Settings UI)
 - ~~Semantic search~~ (TF-IDF scoring in MemoryService, stop-word removal, IDF weighting)
 - ~~CI testing workflow~~ (GitHub Actions: analyze, test, coverage, build on PR/push; release workflow for tags)
+- ~~Parallel session management~~ (up to 3 concurrent chat sessions)
+- ~~Platform adaptation~~ (web-specific workarounds)
 - Unit test coverage to 80%+
 - Widget tests for key screens (TasksScreen, NotesScreen, AssistantScreen)
 - Beginner mode tests (AssistantScreenBeginner, UserPreferencesService)
+- Conversation summaries
+- Proactive suggestions
+- Prompt presets (context-based)
+- Conversation branching (start from message)
+- Response regeneration (reroll)
 
 ### v0.4.0
 - Windows support
@@ -254,15 +268,12 @@ This document outlines the planned features and improvements for Nova Assistant.
 - Voice synthesis
 - Wake word detection
 - Plugin system
-- Conversation summaries
-- Proactive suggestions
+- Multi-language support
 
 ### v1.0.0
 - Stable release with comprehensive features
 - Complete documentation
 - Cloud sync
-- MCP client
-- Multi-language support
 
 ---
 

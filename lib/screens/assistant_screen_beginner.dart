@@ -178,6 +178,27 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
     }
   }
 
+  void _regenerateResponse(int assistantIndex) {
+    // Find the user message that preceded this assistant response
+    String? userText;
+    for (var i = assistantIndex - 1; i >= 0; i--) {
+      if (_messages[i].isUser) {
+        userText = _messages[i].text;
+        break;
+      }
+    }
+    if (userText == null || userText.isEmpty) return;
+
+    // Remove the assistant message and any following messages
+    setState(() {
+      _messages.removeRange(assistantIndex, _messages.length);
+    });
+
+    // Re-send the user message
+    _inputController.text = userText;
+    _sendMessage();
+  }
+
   Future<void> _switchToExpertMode() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -401,6 +422,9 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
               ),
             );
           },
+          onRegenerate: !msg.isUser && !msg.isError && !msg.isStreaming
+              ? () => _regenerateResponse(index)
+              : null,
         );
       },
     );

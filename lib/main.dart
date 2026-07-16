@@ -7,8 +7,8 @@ import 'package:flutter_gemma_mediapipe/flutter_gemma_mediapipe.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
-import 'package:nova_assistant/screens/assistant_screen_beginner.dart';
 import 'package:nova_assistant/screens/onboarding/onboarding_screen.dart';
+import 'package:nova_assistant/screens/chat_history_screen.dart';
 import 'package:nova_assistant/services/memory_service.dart';
 import 'package:nova_assistant/services/task_service.dart';
 import 'package:nova_assistant/services/note_service.dart';
@@ -273,10 +273,6 @@ class _AppLoaderState extends State<AppLoader> {
       return const OnboardingScreen();
     }
 
-    if (_preferences!.mode == UserMode.beginner) {
-      return const AssistantScreenBeginner();
-    }
-
-    return const AssistantScreen();
+    return const ChatHistoryScreen();
   }
 }

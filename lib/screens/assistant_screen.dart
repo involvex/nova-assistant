@@ -17,13 +17,16 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
 import 'package:nova_assistant/widgets/chat_bubble.dart';
 import 'package:nova_assistant/widgets/voice_input.dart';
+import 'package:nova_assistant/screens/chat_history_screen.dart';
 import 'package:nova_assistant/screens/settings_screen.dart';
 import 'package:nova_assistant/screens/model_selector_sheet.dart';
 import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AssistantScreen extends StatefulWidget {
-  const AssistantScreen({super.key});
+  final String? conversationId;
+
+  const AssistantScreen({super.key, this.conversationId});
 
   @override
   State<AssistantScreen> createState() => _AssistantScreenState();
@@ -40,12 +43,11 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _thinkingMode = false;
   bool _offlineMode = false;
   Uint8List? _currentScreenshot;
-  bool _isLoadingInitialScreenshot =
-      true; // Track if initial screenshot is loading
+  bool _isLoadingInitialScreenshot = true;
   String _status = 'Ready';
   bool _shouldPreserveScreenshot = false;
-  NovaModel? _selectedModel; // Track selected model for UI
-  CustomModel? _selectedCustomModel; // Track selected custom model for UI
+  NovaModel? _selectedModel;
+  CustomModel? _selectedCustomModel;
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
   StreamSubscription<void>? _historyClearedSub;
   StreamSubscription<String>? _statusSub;
@@ -72,10 +74,34 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _loadHistory() async {
-    final history = await ChatHistoryService.load();
-    if (mounted && history.isNotEmpty) {
-      setState(() => _messages.addAll(history));
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    if (widget.conversationId != null) {
+      final conversation = await ChatHistoryService.getConversation(
+        widget.conversationId!,
+      );
+      if (conversation != null && mounted) {
+        setState(() => _messages.addAll(conversation.messages));
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      }
+    } else {
+      final history = await ChatHistoryService.load();
+      if (mounted && history.isNotEmpty) {
+        setState(() => _messages.addAll(history));
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      }
+    }
+  }
+
+  Future<void> _saveMessages() async {
+    if (widget.conversationId != null) {
+      final conversation = await ChatHistoryService.getConversation(
+        widget.conversationId!,
+      );
+      if (conversation != null) {
+        final updated = conversation.copyWith(messages: _messages);
+        await ChatHistoryService.updateConversation(updated);
+      }
+    } else {
+      await ChatHistoryService.save(_messages);
     }
   }
 
@@ -354,7 +380,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       _isGenerating = true;
     });
 
-    ChatHistoryService.save(_messages); // Persist immediately
+    _saveMessages();
 
     _scrollToBottom();
 
@@ -870,28 +896,34 @@ class _AssistantScreenState extends State<AssistantScreen>
       ),
       child: Row(
         children: [
-          // Nova logo
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6C63FF), Color(0xFF9D4EDD)],
+          if (widget.conversationId != null)
+            IconButton(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              tooltip: 'Back to chat history',
+            )
+          else
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF6C63FF), Color(0xFF9D4EDD)],
+                ),
+                borderRadius: BorderRadius.circular(10),
               ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Center(
-              child: Text(
-                'N',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
+              child: const Center(
+                child: Text(
+                  'N',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
 
           // Thinking mode toggle
           Tooltip(
@@ -988,6 +1020,18 @@ class _AssistantScreenState extends State<AssistantScreen>
               message: 'Export conversation',
               child: Icon(Icons.download_outlined, color: Colors.grey),
             ),
+          ),
+
+          // Chat history
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => const ChatHistoryScreen(),
+              ),
+            ),
+            icon: const Icon(Icons.history, color: Colors.grey),
+            tooltip: 'Chat history',
           ),
 
           // Settings
@@ -1539,7 +1583,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       }
       _messages[messageIndex] = msg.copyWith(reactions: newReactions);
     });
-    ChatHistoryService.save(_messages);
+    _saveMessages();
   }
 
   void _showFullScreenshot(Uint8List data) {

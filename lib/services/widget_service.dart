@@ -30,10 +30,16 @@ class WidgetService {
   final _widgetActionController = StreamController<String>.broadcast();
   Stream<String> get widgetActionStream => _widgetActionController.stream;
 
+  bool _widgetChannelInitialized = false;
+
   Future<void> initialize() async {
     await HomeWidget.setAppGroupId(_appGroupId);
 
-    _setupWidgetChannelListener();
+    if (!_widgetChannelInitialized) {
+      _widgetChannelInitialized = true;
+      _setupWidgetChannelListener();
+    }
+
     await _updateAllStats();
     await _updateModelStatus('Ready');
 

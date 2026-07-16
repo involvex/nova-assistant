@@ -141,6 +141,10 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<String>? _widgetActionSub;
 
+  String? _lastWidgetAction;
+  DateTime? _lastWidgetActionTime;
+  static const _widgetActionDebounceMs = 1000;
+
   @override
   void initState() {
     super.initState();
@@ -160,6 +164,18 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
   }
 
   void _handleWidgetAction(String action) {
+    final now = DateTime.now();
+
+    if (action == _lastWidgetAction &&
+        _lastWidgetActionTime != null &&
+        now.difference(_lastWidgetActionTime!).inMilliseconds <
+            _widgetActionDebounceMs) {
+      debugPrint('Ignoring duplicate widget action: $action');
+      return;
+    }
+
+    _lastWidgetAction = action;
+    _lastWidgetActionTime = now;
     debugPrint('Widget action received in NovaApp: $action');
 
     Widget? screen;

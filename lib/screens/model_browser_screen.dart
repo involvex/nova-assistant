@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
@@ -159,7 +160,8 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-                'Model type not recognized. Use Settings > Install model from file for custom models.'),
+              'Model type not recognized. Use Settings > Install model from file for custom models.',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -224,7 +226,8 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                  'Download failed. Check Settings > HuggingFace Token or try Install from file.'),
+                'Download failed. Check Settings > HuggingFace Token or try Install from file.',
+              ),
               backgroundColor: Colors.red,
             ),
           );
@@ -299,9 +302,7 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
               ),
             ),
           const SizedBox(height: 8),
-          Expanded(
-            child: _buildBody(),
-          ),
+          Expanded(child: _buildBody()),
         ],
       ),
     );
@@ -345,8 +346,11 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
     );
   }
 
-  Widget _modelTile(Map<String, dynamic> model,
-      {bool isDefault = false, bool isInstalled = false}) {
+  Widget _modelTile(
+    Map<String, dynamic> model, {
+    bool isDefault = false,
+    bool isInstalled = false,
+  }) {
     final modelId = model['modelId'] as String? ?? model['id'] as String;
     final author = model['author'] as String? ?? 'unknown';
     final downloads = (model['downloads'] as int?) ?? 0;
@@ -418,8 +422,11 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
                     ],
                     if (likes > 0) ...[
                       const SizedBox(width: 8),
-                      Icon(Icons.thumb_up_outlined,
-                          size: 10, color: Colors.grey[600]),
+                      Icon(
+                        Icons.thumb_up_outlined,
+                        size: 10,
+                        color: Colors.grey[600],
+                      ),
                       Text(
                         '$likes',
                         style: TextStyle(fontSize: 10, color: Colors.grey[600]),
@@ -452,8 +459,9 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
                     isDefault
                         ? Icons.cloud_download_outlined
                         : Icons.download_outlined,
-                    color:
-                        isDefault ? Colors.grey[600] : const Color(0xFF6C63FF),
+                    color: isDefault
+                        ? Colors.grey[600]
+                        : const Color(0xFF6C63FF),
                     size: 20,
                   ),
                 ),
@@ -473,8 +481,9 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
 
   Future<void> _showCustomDownloadDialog(Map<String, dynamic> model) async {
     final urlController = TextEditingController();
-    final nameController =
-        TextEditingController(text: model['id'] as String? ?? '');
+    final nameController = TextEditingController(
+      text: model['id'] as String? ?? '',
+    );
     final typeController = TextEditingController();
 
     if (!context.mounted) return;
@@ -482,8 +491,10 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text('Download Custom Model',
-            style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Download Custom Model',
+          style: TextStyle(color: Colors.white),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -544,9 +555,13 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
               ),
               items: const [
                 DropdownMenuItem(
-                    value: 'general', child: Text('General (SmolLM, FastVLM)')),
+                  value: 'general',
+                  child: Text('General (SmolLM, FastVLM)'),
+                ),
                 DropdownMenuItem(
-                    value: 'gemmaIt', child: Text('Gemma IT (Gemma 3)')),
+                  value: 'gemmaIt',
+                  child: Text('Gemma IT (Gemma 3)'),
+                ),
                 DropdownMenuItem(value: 'gemma4', child: Text('Gemma 4')),
               ],
               onChanged: (v) => typeController.text = v ?? '',
@@ -576,7 +591,10 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
   }
 
   Future<void> _downloadCustomModel(
-      String url, String fileName, String modelTypeStr) async {
+    String url,
+    String fileName,
+    String modelTypeStr,
+  ) async {
     ModelType? modelType;
     switch (modelTypeStr) {
       case 'gemmaIt':
@@ -624,7 +642,8 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                  'Download failed. Check URL or add a HuggingFace token in Settings.'),
+                'Download failed. Check URL or add a HuggingFace token in Settings.',
+              ),
               backgroundColor: Colors.red,
             ),
           );

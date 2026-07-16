@@ -37,14 +37,7 @@ class DocumentExtractor {
   };
 
   /// Supported image extensions (delegated to vision model).
-  static const _imageExtensions = {
-    'jpg',
-    'jpeg',
-    'png',
-    'gif',
-    'webp',
-    'bmp',
-  };
+  static const _imageExtensions = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'};
 
   /// Returns true if the file extension is a recognized image type.
   static bool isImageFile(String fileName) {
@@ -69,10 +62,7 @@ class DocumentExtractor {
   /// For PDFs, returns a structured placeholder with metadata.
   /// For images, returns a placeholder (should be handled by vision model).
   /// For unknown types, returns a placeholder.
-  static Future<String> extractText(
-    String filePath,
-    String fileName,
-  ) async {
+  static Future<String> extractText(String filePath, String fileName) async {
     final ext = _extension(fileName);
     final file = File(filePath);
 

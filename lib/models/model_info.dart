@@ -156,19 +156,23 @@ class ModelHuggingFaceURLs {
         return model;
       }
     }
+
     return null;
   }
 
   static NovaModel? modelFromFileName(String fileName) {
     final normalizedName = fileName.toLowerCase();
     for (final model in NovaModel.values) {
-      if (normalizedName.contains(fileNameFor(model)
-          .toLowerCase()
-          .replaceAll('.litertlm', '')
-          .replaceAll('.task', ''))) {
+      if (normalizedName.contains(
+        fileNameFor(model)
+            .toLowerCase()
+            .replaceAll('.litertlm', '')
+            .replaceAll('.task', ''),
+      )) {
         return model;
       }
     }
+
     return null;
   }
 }
@@ -178,6 +182,7 @@ extension NovaModelExtensions on NovaModel {
     final caps = <String>[];
     if (hasVision) caps.add('Vision');
     if (hasThinking) caps.add('Thinking');
+
     return caps.isEmpty ? 'Text only' : caps.join(' + ');
   }
 
@@ -189,6 +194,7 @@ extension NovaModelExtensions on NovaModel {
     final list = <String>['Function Calling'];
     if (hasVision) list.insert(0, 'Vision');
     if (hasThinking) list.insert(0, 'Thinking');
+
     return list;
   }
 }
@@ -229,6 +235,7 @@ class CustomModel {
     if (hasVision) caps.add('Vision');
     if (hasThinking) caps.add('Thinking');
     if (isGguf) caps.add('GGUF');
+
     return caps.isEmpty ? 'Text only' : caps.join(' + ');
   }
 
@@ -237,25 +244,27 @@ class CustomModel {
     if (hasVision) list.insert(0, 'Vision');
     if (hasThinking) list.insert(0, 'Thinking');
     if (isGguf) list.insert(0, 'GGUF');
+
     return list;
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'displayName': displayName,
-        'fileName': fileName,
-        'modelType': modelType.name,
-        'fileType': isGguf ? 'gguf' : fileType.name,
-        'hasVision': hasVision,
-        'hasThinking': hasThinking,
-        'supportsFunctionCalling': supportsFunctionCalling,
-        'fileSizeBytes': fileSizeBytes,
-        'installedAt': installedAt.toIso8601String(),
-        'isGguf': isGguf,
-      };
+    'id': id,
+    'displayName': displayName,
+    'fileName': fileName,
+    'modelType': modelType.name,
+    'fileType': isGguf ? 'gguf' : fileType.name,
+    'hasVision': hasVision,
+    'hasThinking': hasThinking,
+    'supportsFunctionCalling': supportsFunctionCalling,
+    'fileSizeBytes': fileSizeBytes,
+    'installedAt': installedAt.toIso8601String(),
+    'isGguf': isGguf,
+  };
 
   factory CustomModel.fromJson(Map<String, dynamic> json) {
     final isGguf = json['isGguf'] as bool? ?? false;
+
     return CustomModel(
       id: json['id'] as String,
       displayName: json['displayName'] as String,

@@ -36,6 +36,7 @@ class _ConversationSearchScreenState extends State<ConversationSearchScreen> {
   void _onQueryChanged(String query) {
     if (query.isEmpty) {
       setState(() => _results = []);
+
       return;
     }
     final lowerQuery = query.toLowerCase();
@@ -98,6 +99,7 @@ class _ConversationSearchScreenState extends State<ConversationSearchScreen> {
       itemBuilder: (context, index) {
         final msg = _results[index];
         final snippet = _highlightSnippet(msg.text, _controller.text);
+
         return _ResultTile(message: msg, snippet: snippet);
       },
     );
@@ -117,6 +119,7 @@ class _ConversationSearchScreenState extends State<ConversationSearchScreen> {
         : text.length;
     final prefix = start > 0 ? '...' : '';
     final suffix = end < text.length ? '...' : '';
+
     return '$prefix${text.substring(start, end)}$suffix';
   }
 }
@@ -144,8 +147,9 @@ class _ResultTile extends StatelessWidget {
             Icon(
               message.isUser ? Icons.person_outline : Icons.auto_awesome,
               size: 16,
-              color:
-                  message.isUser ? Colors.grey[400] : const Color(0xFF6C63FF),
+              color: message.isUser
+                  ? Colors.grey[400]
+                  : const Color(0xFF6C63FF),
             ),
             const SizedBox(width: 10),
             Expanded(

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:nova_assistant/models/task.dart';
@@ -82,15 +83,17 @@ class ExportService {
   }
 
   Future<void> shareTasks({String format = 'json'}) async {
-    final content =
-        format == 'json' ? exportTasksAsJson() : exportTasksAsText();
+    final content = format == 'json'
+        ? exportTasksAsJson()
+        : exportTasksAsText();
     final fileName = format == 'json' ? 'nova_tasks.json' : 'nova_tasks.txt';
     await _shareText(content, fileName);
   }
 
   Future<void> shareNotes({String format = 'json'}) async {
-    final content =
-        format == 'json' ? exportNotesAsJson() : exportNotesAsText();
+    final content = format == 'json'
+        ? exportNotesAsJson()
+        : exportNotesAsText();
     final fileName = format == 'json' ? 'nova_notes.json' : 'nova_notes.txt';
     await _shareText(content, fileName);
   }

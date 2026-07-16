@@ -163,6 +163,7 @@ class HttpToolProvider implements ExternalToolProvider {
         headers[parts[0].trim()] = parts.sublist(1).join(':').trim();
       }
     }
+
     return headers;
   }
 }
@@ -193,6 +194,7 @@ class McpToolProvider implements ExternalToolProvider {
 
         if (response.statusCode >= 200 && response.statusCode < 300) {
           final json = jsonDecode(body);
+
           return ExternalToolResult(success: true, data: json);
         } else {
           return ExternalToolResult(
@@ -219,17 +221,16 @@ class LocalToolProvider implements ExternalToolProvider {
       final command = tool.config['command'] ?? '';
       if (command.isEmpty) {
         return ExternalToolResult(
-            success: false, error: 'No command specified');
+          success: false,
+          error: 'No command specified',
+        );
       }
 
       final result = await Process.run(command, [jsonEncode(args)]);
 
-      if (result.exitCode == 0) {
-        return ExternalToolResult(success: true, data: result.stdout);
-      } else {
-        return ExternalToolResult(
-            success: false, error: result.stderr.toString());
-      }
+      return result.exitCode == 0
+          ? ExternalToolResult(success: true, data: result.stdout)
+          : ExternalToolResult(success: false, error: result.stderr.toString());
     } catch (e) {
       return ExternalToolResult(success: false, error: e.toString());
     }

@@ -23,16 +23,21 @@ class ScreenshotService {
         _cachedScreenshot = result;
         _lastCapture = DateTime.now();
       }
+
       return result;
     } on PlatformException catch (e) {
       debugPrint('ScreenshotService: PlatformException — ${e.message}');
+
       return null;
     } on MissingPluginException {
       debugPrint(
-          'ScreenshotService: Screenshot channel not available (not launched via MainActivity)');
+        'ScreenshotService: Screenshot channel not available (not launched via MainActivity)',
+      );
+
       return null;
     } catch (e) {
       debugPrint('ScreenshotService: failed to get screenshot — $e');
+
       return null;
     }
   }
@@ -48,10 +53,13 @@ class ScreenshotService {
   Future<bool> requestCapture() async {
     try {
       final result = await _channel.invokeMethod<bool>('requestCapture');
+
       return result ?? false;
     } on MissingPluginException {
       debugPrint(
-          'ScreenshotService: Capture not available — channel not registered');
+        'ScreenshotService: Capture not available — channel not registered',
+      );
+
       return false;
     } catch (_) {
       return false;
@@ -60,6 +68,7 @@ class ScreenshotService {
 
   bool get hasRecentCapture {
     if (_cachedScreenshot == null || _lastCapture == null) return false;
+
     return DateTime.now().difference(_lastCapture!).inSeconds < 5;
   }
 

@@ -15,9 +15,9 @@ class Note {
     DateTime? createdAt,
     DateTime? updatedAt,
     this.isPinned = false,
-  })  : createdAt = createdAt ?? DateTime.now(),
-        updatedAt = updatedAt ?? DateTime.now(),
-        tags = tags ?? [];
+  }) : createdAt = createdAt ?? DateTime.now(),
+       updatedAt = updatedAt ?? DateTime.now(),
+       tags = tags ?? [];
 
   Note copyWith({
     String? title,
@@ -37,22 +37,22 @@ class Note {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'content': content,
-        'tags': tags,
-        'createdAt': createdAt.toIso8601String(),
-        'updatedAt': updatedAt.toIso8601String(),
-        'isPinned': isPinned,
-      };
+    'id': id,
+    'title': title,
+    'content': content,
+    'tags': tags,
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+    'isPinned': isPinned,
+  };
 
   factory Note.fromJson(Map<String, dynamic> json) => Note(
-        id: json['id'] as String,
-        title: json['title'] as String,
-        content: json['content'] as String? ?? '',
-        tags: (json['tags'] as List<dynamic>?)?.cast<String>() ?? [],
-        createdAt: DateTime.parse(json['createdAt'] as String),
-        updatedAt: DateTime.parse(json['updatedAt'] as String),
-        isPinned: json['isPinned'] as bool? ?? false,
-      );
+    id: json['id'] as String,
+    title: json['title'] as String,
+    content: json['content'] as String? ?? '',
+    tags: (json['tags'] as List<dynamic>?)?.cast<String>() ?? [],
+    createdAt: DateTime.parse(json['createdAt'] as String),
+    updatedAt: DateTime.parse(json['updatedAt'] as String),
+    isPinned: json['isPinned'] as bool? ?? false,
+  );
 }

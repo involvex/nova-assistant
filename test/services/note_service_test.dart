@@ -57,7 +57,9 @@ void main() {
       test('finds notes by title', () async {
         await service.createNote(title: 'Grocery List', content: 'milk, eggs');
         await service.createNote(
-            title: 'Meeting Notes', content: 'action items');
+          title: 'Meeting Notes',
+          content: 'action items',
+        );
 
         final results = service.searchNotes('grocery');
         expect(results.length, 1);

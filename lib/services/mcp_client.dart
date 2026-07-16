@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 enum McpTransport { httpSse, stdio }
@@ -29,15 +30,15 @@ class McpServerConfig {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'url': url,
-        'transport': transport.name,
-        'authToken': authToken,
-        'command': command,
-        'args': args,
-        'enabled': enabled,
-      };
+    'id': id,
+    'name': name,
+    'url': url,
+    'transport': transport.name,
+    'authToken': authToken,
+    'command': command,
+    'args': args,
+    'enabled': enabled,
+  };
 
   factory McpServerConfig.fromJson(Map<String, dynamic> json) =>
       McpServerConfig(
@@ -145,12 +146,15 @@ class McpClient {
       config.connected = true;
 
       // Start listening for SSE events
-      response.transform(utf8.decoder).transform(const LineSplitter()).listen(
-        _handleSseLine,
-        onDone: () {
-          config.connected = false;
-        },
-      );
+      response
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen(
+            _handleSseLine,
+            onDone: () {
+              config.connected = false;
+            },
+          );
 
       // Send initialize request via HTTP POST
       final result = await _sendHttpRequest('initialize', <String, dynamic>{
@@ -300,11 +304,7 @@ class McpClient {
   }
 
   void _sendNotification(String method, Map<String, dynamic> params) {
-    final notification = {
-      'jsonrpc': '2.0',
-      'method': method,
-      'params': params,
-    };
+    final notification = {'jsonrpc': '2.0', 'method': method, 'params': params};
 
     if (config.transport == McpTransport.stdio) {
       _process?.stdin.writeln(jsonEncode(notification));

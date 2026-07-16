@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/services/semantic_search.dart';
@@ -73,8 +74,8 @@ class MemoryService {
       final existing = p.getString(_customMemoriesKey);
       final List<Map<String, dynamic>> memories = existing != null
           ? (jsonDecode(existing) as List<dynamic>)
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList()
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList()
           : [];
 
       memories.add({
@@ -226,8 +227,9 @@ class MemoryService {
         final ageInDays = DateTime.now()
             .difference(DateTime.parse(entry['time'] as String))
             .inDays;
-        final recencyBonus =
-            ageInDays == 0 ? 1.5 : 1.0 / (1.0 + ageInDays * 0.05);
+        final recencyBonus = ageInDays == 0
+            ? 1.5
+            : 1.0 / (1.0 + ageInDays * 0.05);
         return MapEntry(entry, r.score * recencyBonus);
       }).toList();
 

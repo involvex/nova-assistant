@@ -33,8 +33,9 @@ class NoteService {
     if (json != null && json.isNotEmpty) {
       try {
         final list = jsonDecode(json) as List<dynamic>;
-        _notes =
-            list.map((e) => Note.fromJson(e as Map<String, dynamic>)).toList();
+        _notes = list
+            .map((e) => Note.fromJson(e as Map<String, dynamic>))
+            .toList();
       } catch (_) {
         _notes = [];
       }
@@ -138,11 +139,7 @@ class NoteService {
         ? tagsStr.split(',').map((t) => t.trim()).toList()
         : <String>[];
 
-    final note = await createNote(
-      title: title,
-      content: content,
-      tags: tags,
-    );
+    final note = await createNote(title: title, content: content, tags: tags);
 
     return {
       'success': true,
@@ -174,15 +171,17 @@ class NoteService {
       'count': results.length,
       'notes': results
           .take(10)
-          .map((n) => {
-                'id': n.id,
-                'title': n.title,
-                'preview': n.content.length > 100
-                    ? '${n.content.substring(0, 100)}...'
-                    : n.content,
-                'tags': n.tags,
-                'updatedAt': n.updatedAt.toIso8601String(),
-              })
+          .map(
+            (n) => {
+              'id': n.id,
+              'title': n.title,
+              'preview': n.content.length > 100
+                  ? '${n.content.substring(0, 100)}...'
+                  : n.content,
+              'tags': n.tags,
+              'updatedAt': n.updatedAt.toIso8601String(),
+            },
+          )
           .toList(),
       'message': 'Found ${results.length} note(s) matching "$query"',
     };
@@ -207,15 +206,17 @@ class NoteService {
       'pinnedCount': pinned.length,
       'notes': all
           .take(20)
-          .map((n) => {
-                'id': n.id,
-                'title': n.title,
-                'preview': n.content.length > 80
-                    ? '${n.content.substring(0, 80)}...'
-                    : n.content,
-                'tags': n.tags,
-                'isPinned': n.isPinned,
-              })
+          .map(
+            (n) => {
+              'id': n.id,
+              'title': n.title,
+              'preview': n.content.length > 80
+                  ? '${n.content.substring(0, 80)}...'
+                  : n.content,
+              'tags': n.tags,
+              'isPinned': n.isPinned,
+            },
+          )
           .toList(),
       'message': '${all.length} note(s) total, ${pinned.length} pinned',
     };

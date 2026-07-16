@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
@@ -24,13 +25,13 @@ class ChatSession {
   }) : lastActiveAt = createdAt;
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'model': model.name,
-        'createdAt': createdAt.toIso8601String(),
-        'lastActiveAt': lastActiveAt.toIso8601String(),
-        'isActive': isActive,
-      };
+    'id': id,
+    'name': name,
+    'model': model.name,
+    'createdAt': createdAt.toIso8601String(),
+    'lastActiveAt': lastActiveAt.toIso8601String(),
+    'isActive': isActive,
+  };
 
   factory ChatSession.fromJson(Map<String, dynamic> json) {
     final session = ChatSession(

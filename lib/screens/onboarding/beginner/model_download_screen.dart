@@ -7,10 +7,7 @@ import 'package:nova_assistant/services/user_preferences_service.dart';
 class ModelDownloadScreen extends StatefulWidget {
   final VoidCallback onDownloadComplete;
 
-  const ModelDownloadScreen({
-    super.key,
-    required this.onDownloadComplete,
-  });
+  const ModelDownloadScreen({super.key, required this.onDownloadComplete});
 
   @override
   State<ModelDownloadScreen> createState() => _ModelDownloadScreenState();
@@ -33,8 +30,9 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
 
   Future<void> _checkAndDownload() async {
     final fileName = ModelHuggingFaceURLs.fileNameFor(_targetModel);
-    final alreadyInstalled =
-        await ModelManager.instance.isInstalledOnDisk(fileName);
+    final alreadyInstalled = await ModelManager.instance.isInstalledOnDisk(
+      fileName,
+    );
 
     if (alreadyInstalled) {
       if (mounted) {
@@ -81,9 +79,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
             _isComplete = true;
           });
 
-          await UserPreferencesService.instance.setMode(
-            UserMode.beginner,
-          );
+          await UserPreferencesService.instance.setMode(UserMode.beginner);
 
           await Future<void>.delayed(const Duration(milliseconds: 800));
           if (mounted) {
@@ -167,25 +163,16 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
               decoration: BoxDecoration(
                 color: Colors.red.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.red.withValues(alpha: 0.3),
-                ),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.error_outline,
-                    color: Colors.red,
-                    size: 24,
-                  ),
+                  const Icon(Icons.error_outline, color: Colors.red, size: 24),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       _errorMessage,
-                      style: const TextStyle(
-                        color: Colors.red,
-                        fontSize: 13,
-                      ),
+                      style: const TextStyle(color: Colors.red, fontSize: 13),
                     ),
                   ),
                 ],
@@ -272,10 +259,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
             Text(
               'This may take a few minutes depending on your connection.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.grey[600], fontSize: 12),
             ),
           const SizedBox(height: 32),
         ],
@@ -289,23 +273,13 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A2E),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.06),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       child: Column(
         children: [
-          _buildInfoRow(
-            'Model',
-            'Gemma 4 E2B',
-            Icons.model_training_outlined,
-          ),
+          _buildInfoRow('Model', 'Gemma 4 E2B', Icons.model_training_outlined),
           const SizedBox(height: 12),
-          _buildInfoRow(
-            'Size',
-            '~2400 MB',
-            Icons.storage_outlined,
-          ),
+          _buildInfoRow('Size', '~2400 MB', Icons.storage_outlined),
           const SizedBox(height: 12),
           _buildInfoRow(
             'Capabilities',
@@ -326,11 +300,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
             color: const Color(0xFF6C63FF).withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(
-            icon,
-            color: const Color(0xFF6C63FF),
-            size: 18,
-          ),
+          child: Icon(icon, color: const Color(0xFF6C63FF), size: 18),
         ),
         const SizedBox(width: 12),
         Column(
@@ -338,10 +308,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
           children: [
             Text(
               label,
-              style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 11,
-              ),
+              style: TextStyle(color: Colors.grey[500], fontSize: 11),
             ),
             Text(
               value,

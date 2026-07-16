@@ -48,6 +48,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
 
         if (path == null) {
           setState(() => _fileError = 'Could not access file path');
+
           return;
         }
 
@@ -57,11 +58,13 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
         // Validate file
         if (fileSize < 1024 * 1024) {
           setState(() => _fileError = 'File too small (min 1MB)');
+
           return;
         }
 
         if (fileSize > 5 * 1024 * 1024 * 1024) {
           setState(() => _fileError = 'File too large (max 5GB)');
+
           return;
         }
 
@@ -74,8 +77,10 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
             .replaceAll('-', ' ')
             .replaceAll('_', ' ')
             .split(' ')
-            .map((w) =>
-                w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '')
+            .map(
+              (w) =>
+                  w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '',
+            )
             .join(' ');
 
         setState(() {
@@ -95,12 +100,14 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
   Future<void> _install() async {
     if (_selectedFilePath == null) {
       setState(() => _status = 'Please select a file first');
+
       return;
     }
 
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       setState(() => _status = 'Please enter a model name');
+
       return;
     }
 
@@ -123,8 +130,8 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
       final fileType = _fileExtension == '.task'
           ? ModelFileType.task
           : _fileExtension == '.gguf'
-              ? ModelFileType.binary
-              : ModelFileType.litertlm;
+          ? ModelFileType.binary
+          : ModelFileType.litertlm;
 
       final isGguf = _fileExtension == '.gguf';
 
@@ -243,8 +250,8 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
                     color: _fileError != null
                         ? Colors.red
                         : _selectedFilePath != null
-                            ? Colors.green
-                            : Colors.grey.shade600,
+                        ? Colors.green
+                        : Colors.grey.shade600,
                   ),
                 ),
                 child: _selectedFilePath != null
@@ -285,10 +292,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
                     : Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            Icons.upload_file,
-                            color: Colors.grey.shade500,
-                          ),
+                          Icon(Icons.upload_file, color: Colors.grey.shade500),
                           const SizedBox(width: 8),
                           Text(
                             'Select .litertlm, .task, or .gguf file',
@@ -302,10 +306,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
               const SizedBox(height: 4),
               Text(
                 _fileError!,
-                style: TextStyle(
-                  color: Colors.red.shade400,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: Colors.red.shade400, fontSize: 12),
               ),
             ],
             const SizedBox(height: 20),
@@ -350,10 +351,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
                   value: 'gemmaIt',
                   child: Text('Gemma IT (Gemma 3)'),
                 ),
-                DropdownMenuItem(
-                  value: 'gemma4',
-                  child: Text('Gemma 4'),
-                ),
+                DropdownMenuItem(value: 'gemma4', child: Text('Gemma 4')),
               ],
               onChanged: _isInstalling
                   ? null
@@ -439,8 +437,9 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
 
             // Install button
             FilledButton.icon(
-              onPressed:
-                  _selectedFilePath != null && !_isInstalling ? _install : null,
+              onPressed: _selectedFilePath != null && !_isInstalling
+                  ? _install
+                  : null,
               icon: const Icon(Icons.download),
               label: const Text('Import Model'),
             ),

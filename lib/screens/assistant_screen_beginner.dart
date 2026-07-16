@@ -41,12 +41,13 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
     _requestPermissions();
     _inputController.addListener(() => setState(() {}));
     _listenToModelStatus();
-    _historyClearedSub =
-        ModelOrchestrator.instance.historyClearedStream.listen((_) {
-      if (mounted) {
-        setState(() => _messages.clear());
-      }
-    });
+    _historyClearedSub = ModelOrchestrator.instance.historyClearedStream.listen(
+      (_) {
+        if (mounted) {
+          setState(() => _messages.clear());
+        }
+      },
+    );
   }
 
   Future<void> _loadUserName() async {
@@ -161,11 +162,9 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
       final idx = _messages.indexWhere((m) => m.id == assistantId);
       if (idx != -1) {
         String errorText;
-        if (e is ModelException) {
-          errorText = '⚠️ ${e.message}\n\n${e.suggestion ?? ''}';
-        } else {
-          errorText = 'Sorry, I encountered an error: $e';
-        }
+        errorText = e is ModelException
+            ? '⚠️ ${e.message}\n\n${e.suggestion ?? ''}'
+            : 'Sorry, I encountered an error: $e';
         setState(() {
           _messages[idx] = _messages[idx].copyWith(
             text: errorText,
@@ -196,10 +195,7 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: Colors.grey[400]),
-            ),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey[400])),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -240,8 +236,9 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
           children: [
             _buildHeader(),
             Expanded(
-              child:
-                  _messages.isEmpty ? _buildEmptyState() : _buildMessageList(),
+              child: _messages.isEmpty
+                  ? _buildEmptyState()
+                  : _buildMessageList(),
             ),
             _buildStatusBar(),
             _buildInputBar(),
@@ -297,20 +294,14 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
                 ),
                 Text(
                   'Tap the mic and ask me anything',
-                  style: TextStyle(
-                    color: Colors.grey[500],
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: Colors.grey[500], fontSize: 12),
                 ),
               ],
             ),
           ),
           IconButton(
             onPressed: _switchToExpertMode,
-            icon: Icon(
-              Icons.settings_outlined,
-              color: Colors.grey[400],
-            ),
+            icon: Icon(Icons.settings_outlined, color: Colors.grey[400]),
             tooltip: 'Settings',
           ),
         ],
@@ -398,6 +389,7 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
       itemCount: _messages.length,
       itemBuilder: (context, index) {
         final msg = _messages[index];
+
         return ChatBubble(
           message: msg,
           onCopy: () {

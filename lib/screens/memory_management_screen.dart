@@ -186,8 +186,8 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _memories.isEmpty
-              ? _buildEmptyState()
-              : _buildMemoryList(),
+          ? _buildEmptyState()
+          : _buildMemoryList(),
       floatingActionButton: _memories.isNotEmpty
           ? FloatingActionButton(
               onPressed: () => _showAddEditDialog(),

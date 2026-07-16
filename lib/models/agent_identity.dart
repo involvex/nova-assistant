@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum AgentSkill {
@@ -66,38 +67,40 @@ class AgentIdentity {
   }
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'avatarEmoji': avatarEmoji,
-        'backstory': backstory,
-        'skills': skills.map((s) => s.name).toList(),
-        'sources': sources.map((s) => s.name).toList(),
-        'isActive': isActive,
-      };
+    'name': name,
+    'avatarEmoji': avatarEmoji,
+    'backstory': backstory,
+    'skills': skills.map((s) => s.name).toList(),
+    'sources': sources.map((s) => s.name).toList(),
+    'isActive': isActive,
+  };
 
   factory AgentIdentity.fromJson(Map<String, dynamic> json) => AgentIdentity(
-        name: json['name'] as String? ?? 'Nova',
-        avatarEmoji: json['avatarEmoji'] as String?,
-        backstory: json['backstory'] as String? ?? '',
-        skills: (json['skills'] as List<dynamic>?)
-                ?.map(
-                  (s) => AgentSkill.values.firstWhere(
-                    (e) => e.name == s,
-                    orElse: () => AgentSkill.general,
-                  ),
-                )
-                .toSet() ??
-            {AgentSkill.general},
-        sources: (json['sources'] as List<dynamic>?)
-                ?.map(
-                  (s) => KnowledgeSource.values.firstWhere(
-                    (e) => e.name == s,
-                    orElse: () => KnowledgeSource.none,
-                  ),
-                )
-                .toSet() ??
-            {KnowledgeSource.none},
-        isActive: json['isActive'] as bool? ?? false,
-      );
+    name: json['name'] as String? ?? 'Nova',
+    avatarEmoji: json['avatarEmoji'] as String?,
+    backstory: json['backstory'] as String? ?? '',
+    skills:
+        (json['skills'] as List<dynamic>?)
+            ?.map(
+              (s) => AgentSkill.values.firstWhere(
+                (e) => e.name == s,
+                orElse: () => AgentSkill.general,
+              ),
+            )
+            .toSet() ??
+        {AgentSkill.general},
+    sources:
+        (json['sources'] as List<dynamic>?)
+            ?.map(
+              (s) => KnowledgeSource.values.firstWhere(
+                (e) => e.name == s,
+                orElse: () => KnowledgeSource.none,
+              ),
+            )
+            .toSet() ??
+        {KnowledgeSource.none},
+    isActive: json['isActive'] as bool? ?? false,
+  );
 
   String buildSystemPrompt() {
     final buffer = StringBuffer();

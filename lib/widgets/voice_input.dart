@@ -135,8 +135,9 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
       child: AnimatedBuilder(
         animation: _animController,
         builder: (context, child) {
-          final scale =
-              _isPressed ? 1.2 : (1.0 + (_animController.value * 0.05));
+          final scale = _isPressed
+              ? 1.2
+              : (1.0 + (_animController.value * 0.05));
 
           Color bgColor;
           if (_isListening) {

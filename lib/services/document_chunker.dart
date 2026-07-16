@@ -72,8 +72,7 @@ class DocumentChunker {
       }
       final score = matches / queryWords.length;
       return MapEntry(chunk, score);
-    }).toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+    }).toList()..sort((a, b) => b.value.compareTo(a.value));
 
     return scored
         .take(maxChunks)

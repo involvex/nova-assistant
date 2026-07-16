@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 class AssistantRoleService {
@@ -22,6 +23,7 @@ class AssistantRoleService {
       final result = await _methodChannel.invokeMethod<bool>(
         'isAssistantRoleHeld',
       );
+
       return result ?? false;
     } on PlatformException {
       return false;

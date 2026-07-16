@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:http/http.dart' as http;
@@ -31,14 +32,14 @@ class ModelUpdateInfo {
   bool get isNewer => currentVersion != latestVersion;
 
   Map<String, dynamic> toJson() => {
-        'model': model.name,
-        'currentVersion': currentVersion,
-        'latestVersion': latestVersion,
-        'downloadUrl': downloadUrl,
-        'fileSizeBytes': fileSizeBytes,
-        'releaseNotes': releaseNotes,
-        'publishedAt': publishedAt.toIso8601String(),
-      };
+    'model': model.name,
+    'currentVersion': currentVersion,
+    'latestVersion': latestVersion,
+    'downloadUrl': downloadUrl,
+    'fileSizeBytes': fileSizeBytes,
+    'releaseNotes': releaseNotes,
+    'publishedAt': publishedAt.toIso8601String(),
+  };
 
   factory ModelUpdateInfo.fromJson(Map<String, dynamic> json) {
     return ModelUpdateInfo(

@@ -40,8 +40,9 @@ class TaskService {
     if (json != null && json.isNotEmpty) {
       try {
         final list = jsonDecode(json) as List<dynamic>;
-        _tasks =
-            list.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
+        _tasks = list
+            .map((e) => Task.fromJson(e as Map<String, dynamic>))
+            .toList();
       } catch (_) {
         _tasks = [];
       }
@@ -182,7 +183,8 @@ class TaskService {
         dueDate = DateTime.parse(args['due_date'] as String);
       } catch (e) {
         debugPrint(
-            'TaskService.createTask: invalid due_date format: ${args['due_date']}');
+          'TaskService.createTask: invalid due_date format: ${args['due_date']}',
+        );
       }
     }
 
@@ -223,13 +225,15 @@ class TaskService {
       'success': true,
       'count': active.length,
       'tasks': active
-          .map((t) => {
-                'id': t.id,
-                'title': t.title,
-                'priority': t.priority.name,
-                'dueDate': t.dueDate?.toIso8601String(),
-                'isOverdue': t.isOverdue,
-              })
+          .map(
+            (t) => {
+              'id': t.id,
+              'title': t.title,
+              'priority': t.priority.name,
+              'dueDate': t.dueDate?.toIso8601String(),
+              'isOverdue': t.isOverdue,
+            },
+          )
           .toList(),
       'message': '${active.length} pending task(s)',
     };
@@ -245,17 +249,11 @@ class TaskService {
 
     final task = findTaskByTitle(titleQuery);
     if (task == null) {
-      return {
-        'success': false,
-        'error': 'Task not found: $titleQuery',
-      };
+      return {'success': false, 'error': 'Task not found: $titleQuery'};
     }
 
     await completeTask(task.id);
-    return {
-      'success': true,
-      'message': 'Task completed: ${task.title}',
-    };
+    return {'success': true, 'message': 'Task completed: ${task.title}'};
   }
 
   Future<void> _save() async {

@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/note.dart';
 import 'package:nova_assistant/services/note_service.dart';
@@ -71,8 +72,11 @@ class _NotesScreenState extends State<NotesScreen> {
               decoration: InputDecoration(
                 hintText: 'Search notes...',
                 hintStyle: TextStyle(color: Colors.grey[600], fontSize: 13),
-                prefixIcon:
-                    Icon(Icons.search, color: Colors.grey[600], size: 20),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: Colors.grey[600],
+                  size: 20,
+                ),
                 filled: true,
                 fillColor: const Color(0xFF1A1A2E),
                 border: OutlineInputBorder(
@@ -89,21 +93,28 @@ class _NotesScreenState extends State<NotesScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.note_alt_outlined,
-                            size: 64, color: Colors.grey[700]),
+                        Icon(
+                          Icons.note_alt_outlined,
+                          size: 64,
+                          color: Colors.grey[700],
+                        ),
                         const SizedBox(height: 16),
                         Text(
                           _searchQuery.isEmpty
                               ? 'No notes yet'
                               : 'No matching notes',
-                          style:
-                              TextStyle(color: Colors.grey[500], fontSize: 16),
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: 16,
+                          ),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           'Ask Nova to create a note, or tap +',
-                          style:
-                              TextStyle(color: Colors.grey[600], fontSize: 13),
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 13,
+                          ),
                         ),
                       ],
                     ),
@@ -212,8 +223,10 @@ class _NotesScreenState extends State<NotesScreen> {
                       },
                       decoration: InputDecoration(
                         hintText: 'Add tag...',
-                        hintStyle:
-                            TextStyle(color: Colors.grey[600], fontSize: 13),
+                        hintStyle: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 13,
+                        ),
                         filled: true,
                         fillColor: const Color(0xFF0D0D1A),
                         border: OutlineInputBorder(
@@ -254,10 +267,12 @@ class _NotesScreenState extends State<NotesScreen> {
                   children: tags
                       .map(
                         (tag) => Chip(
-                          label:
-                              Text(tag, style: const TextStyle(fontSize: 11)),
-                          backgroundColor:
-                              const Color(0xFF6C63FF).withValues(alpha: 0.15),
+                          label: Text(
+                            tag,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          backgroundColor: const Color(0xFF6C63FF)
+                              .withValues(alpha: 0.15),
                           labelStyle: const TextStyle(color: Color(0xFF6C63FF)),
                           deleteIcon: const Icon(Icons.close, size: 14),
                           onDeleted: () => setModalState(() {
@@ -340,8 +355,11 @@ class _NoteCard extends StatelessWidget {
             Row(
               children: [
                 if (note.isPinned) ...[
-                  const Icon(Icons.push_pin,
-                      size: 14, color: Color(0xFF6C63FF)),
+                  const Icon(
+                    Icons.push_pin,
+                    size: 14,
+                    color: Color(0xFF6C63FF),
+                  ),
                   const SizedBox(width: 6),
                 ],
                 Expanded(
@@ -368,8 +386,10 @@ class _NoteCard extends StatelessWidget {
                     ),
                     const PopupMenuItem(
                       value: 'delete',
-                      child:
-                          Text('Delete', style: TextStyle(color: Colors.red)),
+                      child: Text(
+                        'Delete',
+                        style: TextStyle(color: Colors.red),
+                      ),
                     ),
                   ],
                 ),
@@ -390,10 +410,12 @@ class _NoteCard extends StatelessWidget {
                     .map(
                       (tag) => Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color:
-                              const Color(0xFF6C63FF).withValues(alpha: 0.15),
+                          color: const Color(0xFF6C63FF)
+                              .withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(

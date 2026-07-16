@@ -137,25 +137,19 @@ class _WelcomePage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.psychology_outlined,
-            size: 80,
-            color: colorScheme.primary,
-          ),
+          Icon(Icons.psychology_outlined, size: 80, color: colorScheme.primary),
           const SizedBox(height: 32),
           Text(
             'Welcome to Nova',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+            style: Theme.of(context).textTheme.headlineMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
           Text(
             'Your on-device AI assistant powered by Gemma. All inference runs locally on your device for maximum privacy.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: colorScheme.onSurface.withValues(alpha: 0.7),
-                ),
+            style: Theme.of(context).textTheme.bodyLarge
+                ?.copyWith(color: colorScheme.onSurface.withValues(alpha: 0.7)),
           ),
         ],
       ),
@@ -181,17 +175,12 @@ class _ModelSelectionPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.speed_outlined,
-            size: 80,
-            color: colorScheme.primary,
-          ),
+          Icon(Icons.speed_outlined, size: 80, color: colorScheme.primary),
           const SizedBox(height: 32),
           Text(
             'Choose Your Mode',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+            style: Theme.of(context).textTheme.headlineMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 32),
           _ModeOption(
@@ -264,24 +253,20 @@ class _ModeOption extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   Text(
                     description,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurface.withValues(alpha: 0.7),
-                        ),
+                      color: colorScheme.onSurface.withValues(alpha: 0.7),
+                    ),
                   ),
                 ],
               ),
             ),
             if (isSelected)
-              Icon(
-                Icons.check_circle,
-                color: colorScheme.primary,
-              ),
+              Icon(Icons.check_circle, color: colorScheme.primary),
           ],
         ),
       ),
@@ -301,25 +286,19 @@ class _PrivacyPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.security_outlined,
-            size: 80,
-            color: colorScheme.primary,
-          ),
+          Icon(Icons.security_outlined, size: 80, color: colorScheme.primary),
           const SizedBox(height: 32),
           Text(
             'Privacy First',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+            style: Theme.of(context).textTheme.headlineMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
           Text(
             'Nova runs entirely on your device. No data is ever sent to external servers.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: colorScheme.onSurface.withValues(alpha: 0.7),
-                ),
+            style: Theme.of(context).textTheme.bodyLarge
+                ?.copyWith(color: colorScheme.onSurface.withValues(alpha: 0.7)),
           ),
           const SizedBox(height: 32),
           _PermissionItem(
@@ -362,10 +341,7 @@ class _PermissionItem extends StatelessWidget {
       children: [
         Icon(icon, color: colorScheme.primary),
         const SizedBox(width: 12),
-        Text(
-          text,
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
+        Text(text, style: Theme.of(context).textTheme.bodyMedium),
       ],
     );
   }

@@ -12,8 +12,10 @@ void main() {
       final tokens = SemanticSearch.tokenize(
         'the quick brown fox jumps over the lazy dog',
       );
-      expect(tokens,
-          containsAll(['quick', 'brown', 'fox', 'jumps', 'lazy', 'dog']));
+      expect(
+        tokens,
+        containsAll(['quick', 'brown', 'fox', 'jumps', 'lazy', 'dog']),
+      );
       expect(tokens, isNot(contains('the')));
       expect(tokens, isNot(contains('over')));
     });
@@ -78,9 +80,7 @@ void main() {
     });
 
     test('returns empty for no matching terms', () {
-      final docs = [
-        SemanticSearch.tokenize('apple banana'),
-      ];
+      final docs = [SemanticSearch.tokenize('apple banana')];
       final query = SemanticSearch.tokenize('quantum physics');
       final results = SemanticSearch.search(
         queryTokens: query,
@@ -92,9 +92,7 @@ void main() {
     });
 
     test('respects minScore threshold', () {
-      final docs = [
-        SemanticSearch.tokenize('hello world'),
-      ];
+      final docs = [SemanticSearch.tokenize('hello world')];
       final query = SemanticSearch.tokenize('hello');
       final results = SemanticSearch.search(
         queryTokens: query,

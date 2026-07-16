@@ -78,10 +78,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
           if (_servers.isEmpty) _buildEmptyState('No MCP servers configured'),
           ..._servers.map(_buildServerTile),
           const SizedBox(height: 8),
-          _buildAddButton(
-            'Add MCP Server',
-            _showAddServerDialog,
-          ),
+          _buildAddButton('Add MCP Server', _showAddServerDialog),
           const SizedBox(height: 24),
           _buildSectionHeader('Data Sources', Icons.storage_outlined),
           if (_sources.isEmpty) _buildEmptyState('No data sources configured'),
@@ -189,10 +186,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
           Icons.dns_outlined,
           color: server.connected ? Colors.green : Colors.grey,
         ),
-        title: Text(
-          server.name,
-          style: const TextStyle(color: Colors.white),
-        ),
+        title: Text(server.name, style: const TextStyle(color: Colors.white)),
         subtitle: Text(
           server.connected ? 'Connected' : 'Disconnected',
           style: TextStyle(
@@ -222,10 +216,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
               },
               itemBuilder: (context) => [
                 if (!server.connected)
-                  const PopupMenuItem(
-                    value: 'connect',
-                    child: Text('Connect'),
-                  ),
+                  const PopupMenuItem(value: 'connect', child: Text('Connect')),
                 if (server.connected)
                   const PopupMenuItem(
                     value: 'disconnect',
@@ -248,8 +239,10 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E2E),
-        title:
-            const Text('Delete Server', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Delete Server',
+          style: TextStyle(color: Colors.white),
+        ),
         content: Text(
           'Remove "${server.name}" and its discovered tools?',
           style: const TextStyle(color: Colors.grey),
@@ -298,7 +291,8 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
                     Expanded(
                       child: GestureDetector(
                         onTap: () => setDialogState(
-                            () => transport = McpTransport.httpSse),
+                          () => transport = McpTransport.httpSse,
+                        ),
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           decoration: BoxDecoration(
@@ -332,7 +326,8 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
                     Expanded(
                       child: GestureDetector(
                         onTap: () => setDialogState(
-                            () => transport = McpTransport.stdio),
+                          () => transport = McpTransport.stdio,
+                        ),
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           decoration: BoxDecoration(
@@ -374,7 +369,9 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
                   _dialogTextField(commandController, 'Command (e.g. npx)'),
                   const SizedBox(height: 12),
                   _dialogTextField(
-                      urlController, 'Arguments (comma-separated)'),
+                    urlController,
+                    'Arguments (comma-separated)',
+                  ),
                 ],
               ],
             ),
@@ -390,10 +387,10 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
 
                 final args = transport == McpTransport.stdio
                     ? urlController.text
-                        .split(',')
-                        .map((a) => a.trim())
-                        .where((a) => a.isNotEmpty)
-                        .toList()
+                          .split(',')
+                          .map((a) => a.trim())
+                          .where((a) => a.isNotEmpty)
+                          .toList()
                     : <String>[];
 
                 final server = McpServerConfig(
@@ -516,8 +513,8 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
           tool != null
               ? 'Edit Tool'
               : (type == ExternalToolType.http
-                  ? 'Add HTTP Tool'
-                  : 'Add MCP Tool'),
+                    ? 'Add HTTP Tool'
+                    : 'Add MCP Tool'),
           style: const TextStyle(color: Colors.white),
         ),
         content: SingleChildScrollView(

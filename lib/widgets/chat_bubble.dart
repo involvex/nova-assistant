@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -35,8 +36,9 @@ class ChatBubble extends StatelessWidget {
         ),
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
         child: Column(
-          crossAxisAlignment:
-              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: isUser
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
           children: [
             // Screenshot preview
             if (message.imageData != null)
@@ -305,10 +307,7 @@ class ChatBubble extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     progress,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey[500],
-                    ),
+                    style: TextStyle(fontSize: 10, color: Colors.grey[500]),
                   ),
                   if (progressPercent != null) ...[
                     const SizedBox(height: 2),

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
@@ -326,8 +327,9 @@ class ModelOrchestrator {
       } else {
         final modelsDir = Directory('${dir.path}/models');
         if (await modelsDir.exists()) {
-          final baseName =
-              fileName.replaceAll('.litertlm', '').replaceAll('.task', '');
+          final baseName = fileName
+              .replaceAll('.litertlm', '')
+              .replaceAll('.task', '');
           await for (final entity in modelsDir.list()) {
             if (entity is File) {
               final entityName = p.basename(entity.path);
@@ -365,7 +367,8 @@ class ModelOrchestrator {
               _statusController.add('Removed corrupt model: $fileName');
             } catch (e) {
               debugPrint(
-                  'ModelOrchestrator: failed to delete corrupt model file: $e');
+                'ModelOrchestrator: failed to delete corrupt model file: $e',
+              );
             }
           }
         } else {
@@ -440,8 +443,9 @@ class ModelOrchestrator {
 
     // First, ensure the model is registered with flutter_gemma
     final fileName = ModelHuggingFaceURLs.fileNameFor(model);
-    final existsOnDisk =
-        await ModelManager.instance.isInstalledOnDisk(fileName);
+    final existsOnDisk = await ModelManager.instance.isInstalledOnDisk(
+      fileName,
+    );
 
     if (existsOnDisk) {
       _statusController.add(
@@ -482,7 +486,8 @@ class ModelOrchestrator {
         throw ModelLoadException(
           'Failed to load ${model.displayName} from disk.',
           model: model,
-          suggestion: 'The model file may be corrupted. '
+          suggestion:
+              'The model file may be corrupted. '
               'Try re-downloading or pick a different file.',
           underlyingError: e,
         );
@@ -652,10 +657,12 @@ class ModelOrchestrator {
     }
 
     if (modelPath == null) {
-      _statusController
-          .add('Custom model file not found: ${customModel.fileName}');
+      _statusController.add(
+        'Custom model file not found: ${customModel.fileName}',
+      );
       yield InferenceResult(
-        text: 'Custom model file not found: ${customModel.fileName}\n\n'
+        text:
+            'Custom model file not found: ${customModel.fileName}\n\n'
             'The model may have been deleted. Try re-importing it.',
         model: selector.primaryHeavy,
         isStreaming: false,
@@ -689,7 +696,8 @@ class ModelOrchestrator {
       _statusController.add('${customModel.displayName} ready');
     } on TimeoutException {
       yield InferenceResult(
-        text: 'Timed out loading ${customModel.displayName}. '
+        text:
+            'Timed out loading ${customModel.displayName}. '
             'The model may be too large for your device.',
         model: selector.primaryHeavy,
         isStreaming: false,
@@ -767,7 +775,8 @@ class ModelOrchestrator {
             final toolText = textBuffer.toString();
             final idx = fullResponse.lastIndexOf(toolText);
             if (idx >= 0) {
-              fullResponse = fullResponse.substring(0, idx) +
+              fullResponse =
+                  fullResponse.substring(0, idx) +
                   fullResponse.substring(idx + toolText.length);
             }
             textBuffer.clear();
@@ -838,10 +847,9 @@ class ModelOrchestrator {
         for (final tc in allToolCalls.where(
           (t) => t['status'] == 'completed' && t['result'] != null,
         )) {
-          toolResultMessages.add(Message.text(
-            text: jsonEncode(tc['result']),
-            isUser: true,
-          ));
+          toolResultMessages.add(
+            Message.text(text: jsonEncode(tc['result']), isUser: true),
+          );
         }
         if (toolResultMessages.isNotEmpty) {
           for (final msg in toolResultMessages) {
@@ -876,7 +884,8 @@ class ModelOrchestrator {
     // GGUF support requires llamadart package, which currently conflicts with
     // flutter_gemma_litertlm native libraries. Show a clear error message.
     yield InferenceResult(
-      text: 'GGUF model support is not yet available.\n\n'
+      text:
+          'GGUF model support is not yet available.\n\n'
           'The GGUF format requires additional integration work that is pending.\n\n'
           'In the meantime, please use .litertlm or .task model formats.\n'
           'You can convert GGUF models to supported formats or download\n'
@@ -1077,8 +1086,9 @@ class ModelOrchestrator {
     if (forcePrimaryModel && _preferredCustomModelOverride == null) {
       model = selector.primaryHeavy;
       if (_debugMode) {
-        _statusController
-            .add('[DEBUG] Force Primary Model: ${model.displayName}');
+        _statusController.add(
+          '[DEBUG] Force Primary Model: ${model.displayName}',
+        );
       }
     } else if (_preferredCustomModelOverride != null) {
       // Custom model selected - use it directly (bypasses NovaModel selection)
@@ -1206,7 +1216,8 @@ class ModelOrchestrator {
               final toolText = textBuffer.toString();
               final idx = fullResponse.lastIndexOf(toolText);
               if (idx >= 0) {
-                fullResponse = fullResponse.substring(0, idx) +
+                fullResponse =
+                    fullResponse.substring(0, idx) +
                     fullResponse.substring(idx + toolText.length);
               }
               textBuffer.clear();
@@ -1214,8 +1225,9 @@ class ModelOrchestrator {
               // Execute all tool calls found in this response
               for (final parsed in parsedCalls) {
                 final toolName = parsed['name'] as String;
-                final toolArgs =
-                    Map<String, dynamic>.from(parsed['args'] as Map);
+                final toolArgs = Map<String, dynamic>.from(
+                  parsed['args'] as Map,
+                );
                 _statusController.add('Executing $toolName...');
 
                 allToolCalls.add({
@@ -1411,13 +1423,13 @@ class ModelOrchestrator {
     final progressSub = ToolExecutorService.instance.onProgress
         .where((p) => p.toolName == toolName)
         .listen((progress) {
-      // Update the tool call entry with progress info
-      if (allToolCalls.isNotEmpty) {
-        allToolCalls.last['progress'] = progress.message;
-        allToolCalls.last['progressPercent'] = progress.percent;
-        allToolCalls.last['progressStage'] = progress.stage.name;
-      }
-    });
+          // Update the tool call entry with progress info
+          if (allToolCalls.isNotEmpty) {
+            allToolCalls.last['progress'] = progress.message;
+            allToolCalls.last['progressPercent'] = progress.percent;
+            allToolCalls.last['progressStage'] = progress.stage.name;
+          }
+        });
 
     // Also yield our own starting event
     if (allToolCalls.isNotEmpty) {
@@ -1444,11 +1456,15 @@ class ModelOrchestrator {
       };
       if (dartTools.contains(toolName)) {
         if (['create_task', 'list_tasks', 'complete_task'].contains(toolName)) {
-          toolResult =
-              await TaskService.instance.executeTool(toolName, toolArgs);
+          toolResult = await TaskService.instance.executeTool(
+            toolName,
+            toolArgs,
+          );
         } else {
-          toolResult =
-              await NoteService.instance.executeTool(toolName, toolArgs);
+          toolResult = await NoteService.instance.executeTool(
+            toolName,
+            toolArgs,
+          );
         }
       } else {
         // Try MCP external tools first, then native tools
@@ -1565,7 +1581,7 @@ class ModelOrchestrator {
 
     final thinkingSuffix = model.hasThinking
         ? ' When asked to think step by step, show your reasoning in <thinking> tags '
-            'before your final answer.'
+              'before your final answer.'
         : '';
 
     final buffer = StringBuffer('$base$thinkingSuffix');
@@ -1579,8 +1595,9 @@ class ModelOrchestrator {
     }
 
     // Add data source context from MCP sources
-    final enabledSources =
-        McpService.instance.sources.where((s) => s.enabled).toList();
+    final enabledSources = McpService.instance.sources
+        .where((s) => s.enabled)
+        .toList();
     if (enabledSources.isNotEmpty) {
       buffer.write('\n\n--- Connected Data Sources ---');
       for (final source in enabledSources) {

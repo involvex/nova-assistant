@@ -5,8 +5,9 @@ import 'package:nova_assistant/models/tool_progress.dart';
 
 class ToolExecutorService {
   static const _channel = MethodChannel('dev.nova.assistant/tools');
-  static const _progressChannel =
-      EventChannel('dev.nova.assistant/tools_progress');
+  static const _progressChannel = EventChannel(
+    'dev.nova.assistant/tools_progress',
+  );
 
   static ToolExecutorService? _instance;
   static ToolExecutorService get instance =>
@@ -21,8 +22,11 @@ class ToolExecutorService {
     _progressStream ??= _progressChannel
         .receiveBroadcastStream()
         .where((event) => event != null)
-        .map((event) =>
-            ToolProgress.fromMap(Map<String, dynamic>.from(event as Map)));
+        .map(
+          (event) =>
+              ToolProgress.fromMap(Map<String, dynamic>.from(event as Map)),
+        );
+
     return _progressStream!;
   }
 
@@ -37,6 +41,7 @@ class ToolExecutorService {
           Map<String, dynamic>.from(result),
         );
       }
+
       return {'success': true, 'result': result};
     } on PlatformException catch (e) {
       return {'success': false, 'error': e.message ?? 'Platform error'};
@@ -53,10 +58,13 @@ class ToolExecutorService {
         final converted = value.map((e) {
           if (e is int) return e;
           if (e is double) return e.toInt();
+
           return e;
         }).toList();
+
         return MapEntry(key, converted);
       }
+
       return MapEntry(key, value);
     });
   }
@@ -104,6 +112,7 @@ class ToolExecutorService {
       if (data is Uint8List) return data;
       if (data is List<int>) return Uint8List.fromList(data);
     }
+
     return null;
   }
 }

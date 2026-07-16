@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/task.dart';
 import 'package:nova_assistant/services/task_service.dart';
@@ -86,7 +87,9 @@ class _TasksScreenState extends State<TasksScreen> {
             tooltip: 'Sort by',
             itemBuilder: (context) => [
               const PopupMenuItem(
-                  value: 'created', child: Text('Date created')),
+                value: 'created',
+                child: Text('Date created'),
+              ),
               const PopupMenuItem(value: 'dueDate', child: Text('Due date')),
               const PopupMenuItem(value: 'priority', child: Text('Priority')),
               const PopupMenuItem(value: 'title', child: Text('Title')),
@@ -238,8 +241,10 @@ class _TasksScreenState extends State<TasksScreen> {
                       },
                       decoration: InputDecoration(
                         hintText: 'Add tag...',
-                        hintStyle:
-                            TextStyle(color: Colors.grey[600], fontSize: 13),
+                        hintStyle: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 13,
+                        ),
                         filled: true,
                         fillColor: const Color(0xFF0D0D1A),
                         border: OutlineInputBorder(
@@ -280,10 +285,12 @@ class _TasksScreenState extends State<TasksScreen> {
                   children: tags
                       .map(
                         (tag) => Chip(
-                          label:
-                              Text(tag, style: const TextStyle(fontSize: 11)),
-                          backgroundColor:
-                              const Color(0xFF6C63FF).withValues(alpha: 0.15),
+                          label: Text(
+                            tag,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          backgroundColor: const Color(0xFF6C63FF)
+                              .withValues(alpha: 0.15),
                           labelStyle: const TextStyle(color: Color(0xFF6C63FF)),
                           deleteIcon: const Icon(Icons.close, size: 14),
                           onDeleted: () => setModalState(() {
@@ -330,9 +337,7 @@ class _TasksScreenState extends State<TasksScreen> {
                         context: context,
                         initialDate: DateTime.now(),
                         firstDate: DateTime.now(),
-                        lastDate: DateTime.now().add(
-                          const Duration(days: 365),
-                        ),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
                       );
                       if (picked != null) {
                         setModalState(() => dueDate = picked);
@@ -417,8 +422,8 @@ class _TaskCard extends StatelessWidget {
             color: isCompleted
                 ? Colors.green.withValues(alpha: 0.3)
                 : isOverdue
-                    ? Colors.red.withValues(alpha: 0.3)
-                    : Colors.white.withValues(alpha: 0.06),
+                ? Colors.red.withValues(alpha: 0.3)
+                : Colors.white.withValues(alpha: 0.06),
           ),
         ),
         child: Row(
@@ -435,10 +440,10 @@ class _TaskCard extends StatelessWidget {
                     color: isCompleted
                         ? Colors.green
                         : task.priority == TaskPriority.high
-                            ? Colors.red
-                            : task.priority == TaskPriority.low
-                                ? Colors.green
-                                : Colors.orange,
+                        ? Colors.red
+                        : task.priority == TaskPriority.low
+                        ? Colors.green
+                        : Colors.orange,
                     width: 2,
                   ),
                 ),
@@ -458,8 +463,9 @@ class _TaskCard extends StatelessWidget {
                       color: Colors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
-                      decoration:
-                          isCompleted ? TextDecoration.lineThrough : null,
+                      decoration: isCompleted
+                          ? TextDecoration.lineThrough
+                          : null,
                     ),
                   ),
                   if (task.description != null &&
@@ -529,9 +535,7 @@ class _PriorityChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? color.withValues(alpha: 0.2) : Colors.transparent,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: selected ? color : Colors.grey[700]!,
-          ),
+          border: Border.all(color: selected ? color : Colors.grey[700]!),
         ),
         child: Text(
           label,

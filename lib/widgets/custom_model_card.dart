@@ -34,8 +34,9 @@ class CustomModelCard extends StatelessWidget {
                 : (isDark ? Colors.grey.shade900 : Colors.grey.shade100),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color:
-                  isSelected ? theme.colorScheme.primary : Colors.transparent,
+              color: isSelected
+                  ? theme.colorScheme.primary
+                  : Colors.transparent,
               width: 2,
             ),
           ),
@@ -56,11 +57,7 @@ class CustomModelCard extends StatelessWidget {
                 ),
               ],
               if (isSelected) ...[
-                Icon(
-                  Icons.check,
-                  color: theme.colorScheme.primary,
-                  size: 20,
-                ),
+                Icon(Icons.check, color: theme.colorScheme.primary, size: 20),
               ],
             ],
           ),

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -61,12 +62,13 @@ class _AssistantScreenState extends State<AssistantScreen>
     _inputController.addListener(() => setState(() {}));
     _listenToModelStatus();
     _checkModelAvailability();
-    _historyClearedSub =
-        ModelOrchestrator.instance.historyClearedStream.listen((_) {
-      if (mounted) {
-        setState(() => _messages.clear());
-      }
-    });
+    _historyClearedSub = ModelOrchestrator.instance.historyClearedStream.listen(
+      (_) {
+        if (mounted) {
+          setState(() => _messages.clear());
+        }
+      },
+    );
   }
 
   Future<void> _loadHistory() async {
@@ -415,15 +417,14 @@ class _AssistantScreenState extends State<AssistantScreen>
         _attachmentManager.clear();
         await _handleModelFilePick(e.model);
         _inputController.text = text;
+
         return;
       }
       if (idx != -1) {
         String errorText;
-        if (e is ModelException) {
-          errorText = '⚠️ ${e.message}\n\n${e.suggestion ?? ''}';
-        } else {
-          errorText = 'Sorry, I encountered an error: $e';
-        }
+        errorText = e is ModelException
+            ? '⚠️ ${e.message}\n\n${e.suggestion ?? ''}'
+            : 'Sorry, I encountered an error: $e';
         setState(() {
           _messages[idx] = _messages[idx].copyWith(
             text: errorText,
@@ -455,6 +456,7 @@ class _AssistantScreenState extends State<AssistantScreen>
           ),
         );
       }
+
       return;
     }
     final screenshot = await ScreenshotService.instance.getLatestScreenshot();
@@ -551,6 +553,7 @@ class _AssistantScreenState extends State<AssistantScreen>
           ),
         );
       }
+
       return;
     }
 
@@ -808,6 +811,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                       itemCount: _messages.length,
                       itemBuilder: (context, index) {
                         final msg = _messages[index];
+
                         return ChatBubble(
                           message: msg,
                           onScreenshotTap: msg.imageData != null
@@ -958,11 +962,9 @@ class _AssistantScreenState extends State<AssistantScreen>
             tooltip: 'Export conversation',
             onSelected: (format) async {
               String? path;
-              if (format == 'text') {
-                path = await ChatHistoryService.exportAsText();
-              } else {
-                path = await ChatHistoryService.exportAsJson();
-              }
+              path = format == 'text'
+                  ? await ChatHistoryService.exportAsText()
+                  : await ChatHistoryService.exportAsJson();
               if (path != null && mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -1041,6 +1043,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         separatorBuilder: (context, index) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final att = _attachmentManager.attachments[index];
+
           return _buildAttachmentChip(att);
         },
       ),
@@ -1144,6 +1147,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     if (name.endsWith('.csv') || name.endsWith('.xlsx')) {
       return Icons.table_chart_outlined;
     }
+
     return Icons.insert_drive_file_outlined;
   }
 
@@ -1166,6 +1170,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         name.endsWith('.js')) {
       return const Color(0xFF448AFF);
     }
+
     return const Color(0xFF6C63FF);
   }
 
@@ -1173,6 +1178,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     if (att.type == AttachedDataType.url) {
       try {
         final uri = Uri.parse(att.url ?? '');
+
         return uri.host;
       } catch (_) {
         return att.name;
@@ -1182,6 +1188,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     if (att.name.length > 16) {
       return '${att.name.substring(0, 13)}...';
     }
+
     return att.name;
   }
 
@@ -1191,6 +1198,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         final uri = Uri.parse(att.url ?? '');
         final path = uri.path;
         if (path.length > 20) return '${path.substring(0, 17)}...';
+
         return path.isEmpty ? null : path;
       } catch (_) {
         return null;
@@ -1204,9 +1212,11 @@ class _AssistantScreenState extends State<AssistantScreen>
         if (att.fileSizeBytes! > 1024) {
           return '${(att.fileSizeBytes! / 1024).toStringAsFixed(1)} KB';
         }
+
         return '${att.fileSizeBytes} B';
       }
     }
+
     return null;
   }
 
@@ -1215,6 +1225,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     if (att.type == AttachedDataType.url) {
       buffer.writeln('\nURL: ${att.url}');
     }
+
     return buffer.toString();
   }
 
@@ -1423,8 +1434,8 @@ class _AssistantScreenState extends State<AssistantScreen>
                 child: IconButton(
                   onPressed:
                       _inputController.text.trim().isNotEmpty && !_isGenerating
-                          ? _sendMessage
-                          : null,
+                      ? _sendMessage
+                      : null,
                   icon: Icon(
                     Icons.send_rounded,
                     color: _inputController.text.trim().isNotEmpty
@@ -1469,6 +1480,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     items.addAll(
       _reactionEmojis.map((emoji) {
         final count = msg.reactions[emoji] ?? 0;
+
         return ListTile(
           leading: Text(emoji, style: const TextStyle(fontSize: 22)),
           title: Text(

@@ -52,27 +52,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget _buildCurrentStep() {
     switch (_currentStep) {
       case 0:
-        return WelcomeScreen(
-          onGetStarted: () => _nextStep(),
-        );
+        return WelcomeScreen(onGetStarted: () => _nextStep());
       case 1:
         return ModeSelectionScreen(
           onModeSelected: _onModeSelected,
           onBack: _previousStep,
         );
       case 2:
-        return NameSetupScreen(
-          onNameEntered: _onNameEntered,
-        );
+        return NameSetupScreen(onNameEntered: _onNameEntered);
       case 3:
         return PermissionsScreen(
           userName: _userName,
           onPermissionsGranted: _nextStep,
         );
       case 4:
-        return ModelDownloadScreen(
-          onDownloadComplete: _nextStep,
-        );
+        return ModelDownloadScreen(onDownloadComplete: _nextStep);
       case 5:
         return ReadyScreen(
           userName: _userName,

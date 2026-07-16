@@ -31,17 +31,18 @@ class UserPreferences {
       mode: mode ?? this.mode,
       userName: userName ?? this.userName,
       onboardingComplete: onboardingComplete ?? this.onboardingComplete,
-      beginnerHasSeenSimplifiedPrompt: beginnerHasSeenSimplifiedPrompt ??
+      beginnerHasSeenSimplifiedPrompt:
+          beginnerHasSeenSimplifiedPrompt ??
           this.beginnerHasSeenSimplifiedPrompt,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'mode': mode.name,
-        'userName': userName,
-        'onboardingComplete': onboardingComplete,
-        'beginnerHasSeenSimplifiedPrompt': beginnerHasSeenSimplifiedPrompt,
-      };
+    'mode': mode.name,
+    'userName': userName,
+    'onboardingComplete': onboardingComplete,
+    'beginnerHasSeenSimplifiedPrompt': beginnerHasSeenSimplifiedPrompt,
+  };
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) =>
       UserPreferences(

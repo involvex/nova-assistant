@@ -116,8 +116,7 @@ void main() {
 
       test('returns heavy model as default for long query', () {
         final result = selector.selectForQuery(
-          query:
-              'this is a longer query that should definitely use the heavy model for processing',
+          query: 'this is a longer query that should definitely use the heavy model for processing',
           hasVisionContext: false,
           requestedThinking: false,
         );

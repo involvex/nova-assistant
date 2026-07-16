@@ -3,10 +3,7 @@ import 'package:flutter/material.dart';
 class NameSetupScreen extends StatefulWidget {
   final void Function(String name) onNameEntered;
 
-  const NameSetupScreen({
-    super.key,
-    required this.onNameEntered,
-  });
+  const NameSetupScreen({super.key, required this.onNameEntered});
 
   @override
   State<NameSetupScreen> createState() => _NameSetupScreenState();
@@ -78,25 +75,16 @@ class _NameSetupScreenState extends State<NameSetupScreen> {
           const SizedBox(height: 16),
           Text(
             'This is how Nova will address you in conversation.',
-            style: TextStyle(
-              color: Colors.grey[400],
-              fontSize: 16,
-            ),
+            style: TextStyle(color: Colors.grey[400], fontSize: 16),
           ),
           const SizedBox(height: 48),
           TextField(
             controller: _nameController,
             focusNode: _focusNode,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-            ),
+            style: const TextStyle(color: Colors.white, fontSize: 24),
             decoration: InputDecoration(
               hintText: 'Your name',
-              hintStyle: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 24,
-              ),
+              hintStyle: TextStyle(color: Colors.grey[600], fontSize: 24),
               filled: true,
               fillColor: const Color(0xFF1A1A2E),
               border: OutlineInputBorder(
@@ -129,10 +117,7 @@ class _NameSetupScreenState extends State<NameSetupScreen> {
               ),
               child: const Text(
                 'Continue',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -157,16 +142,11 @@ class _NameSetupScreenState extends State<NameSetupScreen> {
             decoration: BoxDecoration(
               color: const Color(0xFF1A1A2E),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.1),
-              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
             ),
             child: Text(
               name,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
-              ),
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
             ),
           ),
         );

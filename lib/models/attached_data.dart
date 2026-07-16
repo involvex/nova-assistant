@@ -59,29 +59,29 @@ class AttachedData {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'type': type.name,
-        'filePath': filePath,
-        'url': url,
-        'extractedText': extractedText,
-        'attachedAt': attachedAt.toIso8601String(),
-        'fileSizeBytes': fileSizeBytes,
-      };
+    'id': id,
+    'name': name,
+    'type': type.name,
+    'filePath': filePath,
+    'url': url,
+    'extractedText': extractedText,
+    'attachedAt': attachedAt.toIso8601String(),
+    'fileSizeBytes': fileSizeBytes,
+  };
 
   factory AttachedData.fromJson(Map<String, dynamic> json) => AttachedData(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        type: AttachedDataType.values.firstWhere(
-          (e) => e.name == json['type'],
-          orElse: () => AttachedDataType.text,
-        ),
-        filePath: json['filePath'] as String?,
-        url: json['url'] as String?,
-        extractedText: json['extractedText'] as String?,
-        attachedAt: DateTime.parse(json['attachedAt'] as String),
-        fileSizeBytes: json['fileSizeBytes'] as int?,
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    type: AttachedDataType.values.firstWhere(
+      (e) => e.name == json['type'],
+      orElse: () => AttachedDataType.text,
+    ),
+    filePath: json['filePath'] as String?,
+    url: json['url'] as String?,
+    extractedText: json['extractedText'] as String?,
+    attachedAt: DateTime.parse(json['attachedAt'] as String),
+    fileSizeBytes: json['fileSizeBytes'] as int?,
+  );
 
   /// Build a context string to inject into the system prompt or user query.
   Future<String> buildContextString() async {
@@ -161,6 +161,7 @@ class AttachmentManager {
       final context = await attachment.buildContextString();
       buffers.add(context);
     }
+
     return buffers.join('\n\n');
   }
 }

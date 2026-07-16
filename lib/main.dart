@@ -28,10 +28,7 @@ void main() async {
     await SharedPreferences.getInstance();
 
     await FlutterGemma.initialize(
-      inferenceEngines: const [
-        LiteRtLmEngine(),
-        MediaPipeEngine(),
-      ],
+      inferenceEngines: const [LiteRtLmEngine(), MediaPipeEngine()],
       maxDownloadRetries: 3,
     );
 
@@ -116,13 +113,12 @@ class _OnboardingRouterState extends State<OnboardingRouter> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (!_onboardingCompleted) {
       return const OnboardingScreen();
     }
+
     return const AssistantScreen();
   }
 }
@@ -268,9 +264,7 @@ class _AppLoaderState extends State<AppLoader> {
     if (_isLoading) {
       return const Scaffold(
         body: Center(
-          child: CircularProgressIndicator(
-            color: Color(0xFF6C63FF),
-          ),
+          child: CircularProgressIndicator(color: Color(0xFF6C63FF)),
         ),
       );
     }

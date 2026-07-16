@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
@@ -50,12 +51,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _loadSettings();
     _checkAssistantRole();
-    _assistantRoleSub =
-        AssistantRoleService.instance.onAssistantRoleChanged.listen((event) {
-      if (event['event'] == 'assistantRoleChanged' && mounted) {
-        setState(() => _isAssistantRoleHeld = event['held'] as bool);
-      }
-    });
+    _assistantRoleSub = AssistantRoleService.instance.onAssistantRoleChanged
+        .listen((event) {
+          if (event['event'] == 'assistantRoleChanged' && mounted) {
+            setState(() => _isAssistantRoleHeld = event['held'] as bool);
+          }
+        });
     _modelStatusSub = ModelManager.instance.statusStream.listen((status) {
       if (mounted) setState(() => _installStatus = status);
     });
@@ -112,8 +113,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text('HuggingFace Token',
-            style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'HuggingFace Token',
+          style: TextStyle(color: Colors.white),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -399,9 +402,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () {
               Navigator.push(
                 context,
-                MaterialPageRoute<void>(
-                  builder: (_) => const TasksScreen(),
-                ),
+                MaterialPageRoute<void>(builder: (_) => const TasksScreen()),
               );
             },
           ),
@@ -412,9 +413,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () {
               Navigator.push(
                 context,
-                MaterialPageRoute<void>(
-                  builder: (_) => const NotesScreen(),
-                ),
+                MaterialPageRoute<void>(builder: (_) => const NotesScreen()),
               );
             },
           ),
@@ -658,8 +657,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         type == ModelType.gemma4
             ? Icons.auto_awesome
             : type == ModelType.gemmaIt
-                ? Icons.smart_toy
-                : Icons.psychology,
+            ? Icons.smart_toy
+            : Icons.psychology,
         color: const Color(0xFF6C63FF),
       ),
       title: Text(title, style: const TextStyle(color: Colors.white)),
@@ -747,18 +746,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: Text(
           targetMode == UserMode.beginner
               ? 'You\'ll see a simplified UI with only the basics. '
-                  'You can switch back to Expert Mode anytime from Settings.'
+                    'You can switch back to Expert Mode anytime from Settings.'
               : 'You\'ll have access to all features including screenshots, '
-                  'file attachments, and advanced settings.',
+                    'file attachments, and advanced settings.',
           style: TextStyle(color: Colors.grey[400]),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: Colors.grey[400]),
-            ),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey[400])),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),

@@ -28,19 +28,15 @@ class _ReadyScreenState extends State<ReadyScreen>
       duration: const Duration(milliseconds: 800),
     );
 
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeOutBack,
-      ),
-    );
+    _scaleAnimation = Tween<double>(
+      begin: 0.8,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
 
-    _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeOut,
-      ),
-    );
+    _opacityAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
     _controller.forward();
   }
@@ -123,9 +119,7 @@ class _ReadyScreenState extends State<ReadyScreen>
               decoration: BoxDecoration(
                 color: const Color(0xFF1A1A2E),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.08),
-                ),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
               ),
               child: Column(
                 children: [
@@ -198,10 +192,7 @@ class _ReadyScreenState extends State<ReadyScreen>
               onPressed: widget.onStartChatting,
               child: Text(
                 'You can always change these settings later',
-                style: TextStyle(
-                  color: Colors.grey[500],
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: Colors.grey[500], fontSize: 12),
               ),
             ),
           ),
@@ -220,11 +211,7 @@ class _ReadyScreenState extends State<ReadyScreen>
             color: const Color(0xFF6C63FF).withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(
-            icon,
-            color: const Color(0xFF6C63FF),
-            size: 24,
-          ),
+          child: Icon(icon, color: const Color(0xFF6C63FF), size: 24),
         ),
         const SizedBox(width: 16),
         Column(
@@ -239,10 +226,7 @@ class _ReadyScreenState extends State<ReadyScreen>
             ),
             Text(
               subtitle,
-              style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.grey[500], fontSize: 12),
             ),
           ],
         ),

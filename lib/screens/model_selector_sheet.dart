@@ -83,9 +83,7 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Remove'),
           ),
         ],
@@ -238,8 +236,8 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
               color: isSelected
                   ? Colors.white
                   : (theme.brightness == Brightness.dark
-                      ? Colors.grey.shade400
-                      : Colors.grey.shade600),
+                        ? Colors.grey.shade400
+                        : Colors.grey.shade600),
             ),
             const SizedBox(width: 8),
             Text(
@@ -248,8 +246,8 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
                 color: isSelected
                     ? Colors.white
                     : (theme.brightness == Brightness.dark
-                        ? Colors.grey.shade400
-                        : Colors.grey.shade600),
+                          ? Colors.grey.shade400
+                          : Colors.grey.shade600),
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
@@ -349,9 +347,7 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
             decoration: BoxDecoration(
               color: Colors.purple.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.purple.withValues(alpha: 0.3),
-              ),
+              border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [

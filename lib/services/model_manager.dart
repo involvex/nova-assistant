@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
@@ -26,23 +27,23 @@ class InstalledModel {
   double get fileSizeMB => fileSizeBytes / (1024 * 1024);
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'fileName': fileName,
-        'modelType': modelType.name,
-        'installedAt': installedAt.toIso8601String(),
-        'fileSizeBytes': fileSizeBytes,
-      };
+    'id': id,
+    'fileName': fileName,
+    'modelType': modelType.name,
+    'installedAt': installedAt.toIso8601String(),
+    'fileSizeBytes': fileSizeBytes,
+  };
 
   factory InstalledModel.fromJson(Map<String, dynamic> json) => InstalledModel(
-        id: json['id'] as String,
-        fileName: json['fileName'] as String,
-        modelType: ModelType.values.firstWhere(
-          (e) => e.name == json['modelType'],
-          orElse: () => ModelType.general,
-        ),
-        installedAt: DateTime.parse(json['installedAt'] as String),
-        fileSizeBytes: json['fileSizeBytes'] as int,
-      );
+    id: json['id'] as String,
+    fileName: json['fileName'] as String,
+    modelType: ModelType.values.firstWhere(
+      (e) => e.name == json['modelType'],
+      orElse: () => ModelType.general,
+    ),
+    installedAt: DateTime.parse(json['installedAt'] as String),
+    fileSizeBytes: json['fileSizeBytes'] as int,
+  );
 }
 
 class ModelManager {
@@ -95,8 +96,9 @@ class ModelManager {
 
   Future<void> _saveToPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonList =
-        _installedModels.map((m) => jsonEncode(m.toJson())).toList();
+    final jsonList = _installedModels
+        .map((m) => jsonEncode(m.toJson()))
+        .toList();
     await prefs.setStringList(_prefsKey, jsonList);
   }
 
@@ -197,7 +199,8 @@ class ModelManager {
             await tempFile.delete();
           } catch (e) {
             debugPrint(
-                'ModelManager: failed to delete temp file after incomplete download: $e');
+              'ModelManager: failed to delete temp file after incomplete download: $e',
+            );
           }
           return null;
         }
@@ -247,7 +250,8 @@ class ModelManager {
         await tempFile.delete();
       } catch (e) {
         debugPrint(
-            'ModelManager: failed to delete temp file after install: $e');
+          'ModelManager: failed to delete temp file after install: $e',
+        );
       }
       if (installed != null) {
         _statusController.add('Model installed: ${installed.fileName}');
@@ -419,7 +423,8 @@ class ModelManager {
     if (validationError != null) {
       _statusController.add('Invalid model file: $validationError');
       debugPrint(
-          'ModelManager: installFromFile validation failed: $validationError');
+        'ModelManager: installFromFile validation failed: $validationError',
+      );
       return null;
     }
 
@@ -561,8 +566,9 @@ class ModelManager {
           isGguf: true,
         );
 
-        _customModels
-            .removeWhere((m) => m.id == displayName || m.fileName == fileName);
+        _customModels.removeWhere(
+          (m) => m.id == displayName || m.fileName == fileName,
+        );
         _customModels.add(customModel);
         await _saveCustomModelsToPrefs();
 
@@ -596,7 +602,8 @@ class ModelManager {
       );
 
       _customModels.removeWhere(
-          (m) => m.id == displayName || m.fileName == installed.fileName);
+        (m) => m.id == displayName || m.fileName == installed.fileName,
+      );
       _customModels.add(customModel);
       await _saveCustomModelsToPrefs();
 

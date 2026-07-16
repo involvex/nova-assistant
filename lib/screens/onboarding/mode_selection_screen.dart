@@ -21,10 +21,7 @@ class ModeSelectionScreen extends StatelessWidget {
             children: [
               IconButton(
                 onPressed: onBack,
-                icon: const Icon(
-                  Icons.arrow_back,
-                  color: Colors.white70,
-                ),
+                icon: const Icon(Icons.arrow_back, color: Colors.white70),
               ),
             ],
           ),
@@ -40,10 +37,7 @@ class ModeSelectionScreen extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             'Select how you want to use Nova',
-            style: TextStyle(
-              color: Colors.grey[400],
-              fontSize: 16,
-            ),
+            style: TextStyle(color: Colors.grey[400], fontSize: 16),
           ),
           const SizedBox(height: 40),
           Expanded(
@@ -52,8 +46,7 @@ class ModeSelectionScreen extends StatelessWidget {
                 _ModeCard(
                   title: 'Beginner Mode',
                   subtitle: 'Simple & Easy',
-                  description:
-                      'Perfect for talking to Nova like a friend.\nJust tap the mic and ask.',
+                  description: 'Perfect for talking to Nova like a friend.\nJust tap the mic and ask.',
                   icon: Icons.mic_rounded,
                   iconColor: const Color(0xFF4CAF50),
                   features: const [
@@ -68,8 +61,7 @@ class ModeSelectionScreen extends StatelessWidget {
                 _ModeCard(
                   title: 'Expert Mode',
                   subtitle: 'Full Control',
-                  description:
-                      'Access all features including\nscreenshots, files, and custom tools.',
+                  description: 'Access all features including\nscreenshots, files, and custom tools.',
                   icon: Icons.settings_rounded,
                   iconColor: const Color(0xFF6C63FF),
                   features: const [
@@ -118,9 +110,7 @@ class _ModeCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFF1A1A2E),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.08),
-          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -133,11 +123,7 @@ class _ModeCard extends StatelessWidget {
                     color: iconColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(
-                    icon,
-                    color: iconColor,
-                    size: 28,
-                  ),
+                  child: Icon(icon, color: iconColor, size: 28),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -154,10 +140,7 @@ class _ModeCard extends StatelessWidget {
                       ),
                       Text(
                         subtitle,
-                        style: TextStyle(
-                          color: iconColor,
-                          fontSize: 14,
-                        ),
+                        style: TextStyle(color: iconColor, fontSize: 14),
                       ),
                     ],
                   ),
@@ -184,18 +167,17 @@ class _ModeCard extends StatelessWidget {
               runSpacing: 8,
               children: features.map((f) {
                 return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0D0D1A),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     f,
-                    style: TextStyle(
-                      color: Colors.grey[400],
-                      fontSize: 11,
-                    ),
+                    style: TextStyle(color: Colors.grey[400], fontSize: 11),
                   ),
                 );
               }).toList(),

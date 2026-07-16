@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -83,18 +84,18 @@ class DownloadInfo {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'modelId': modelId,
-        'url': url,
-        'fileName': fileName,
-        'totalBytes': totalBytes,
-        'downloadedBytes': downloadedBytes,
-        'status': status.name,
-        'startedAt': startedAt.toIso8601String(),
-        'completedAt': completedAt?.toIso8601String(),
-        'error': error,
-        'retryCount': retryCount,
-      };
+    'id': id,
+    'modelId': modelId,
+    'url': url,
+    'fileName': fileName,
+    'totalBytes': totalBytes,
+    'downloadedBytes': downloadedBytes,
+    'status': status.name,
+    'startedAt': startedAt.toIso8601String(),
+    'completedAt': completedAt?.toIso8601String(),
+    'error': error,
+    'retryCount': retryCount,
+  };
 
   factory DownloadInfo.fromJson(Map<String, dynamic> json) {
     return DownloadInfo(

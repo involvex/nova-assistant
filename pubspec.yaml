@@ -20,7 +20,7 @@ dependencies:
   permission_handler: ^12.0.3
 
   # Audio (voice input)
-  record: ^7.1.1
+  record: ^6.0.0
   just_audio: ^0.9.0
   speech_to_text: ^7.0.0
 

@@ -13,6 +13,7 @@ import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/models/agent_identity.dart';
 import 'package:nova_assistant/models/assistant_language.dart';
+import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/external_tool.dart';
 import 'package:nova_assistant/models/model_info.dart';
@@ -147,6 +148,7 @@ class ModelOrchestrator {
   bool _keepModelWarm = true;
   bool _highContextEnabled = false;
   bool _autoCompactEnabled = true;
+  bool _adultModeEnabled = false;
   List<ChatMessage> _pendingReplay = const [];
   bool _debugMode = false;
   bool _isReleasing = false; // Guard against concurrent release operations
@@ -196,6 +198,8 @@ class ModelOrchestrator {
 
   bool get autoCompactEnabled => _autoCompactEnabled;
 
+  bool get adultModeEnabled => _adultModeEnabled;
+
   void setKeepModelWarm(bool enabled) {
     _keepModelWarm = enabled;
   }
@@ -206,6 +210,14 @@ class ModelOrchestrator {
 
   void setAutoCompactEnabled(bool enabled) {
     _autoCompactEnabled = enabled;
+  }
+
+  /// Updates adult mode and clears the live chat so the next send uses the
+  /// new system prompt (model stays loaded when keep-warm is on).
+  void setAdultModeEnabled(bool enabled) {
+    if (_adultModeEnabled == enabled) return;
+    _adultModeEnabled = enabled;
+    _activeChat = null;
   }
 
   void setPendingReplayMessages(List<ChatMessage> messages) {
@@ -347,6 +359,11 @@ class ModelOrchestrator {
         prefs.getBool('settings_high_context') ??
         (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
     _autoCompactEnabled = prefs.getBool('settings_auto_compact') ?? true;
+  }
+
+  Future<void> _loadAdultMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    _adultModeEnabled = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
   }
 
   void clearModelOverride() {
@@ -2289,6 +2306,10 @@ class ModelOrchestrator {
       buffer.write('\n\n${await _languageInstruction()}');
     }
 
+    if (_adultModeEnabled) {
+      buffer.write(AdultModePolicy.systemPromptSuffix(compact: compact));
+    }
+
     if (ragContext != null && ragContext.isNotEmpty) {
       buffer.write('\n\n${_capContextInjection(ragContext)}');
     }
@@ -2397,6 +2418,7 @@ class ModelOrchestrator {
     await _loadPreferredModel();
     await _loadKeepModelWarm();
     await _loadContextBudgetSettings();
+    await _loadAdultMode();
     await _loadIdentity();
     // NOTE: We deliberately do NOT load a model here.
     // Loading a 2.4GB model at startup causes memory/CPU exhaustion
@@ -2420,5 +2442,10 @@ class ModelOrchestrator {
         (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
     orchestrator._autoCompactEnabled =
         prefs.getBool('settings_auto_compact') ?? true;
+    final adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
+    if (orchestrator._adultModeEnabled != adultMode) {
+      orchestrator._adultModeEnabled = adultMode;
+      orchestrator._activeChat = null;
+    }
   }
 }

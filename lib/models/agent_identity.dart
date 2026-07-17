@@ -135,6 +135,17 @@ class AgentIdentity {
       '\n\nYou run entirely on the device — no data is sent to external servers.',
     );
     buffer.write(' Be helpful, concise, and friendly.');
+    buffer.write(
+      '\n\nAvailable tools: get_time, set_alarm, cancel_alarm, open_app, '
+      'search_web, get_weather, send_sms, open_settings, take_screenshot, '
+      'create_task, list_tasks, complete_task, create_note, search_notes, list_notes.',
+    );
+    buffer.write(
+      '\nTool use: When the user request is actionable with a tool and the '
+      'needed details are already in the message, call the tool immediately. '
+      'For alarms, convert AM/PM to 24-hour (7 PM → hour=19) and use minute=0 '
+      'when minutes are omitted.',
+    );
 
     return buffer.toString();
   }

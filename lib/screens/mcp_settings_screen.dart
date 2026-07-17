@@ -205,11 +205,24 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
               activeColor: const Color(0xFF6C63FF),
             ),
             PopupMenuButton<String>(
-              onSelected: (value) {
+              onSelected: (value) async {
                 if (value == 'connect') {
-                  _mcpService.connectServer(server.id);
+                  final ok = await _mcpService.connectServer(server.id);
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        ok
+                            ? 'Connected to ${server.name}'
+                            : (_mcpService.lastConnectError ??
+                                  'Failed to connect to ${server.name}'),
+                      ),
+                      backgroundColor: ok ? Colors.green[700] : Colors.red[700],
+                      duration: Duration(seconds: ok ? 3 : 8),
+                    ),
+                  );
                 } else if (value == 'disconnect') {
-                  _mcpService.disconnectServer(server.id);
+                  await _mcpService.disconnectServer(server.id);
                 } else if (value == 'delete') {
                   _showDeleteServerConfirm(server);
                 }

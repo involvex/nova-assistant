@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
 import java.io.File
 import java.io.FileOutputStream
 
@@ -32,65 +31,61 @@ class AssistantActivity : FlutterActivity() {
         var latestTimestamp: Long = 0L
     }
 
+    private var launchScheduled = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d(TAG, "AssistantActivity: received ASSIST intent")
-
         requestScreenCapture()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         Log.d(TAG, "AssistantActivity: received ASSIST intent in onNewIntent")
+        launchScheduled = false
         requestScreenCapture()
-    }
-
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        // ScreenCaptureHelper is owned by MainActivity — do not register here.
-        // AssistantActivity handles screen capture via its own MediaProjection flow.
     }
 
     private fun requestScreenCapture() {
         try {
-            val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+            val mediaProjectionManager =
+                getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
             startActivityForResult(
                 mediaProjectionManager.createScreenCaptureIntent(),
-                REQUEST_SCREEN_CAPTURE
+                REQUEST_SCREEN_CAPTURE,
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to request screen capture: ${e.message}")
-            // Fallback: launch without screenshot
             launchMainApp()
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_SCREEN_CAPTURE) {
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                Log.d(TAG, "Screen capture permission granted")
-                try {
-                    ScreenCaptureHelper.startCapture(this, data)
+        if (requestCode != REQUEST_SCREEN_CAPTURE) return
 
-                    // Wait longer for capture to complete before launching
-                    android.os.Handler(mainLooper).postDelayed({
-                        launchMainApp()
-                    }, 1000) // Increased from 500ms to 1000ms
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start capture: ${e.message}")
+        if (resultCode == Activity.RESULT_OK && data != null) {
+            Log.d(TAG, "Screen capture permission granted")
+            try {
+                ScreenCaptureHelper.startCapture(this, data)
+                ScreenCaptureHelper.waitForFirstFrame(timeoutMs = 2500L) {
                     launchMainApp()
                 }
-            } else {
-                Log.d(TAG, "Screen capture denied — launching without screenshot")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start capture: ${e.message}")
                 launchMainApp()
             }
+        } else {
+            Log.d(TAG, "Screen capture denied — launching without screenshot")
+            launchMainApp()
         }
     }
 
     private fun launchMainApp() {
+        if (launchScheduled) return
+        launchScheduled = true
+
         try {
-            // Write screenshot to temp file to avoid Binder transaction size limit (~1MB)
             val screenshotPath = writeScreenshotToFile()
 
             val intent = Intent(this, MainActivity::class.java).apply {
@@ -104,7 +99,6 @@ class AssistantActivity : FlutterActivity() {
             finish()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch main app: ${e.message}")
-            // Try launching without screenshot
             try {
                 val intent = Intent(this, MainActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -118,7 +112,7 @@ class AssistantActivity : FlutterActivity() {
     }
 
     private fun writeScreenshotToFile(): String? {
-        val data = latestScreenshot ?: return null
+        val data = latestScreenshot ?: ScreenCaptureHelper.latestFrame ?: return null
         return try {
             val tempFile = File(cacheDir, "nova_screenshot_${System.currentTimeMillis()}.png")
             FileOutputStream(tempFile).use { it.write(data) }

@@ -287,11 +287,10 @@ class _IdentityConfigScreenState extends State<IdentityConfigScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('Skills'),
-        Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A1A2E),
-            borderRadius: BorderRadius.circular(12),
-          ),
+        Material(
+          color: const Color(0xFF1A1A2E),
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
           child: Column(
             children: AgentSkill.values.map((skill) {
               final isSelected = _selectedSkills.contains(skill);
@@ -339,11 +338,10 @@ class _IdentityConfigScreenState extends State<IdentityConfigScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('Knowledge Sources'),
-        Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A1A2E),
-            borderRadius: BorderRadius.circular(12),
-          ),
+        Material(
+          color: const Color(0xFF1A1A2E),
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
           child: Column(
             children: KnowledgeSource.values.map((source) {
               final isSelected = _selectedSources.contains(source);

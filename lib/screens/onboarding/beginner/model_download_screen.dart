@@ -1,8 +1,12 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
+import 'package:nova_assistant/utils/agent_debug_log.dart';
 
 class ModelDownloadScreen extends StatefulWidget {
   final VoidCallback onDownloadComplete;
@@ -17,49 +21,71 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
   static const _targetModel = NovaModel.gemma4E2b;
 
   double _progress = 0;
-  String _status = 'Preparing download...';
+  String _status = 'Preparing...';
   bool _isComplete = false;
   bool _hasError = false;
   String _errorMessage = '';
+  bool _isBusy = false;
 
   @override
   void initState() {
     super.initState();
-    _checkAndDownload();
+    _checkExisting();
   }
 
-  Future<void> _checkAndDownload() async {
-    final fileName = ModelHuggingFaceURLs.fileNameFor(_targetModel);
-    final alreadyInstalled = await ModelManager.instance.isInstalledOnDisk(
-      fileName,
-    );
+  Future<void> _finishReady() async {
+    await UserPreferencesService.instance.setMode(UserMode.beginner);
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    if (mounted) {
+      widget.onDownloadComplete();
+    }
+  }
 
-    if (alreadyInstalled) {
+  Future<void> _checkExisting() async {
+    final fileName = ModelHuggingFaceURLs.fileNameFor(_targetModel);
+    final path = await ModelManager.instance.findModelPath(fileName);
+
+    if (path != null) {
+      final size = await File(path).length();
+      await ModelManager.instance.registerDiskModel(
+        filePath: path,
+        fileName: fileName,
+        modelType: _targetModel.modelType,
+        fileType: _targetModel.fileType,
+        fileSizeBytes: size,
+        deferInstall: true,
+      );
+
       if (mounted) {
         setState(() {
           _progress = 100;
           _status = 'Model already installed!';
           _isComplete = true;
         });
-        await Future<void>.delayed(const Duration(milliseconds: 800));
-        if (mounted) {
-          widget.onDownloadComplete();
-        }
+        await _finishReady();
       }
       return;
     }
 
-    await _downloadModel();
+    if (mounted) {
+      setState(() {
+        _status = 'Choose how to install Gemma 4 E2B';
+        _progress = 0;
+      });
+    }
   }
 
   Future<void> _downloadModel() async {
     setState(() {
+      _isBusy = true;
       _progress = 0;
+      _hasError = false;
       _status = 'Downloading Gemma 4 E2B...';
     });
 
     try {
       final url = ModelHuggingFaceURLs.urlFor(_targetModel);
+      final expected = ModelHuggingFaceURLs.fileNameFor(_targetModel);
       final result = await ModelManager.instance.installFromNetwork(
         url: url,
         modelType: _targetModel.modelType,
@@ -71,30 +97,43 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
         },
       );
 
-      if (mounted) {
-        if (result != null) {
-          setState(() {
-            _progress = 100;
-            _status = 'Model ready!';
-            _isComplete = true;
-          });
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H2-H4',
+        location: 'model_download_screen.dart:_downloadModel:result',
+        message: 'Onboarding download finished',
+        data: {
+          'success': result != null,
+          'fileName': result?.fileName,
+          'expected': expected,
+          'prefsOk': ModelManager.instance.isModelInstalled(expected),
+          'diskOk': await ModelManager.instance.isInstalledOnDisk(expected),
+        },
+        runId: 'post-fix',
+      );
+      // #endregion
 
-          await UserPreferencesService.instance.setMode(UserMode.beginner);
+      if (!mounted) return;
 
-          await Future<void>.delayed(const Duration(milliseconds: 800));
-          if (mounted) {
-            widget.onDownloadComplete();
-          }
-        } else {
-          setState(() {
-            _hasError = true;
-            _errorMessage = 'Download failed. Please check your connection.';
-          });
-        }
+      if (result != null) {
+        setState(() {
+          _progress = 100;
+          _status = 'Model ready!';
+          _isComplete = true;
+          _isBusy = false;
+        });
+        await _finishReady();
+      } else {
+        setState(() {
+          _isBusy = false;
+          _hasError = true;
+          _errorMessage = 'Download failed. Please check your connection.';
+        });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
+          _isBusy = false;
           _hasError = true;
           _errorMessage = 'Error: $e';
         });
@@ -102,12 +141,68 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
     }
   }
 
-  Future<void> _retryDownload() async {
+  Future<void> _importFromStorage() async {
     setState(() {
+      _isBusy = true;
       _hasError = false;
-      _errorMessage = '';
+      _status = 'Importing from storage...';
     });
-    await _downloadModel();
+
+    try {
+      final pick = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['litertlm', 'task'],
+      );
+      if (pick == null ||
+          pick.files.isEmpty ||
+          pick.files.first.path == null) {
+        if (mounted) {
+          setState(() {
+            _isBusy = false;
+            _status = 'Choose how to install Gemma 4 E2B';
+          });
+        }
+        return;
+      }
+
+      final path = pick.files.first.path!;
+      final installed = await ModelManager.instance.installFromFile(
+        filePath: path,
+        modelType: _targetModel.modelType,
+        fileType: _targetModel.fileType,
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p.toDouble());
+        },
+      );
+
+      if (!mounted) return;
+
+      if (installed != null) {
+        setState(() {
+          _progress = 100;
+          _status = 'Model ready!';
+          _isComplete = true;
+          _isBusy = false;
+        });
+        await _finishReady();
+      } else {
+        setState(() {
+          _isBusy = false;
+          _hasError = true;
+          _errorMessage =
+              'Import failed. Select a .litertlm file '
+              '(e.g. gemma-4-E2B-it.litertlm).';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+          _hasError = true;
+          _errorMessage = 'Error: $e';
+        });
+      }
+    }
   }
 
   @override
@@ -137,7 +232,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
           ),
           const SizedBox(height: 40),
           const Text(
-            'Downloading Nova\'s Brain',
+            'Install Nova\'s Brain',
             style: TextStyle(
               color: Colors.white,
               fontSize: 24,
@@ -146,7 +241,8 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Gemma 4 E2B — the AI model that powers\nall of Nova\'s capabilities.',
+            'Gemma 4 E2B — download (~2.4 GB) or import a\n'
+            '.litertlm file you already have.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.grey[400],
@@ -182,7 +278,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: _retryDownload,
+                onPressed: _isBusy ? null : _downloadModel,
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF6C63FF),
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -194,6 +290,44 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
                   'Retry Download',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
+              ),
+            ),
+            TextButton(
+              onPressed: _isBusy ? null : _importFromStorage,
+              child: const Text('Import from storage instead'),
+            ),
+          ] else if (!_isComplete && !_isBusy) ...[
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _downloadModel,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF6C63FF),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text(
+                  'Download from Hugging Face',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: _importFromStorage,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Import from storage'),
               ),
             ),
           ] else ...[
@@ -255,9 +389,9 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
                 ],
               ),
             )
-          else if (!_hasError)
+          else if (!_hasError && !_isBusy)
             Text(
-              'This may take a few minutes depending on your connection.',
+              'Tip: If you already have the .litertlm file, use Import.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey[600], fontSize: 12),
             ),

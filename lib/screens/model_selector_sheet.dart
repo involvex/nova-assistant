@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
@@ -51,6 +53,28 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
     for (final model in NovaModel.values) {
       final fileName = ModelHuggingFaceURLs.fileNameFor(model);
       if (manager.isModelInstalled(fileName)) {
+        installed.add(model);
+        continue;
+      }
+      // Disk may have the file even if prefs were cleared / install failed mid-way
+      final onDisk = await manager.isInstalledOnDisk(fileName);
+      if (onDisk) {
+        final path = await manager.findModelPath(fileName);
+        if (path != null) {
+          try {
+            final size = await File(path).length();
+            await manager.registerDiskModel(
+              filePath: path,
+              fileName: fileName,
+              modelType: model.modelType,
+              fileType: model.fileType,
+              fileSizeBytes: size,
+              deferInstall: true,
+            );
+          } catch (_) {
+            // Still show as installed if file exists
+          }
+        }
         installed.add(model);
       }
     }
@@ -320,22 +344,38 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
           const SizedBox(height: 8),
           ..._customModels.map((model) {
             final isSelected = _selectedCustomModel?.id == model.id;
+            final isUnsupported = model.isGguf;
 
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: CustomModelCard(
                 model: model,
                 isSelected: isSelected,
-                onTap: () {
-                  setState(() {
-                    _selectedModel = null;
-                    _selectedCustomModel = model;
-                    _isAutoMode = false;
-                  });
-                  widget.onModelSelected(null);
-                  widget.onCustomModelSelected(model);
-                  widget.onAutoModeChanged(false);
-                },
+                isDisabled: isUnsupported,
+                disabledReason: isUnsupported
+                    ? 'Not supported for inference'
+                    : null,
+                onTap: isUnsupported
+                    ? () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'GGUF models are not supported for inference. '
+                              'Use a .litertlm or .task model instead.',
+                            ),
+                          ),
+                        );
+                      }
+                    : () {
+                        setState(() {
+                          _selectedModel = null;
+                          _selectedCustomModel = model;
+                          _isAutoMode = false;
+                        });
+                        widget.onModelSelected(null);
+                        widget.onCustomModelSelected(model);
+                        widget.onAutoModeChanged(false);
+                      },
                 onDelete: () => _deleteCustomModel(model),
               ),
             );

@@ -12,6 +12,7 @@ import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
@@ -257,7 +258,10 @@ class _AssistantScreenState extends State<AssistantScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      ModelOrchestrator.instance.releaseIdleResources();
+      // Never unload while LiteRT is generating — causes SIGABRT.
+      if (!ModelOrchestrator.instance.isStreaming) {
+        ModelOrchestrator.instance.releaseIdleResources();
+      }
     } else if (state == AppLifecycleState.resumed) {
       _checkModelAvailability();
     }
@@ -383,6 +387,9 @@ class _AssistantScreenState extends State<AssistantScreen>
         q.contains('google')) {
       tools.add(NovaTools.searchWeb);
     }
+
+    // Connected MCP tools (when a server is connected and tools discovered)
+    tools.addAll(McpService.instance.enabledTools);
 
     return tools;
   }
@@ -1385,7 +1392,7 @@ class _AssistantScreenState extends State<AssistantScreen>
             alignment: WrapAlignment.center,
             children: [
               _quickChip('What\'s on my screen?'),
-              _quickChip('Set an alarm for 7 AM'),
+              _quickChip('Set an alarm for 7:00 PM'),
               _quickChip('Summarize this page'),
               _quickChip('Open Settings'),
             ],

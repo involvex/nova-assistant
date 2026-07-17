@@ -28,7 +28,6 @@ class MainActivity : FlutterActivity() {
     }
 
     private var assistantRoleEventSink: EventChannel.EventSink? = null
-    private var screenCapturePendingResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -42,14 +41,6 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             this
         )
-
-        ScreenCaptureHelper.setPermissionResultCallback { granted ->
-            runOnUiThread {
-                screenCapturePendingResult?.success(granted)
-                screenCapturePendingResult = null
-                ScreenCaptureHelper.onScreenCapturePermissionResult(granted)
-            }
-        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.nova.assistant/share")
             .setMethodCallHandler { call, result ->
@@ -181,15 +172,16 @@ class MainActivity : FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
-            REQUEST_SCREEN_CAPTURE -> {
-                val pendingResult = screenCapturePendingResult
-                screenCapturePendingResult = null
+            REQUEST_SCREEN_CAPTURE,
+            ScreenCaptureHelper.REQUEST_SCREEN_CAPTURE -> {
                 val granted = resultCode == Activity.RESULT_OK && data != null
                 if (granted && data != null) {
+                    Log.d("NovaMain", "Screen capture permission granted")
                     ScreenCaptureHelper.startCapture(this, data)
-                    pendingResult?.success(true)
+                    ScreenCaptureHelper.onScreenCapturePermissionResult(true)
                 } else {
-                    pendingResult?.success(false)
+                    Log.d("NovaMain", "Screen capture permission denied")
+                    ScreenCaptureHelper.onScreenCapturePermissionResult(false)
                 }
             }
             REQUEST_ASSISTANT_ROLE -> {

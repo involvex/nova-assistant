@@ -176,13 +176,19 @@ class McpService {
     if (connected) {
       _clients[serverId] = client;
       await _discoverTools(client);
+      lastConnectError = null;
       debugPrint('Connected to MCP server: ${config.name}');
       return true;
     }
 
-    debugPrint('Failed to connect to MCP server: ${config.name}');
+    lastConnectError = client.lastError ??
+        'Failed to connect to MCP server: ${config.name}';
+    debugPrint(lastConnectError);
     return false;
   }
+
+  /// Human-readable reason for the most recent failed connect attempt.
+  String? lastConnectError;
 
   Future<void> disconnectServer(String serverId) async {
     final client = _clients.remove(serverId);

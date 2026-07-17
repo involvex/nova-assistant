@@ -5,6 +5,8 @@ import 'package:nova_assistant/widgets/model_capability_badge.dart';
 class CustomModelCard extends StatelessWidget {
   final CustomModel model;
   final bool isSelected;
+  final bool isDisabled;
+  final String? disabledReason;
   final VoidCallback? onTap;
   final VoidCallback? onDelete;
 
@@ -12,6 +14,8 @@ class CustomModelCard extends StatelessWidget {
     super.key,
     required this.model,
     this.isSelected = false,
+    this.isDisabled = false,
+    this.disabledReason,
     this.onTap,
     this.onDelete,
   });
@@ -21,45 +25,48 @@ class CustomModelCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
-                : (isDark ? Colors.grey.shade900 : Colors.grey.shade100),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
+    return Opacity(
+      opacity: isDisabled ? 0.55 : 1,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
               color: isSelected
-                  ? theme.colorScheme.primary
-                  : Colors.transparent,
-              width: 2,
+                  ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
+                  : (isDark ? Colors.grey.shade900 : Colors.grey.shade100),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSelected
+                    ? theme.colorScheme.primary
+                    : Colors.transparent,
+                width: 2,
+              ),
             ),
-          ),
-          child: Row(
-            children: [
-              _buildIcon(theme),
-              const SizedBox(width: 16),
-              Expanded(child: _buildInfo(theme)),
-              if (onDelete != null) ...[
-                IconButton(
-                  icon: Icon(
-                    Icons.delete_outline,
-                    color: Colors.red.shade400,
-                    size: 20,
+            child: Row(
+              children: [
+                _buildIcon(theme),
+                const SizedBox(width: 16),
+                Expanded(child: _buildInfo(theme)),
+                if (onDelete != null) ...[
+                  IconButton(
+                    icon: Icon(
+                      Icons.delete_outline,
+                      color: Colors.red.shade400,
+                      size: 20,
+                    ),
+                    onPressed: onDelete,
+                    tooltip: 'Remove custom model',
                   ),
-                  onPressed: onDelete,
-                  tooltip: 'Remove custom model',
-                ),
+                ],
+                if (isSelected && !isDisabled) ...[
+                  Icon(Icons.check, color: theme.colorScheme.primary, size: 20),
+                ],
               ],
-              if (isSelected) ...[
-                Icon(Icons.check, color: theme.colorScheme.primary, size: 20),
-              ],
-            ],
+            ),
           ),
         ),
       ),
@@ -70,7 +77,10 @@ class CustomModelCard extends StatelessWidget {
     IconData icon;
     Color color;
 
-    if (model.hasThinking) {
+    if (model.isGguf || isDisabled) {
+      icon = Icons.block;
+      color = Colors.grey;
+    } else if (model.hasThinking) {
       icon = Icons.psychology;
       color = Colors.orange;
     } else if (model.hasVision) {
@@ -130,6 +140,17 @@ class CustomModelCard extends StatelessWidget {
             color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.7),
           ),
         ),
+        if (disabledReason != null || model.isGguf) ...[
+          const SizedBox(height: 4),
+          Text(
+            disabledReason ?? 'Not supported for inference',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.orange.shade700,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         ModelCapabilityBadges(
           hasVision: model.hasVision,

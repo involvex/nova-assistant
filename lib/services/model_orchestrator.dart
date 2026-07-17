@@ -19,6 +19,10 @@ import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/task_service.dart';
 import 'package:nova_assistant/services/note_service.dart';
 import 'package:nova_assistant/platform/tool_executor_service.dart';
+import 'package:nova_assistant/platform/screenshot_service.dart';
+import 'package:nova_assistant/services/platform_adaptation_service.dart';
+import 'package:nova_assistant/utils/alarm_time_parser.dart';
+import 'package:nova_assistant/utils/agent_debug_log.dart';
 
 enum DownloadConsent { download, pickFile, cancel }
 
@@ -138,7 +142,20 @@ class ModelOrchestrator {
   Timer? _idleTimer;
   bool _isStreaming = false;
   Completer<void>? _streamingCompleter;
+
+  /// Set when idle/lifecycle release is requested while a stream is live.
+  /// Never close the native model until the stream ends (SIGABRT otherwise).
+  bool _pendingIdleRelease = false;
+
+  /// Close/switch deferred because a stream was still running.
+  bool _pendingModelTeardown = false;
   static const _defaultIdleTimeout = Duration(minutes: 5);
+
+  /// Shorter unload on Android to reduce LMK pressure on mid/low-RAM devices.
+  static const _androidIdleTimeout = Duration(minutes: 2);
+
+  /// Whether an inference stream is currently active.
+  bool get isStreaming => _isStreaming;
 
   final _statusController = StreamController<String>.broadcast();
   Stream<String> get statusStream => _statusController.stream;
@@ -174,14 +191,13 @@ class ModelOrchestrator {
     if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
       _streamingCompleter!.complete();
     }
-    _activeChat = null;
-    if (_activeModel != null &&
-        (_activeModelType == null ||
-            model == null ||
-            model != _activeModelType)) {
-      _activeModel!.close().catchError((_) {});
-      _activeModel = null;
+    _tryStopGeneration();
+    if (_isStreaming) {
+      _pendingModelTeardown = true;
+      _persistPreferredModel(model);
+      return;
     }
+    _teardownActiveModel(keepIfSameType: model);
     _persistPreferredModel(model);
   }
 
@@ -192,10 +208,37 @@ class ModelOrchestrator {
     _preferredCustomModelOverride = model;
     _preferredModelOverride = null;
     _modelOverrideDirty = true;
+    if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+      _streamingCompleter!.complete();
+    }
+    _tryStopGeneration();
+    if (_isStreaming) {
+      _pendingModelTeardown = true;
+      return;
+    }
+    _teardownActiveModel();
+  }
+
+  void _teardownActiveModel({NovaModel? keepIfSameType}) {
     _activeChat = null;
-    if (_activeModel != null) {
-      _activeModel!.close().catchError((_) {});
-      _activeModel = null;
+    if (_activeModel == null) return;
+    final shouldClose =
+        keepIfSameType == null ||
+        _activeModelType == null ||
+        keepIfSameType != _activeModelType;
+    if (!shouldClose) return;
+    _activeModel!.close().catchError((_) {});
+    _activeModel = null;
+    _activeModelType = null;
+    _activeModelSupportsImage = false;
+    _clearActiveInferenceIdentity();
+  }
+
+  Future<void> _tryStopGeneration() async {
+    try {
+      await _activeChat?.stopGeneration();
+    } catch (e) {
+      debugPrint('ModelOrchestrator: stopGeneration failed: $e');
     }
   }
 
@@ -234,50 +277,83 @@ class ModelOrchestrator {
     }
   }
 
+  Duration get _idleTimeout {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return _androidIdleTimeout;
+    }
+
+    return _defaultIdleTimeout;
+  }
+
   void _resetIdleTimer() {
     if (!_batteryOptimizationEnabled) return;
     _idleTimer?.cancel();
-    _idleTimer = Timer(_defaultIdleTimeout, _releaseIdleResources);
+    _idleTimer = Timer(_idleTimeout, _releaseIdleResources);
   }
 
   Future<void> _releaseIdleResources() async {
+    if (!_batteryOptimizationEnabled) return;
+
     if (_isReleasing) {
-      debugPrint('Release already in progress, skipping');
+      debugPrint('Release already in progress, awaiting…');
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H6',
+        location: 'model_orchestrator.dart:_releaseIdleResources:await',
+        message: 'Awaiting in-progress release',
+        data: {
+          'activeModelType': _activeModelType?.name,
+          'isStreaming': _isStreaming,
+        },
+      );
+      // #endregion
+      await _releaseCompleter?.future;
+
       return;
     }
-    _isReleasing = true;
-    _releaseCompleter = Completer<void>();
 
-    try {
-      if (!_batteryOptimizationEnabled) return;
-
-      // Signal any active stream to abort
+    // Never tear down LiteRT while the native decode thread is live —
+    // force-close caused SIGABRT: "Callback invoked after it has been deleted".
+    if (_isStreaming) {
+      debugPrint('Deferring idle release until stream ends');
+      _pendingIdleRelease = true;
       if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
         _streamingCompleter!.complete();
       }
+      await _tryStopGeneration();
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H6',
+        location: 'model_orchestrator.dart:_releaseIdleResources:defer',
+        message: 'Idle release deferred while streaming',
+        data: {'activeModelType': _activeModelType?.name, 'isStreaming': true},
+      );
+      // #endregion
 
-      // Clear the chat reference
-      if (_activeChat != null) {
-        try {
-          _activeChat = null;
-        } catch (e) {
-          debugPrint('ModelOrchestrator: error clearing active chat: $e');
-        }
-      }
+      return;
+    }
 
-      // Wait for any ongoing stream iteration to finish
-      if (_isStreaming) {
-        debugPrint('Waiting for active stream to finish...');
-        final deadline = DateTime.now().add(const Duration(seconds: 3));
-        while (_isStreaming && DateTime.now().isBefore(deadline)) {
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-        }
-        if (_isStreaming) {
-          debugPrint('Stream did not finish in time, forcing release');
-        }
-      }
+    _isReleasing = true;
+    _releaseCompleter = Completer<void>();
+    final releaseStarted = DateTime.now().millisecondsSinceEpoch;
+    _pendingIdleRelease = false;
 
-      // Now close the model
+    // #region agent log
+    await AgentDebugLog.log(
+      hypothesisId: 'H6',
+      location: 'model_orchestrator.dart:_releaseIdleResources:start',
+      message: 'Idle release started',
+      data: {
+        'activeModelType': _activeModelType?.name,
+        'hasActiveModel': _activeModel != null,
+        'flutterHasActive': FlutterGemma.hasActiveModel(),
+      },
+    );
+    // #endregion
+
+    try {
+      _activeChat = null;
+
       if (_activeModel != null) {
         try {
           await _activeModel!.close();
@@ -286,19 +362,49 @@ class ModelOrchestrator {
         }
       }
       _activeModel = null;
+      _activeModelType = null;
       _activeModelSupportsImage = false;
+      await _clearActiveInferenceIdentity();
+
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H6',
+        location: 'model_orchestrator.dart:_releaseIdleResources:done',
+        message: 'Idle release finished',
+        data: {
+          'elapsedMs': DateTime.now().millisecondsSinceEpoch - releaseStarted,
+          'flutterHasActive': FlutterGemma.hasActiveModel(),
+        },
+      );
+      // #endregion
 
       _statusController.add('Idle — model released to save battery');
     } catch (e) {
       debugPrint('Error releasing idle resources: $e');
     } finally {
       _isReleasing = false;
-      _releaseCompleter?.complete();
+      if (_releaseCompleter != null && !_releaseCompleter!.isCompleted) {
+        _releaseCompleter!.complete();
+      }
       _releaseCompleter = null;
     }
   }
 
   Future<void> releaseIdleResources() => _releaseIdleResources();
+
+  /// Called from the stream `finally` block to finish deferred teardown.
+  void _onStreamEnded() {
+    if (_pendingModelTeardown) {
+      _pendingModelTeardown = false;
+      _teardownActiveModel(keepIfSameType: _preferredModelOverride);
+    }
+    if (_pendingIdleRelease) {
+      _pendingIdleRelease = false;
+      unawaited(_releaseIdleResources());
+    } else {
+      _resetIdleTimer();
+    }
+  }
 
   Future<void> prefetchModels() async {
     _statusController.add('Checking models...');
@@ -400,7 +506,10 @@ class ModelOrchestrator {
       await _releaseCompleter?.future;
     }
 
-    final needsImageSupport = model.hasVision && screenshot != null;
+    // Vision models must always load with vision enabled. Lazy enablement
+    // (only when screenshot != null) left the engine at max_num_images:0;
+    // flutter_gemma's singleton then ignored a later supportImage:true.
+    final needsImageSupport = model.hasVision;
 
     // Return cached model if same type AND image support setting matches
     if (_activeModel != null &&
@@ -411,12 +520,8 @@ class ModelOrchestrator {
 
     // --- Switching / Loading new model ---
     // Close any previous model and clear flutter_gemma's active identity.
-    // We must ALWAYS do this when loading a new model because:
-    // 1. On restart, _activeModelType is null but flutter_gemma may have a
-    //    cached model from a prior session (wrong type for what we need)
-    // 2. flutter_gemma.getActiveModel() returns whatever is cached internally
-    //    — if it's a different model type, we get wrong behavior
-    // Clearing ensures getActiveModel() loads the correct model fresh.
+    // Always clear when vision flag or model type changes — singleton reuse
+    // otherwise keeps a non-vision engine.
     if (_activeModel != null) {
       try {
         await _activeModel!.close();
@@ -427,16 +532,13 @@ class ModelOrchestrator {
       _activeChat = null;
     }
 
-    // Clear flutter_gemma's internal state if we might have a different model cached
-    // This ensures getActiveModel() loads the correct model fresh
+    // Clear flutter_gemma's internal state whenever we need a fresh engine
+    // (different model OR vision support mismatch).
     if (FlutterGemma.hasActiveModel()) {
-      // If we're loading a different model type, clear first
-      if (_activeModelType != model) {
-        try {
-          await FlutterGemma.clearActiveInferenceIdentity();
-        } catch (e) {
-          debugPrint('Error clearing active identity: $e');
-        }
+      try {
+        await FlutterGemma.clearActiveInferenceIdentity();
+      } catch (e) {
+        debugPrint('Error clearing active identity: $e');
       }
     }
 
@@ -447,6 +549,21 @@ class ModelOrchestrator {
     final existsOnDisk = await ModelManager.instance.isInstalledOnDisk(
       fileName,
     );
+    final prefsInstalled = ModelManager.instance.isModelInstalled(fileName);
+
+    // #region agent log
+    await AgentDebugLog.log(
+      hypothesisId: 'H2-H4',
+      location: 'model_orchestrator.dart:_getOrCreateModel:check',
+      message: 'Model availability check before load',
+      data: {
+        'model': model.name,
+        'fileName': fileName,
+        'existsOnDisk': existsOnDisk,
+        'prefsInstalled': prefsInstalled,
+      },
+    );
+    // #endregion
 
     if (existsOnDisk) {
       _statusController.add(
@@ -469,8 +586,10 @@ class ModelOrchestrator {
           _statusController.add('Loading ${model.displayName}...');
           _activeModel = await FlutterGemma.getActiveModel(
             maxTokens: _tokenLimitFor(model),
-            preferredBackend: PreferredBackend.gpu,
+            preferredBackend: PlatformAdaptationService.instance
+                .preferredBackendFor(model),
             supportImage: supportImage,
+            maxNumImages: supportImage ? 1 : null,
           ).timeout(const Duration(seconds: 30));
           _activeModelType = model;
           _activeModelSupportsImage = supportImage;
@@ -537,8 +656,10 @@ class ModelOrchestrator {
       _statusController.add('Loading ${model.displayName}...');
       _activeModel = await FlutterGemma.getActiveModel(
         maxTokens: _tokenLimitFor(model),
-        preferredBackend: PreferredBackend.gpu,
+        preferredBackend: PlatformAdaptationService.instance
+            .preferredBackendFor(model),
         supportImage: supportImage,
+        maxNumImages: supportImage ? 1 : null,
       ).timeout(const Duration(seconds: 30));
       _activeModelType = model;
       _activeModelSupportsImage = supportImage;
@@ -685,14 +806,27 @@ class ModelOrchestrator {
         fileSizeBytes: fileSize,
       );
 
-      // Load the model
-      final needsImageSupport = customModel.hasVision && screenshot != null;
+      // Load the model — vision customs always enable image support
+      final needsImageSupport = customModel.hasVision;
       _statusController.add('Loading ${customModel.displayName}...');
+      if (FlutterGemma.hasActiveModel()) {
+        try {
+          await FlutterGemma.clearActiveInferenceIdentity();
+        } catch (_) {}
+      }
       inferenceModel = await FlutterGemma.getActiveModel(
         maxTokens: 4096,
         preferredBackend: PreferredBackend.gpu,
         supportImage: needsImageSupport,
+        maxNumImages: needsImageSupport ? 1 : null,
       ).timeout(const Duration(seconds: 60));
+
+      // Track so idle release / model switch can unload it
+      _activeModel = inferenceModel;
+      _activeModelType = null;
+      _activeModelSupportsImage = needsImageSupport;
+      _isInitialized = true;
+      _resetIdleTimer();
 
       _statusController.add('${customModel.displayName} ready');
     } on TimeoutException {
@@ -734,12 +868,14 @@ class ModelOrchestrator {
     final chat = await inferenceModel.createChat(
       systemInstruction: buffer.toString(),
       tools: tools,
-      supportImage: customModel.hasVision,
+      supportImage: customModel.hasVision && _activeModelSupportsImage,
     );
 
     // Add the user message
     final Message message;
-    if (screenshot != null && customModel.hasVision) {
+    if (screenshot != null &&
+        screenshot.isNotEmpty &&
+        _activeModelSupportsImage) {
       message = Message.withImage(
         text: query,
         imageBytes: screenshot,
@@ -761,103 +897,120 @@ class ModelOrchestrator {
     int toolRounds = 0;
     final List<Map<String, dynamic>> allToolCalls = [];
 
-    while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
-      hasPendingToolCalls = false;
-      toolRounds++;
+    _isStreaming = true;
+    _streamingCompleter = Completer<void>();
+    try {
+      while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
+        hasPendingToolCalls = false;
+        toolRounds++;
 
-      await for (final event in chat.generateChatResponseAsync()) {
-        if (event is TextResponse) {
-          final token = event.token;
-          fullResponse += token;
-          textBuffer.write(token);
-
-          final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
-          if (parsedCalls != null && parsedCalls.isNotEmpty) {
-            final toolText = textBuffer.toString();
-            final idx = fullResponse.lastIndexOf(toolText);
-            if (idx >= 0) {
-              fullResponse =
-                  fullResponse.substring(0, idx) +
-                  fullResponse.substring(idx + toolText.length);
-            }
-            textBuffer.clear();
-
-            for (final parsed in parsedCalls) {
-              final toolName = parsed['name'] as String;
-              final toolArgs = Map<String, dynamic>.from(parsed['args'] as Map);
-              _statusController.add('Executing $toolName...');
-
-              allToolCalls.add({
-                'name': toolName,
-                'args': toolArgs,
-                'status': 'executing',
-              });
-
-              ExternalToolResult? mcpResult;
-              if (McpService.instance.getTool(toolName) != null) {
-                mcpResult = await McpService.instance.executeTool(
-                  toolName,
-                  toolArgs,
-                );
-              }
-
-              final Map<String, dynamic> toolResult;
-              if (mcpResult != null) {
-                toolResult = mcpResult.toJson();
-              } else {
-                toolResult = await ToolExecutorService.instance.executeTool(
-                  toolName,
-                  toolArgs,
-                );
-              }
-
-              allToolCalls.add({
-                'name': toolName,
-                'args': toolArgs,
-                'result': toolResult,
-                'status': 'completed',
-              });
-
-              hasPendingToolCalls = true;
-            }
+        await for (final event in chat.generateChatResponseAsync()) {
+          if (_streamingCompleter?.isCompleted ?? false) {
+            debugPrint('Custom model stream aborted');
+            break;
           }
+          if (event is TextResponse) {
+            final token = event.token;
+            fullResponse += token;
+            textBuffer.write(token);
 
-          yield InferenceResult(
-            text: fullResponse,
-            model: selector.primaryHeavy,
-            isStreaming: true,
-            thinking: currentThinking,
-            toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
-            inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
-          );
-        } else if (event is ThinkingResponse) {
-          currentThinking = event.content;
-          yield InferenceResult(
-            text: fullResponse,
-            model: selector.primaryHeavy,
-            isStreaming: true,
-            thinking: currentThinking,
-            toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
-            inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
-          );
-        }
-      }
+            final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
+            if (parsedCalls != null && parsedCalls.isNotEmpty) {
+              final toolText = textBuffer.toString();
+              final idx = fullResponse.lastIndexOf(toolText);
+              if (idx >= 0) {
+                fullResponse =
+                    fullResponse.substring(0, idx) +
+                    fullResponse.substring(idx + toolText.length);
+              }
+              textBuffer.clear();
 
-      if (hasPendingToolCalls) {
-        final toolResultMessages = <Message>[];
-        for (final tc in allToolCalls.where(
-          (t) => t['status'] == 'completed' && t['result'] != null,
-        )) {
-          toolResultMessages.add(
-            Message.text(text: jsonEncode(tc['result']), isUser: true),
-          );
-        }
-        if (toolResultMessages.isNotEmpty) {
-          for (final msg in toolResultMessages) {
-            await chat.addQuery(msg);
+              for (final parsed in parsedCalls) {
+                final toolName = parsed['name'] as String;
+                final toolArgs = Map<String, dynamic>.from(
+                  parsed['args'] as Map,
+                );
+                _statusController.add('Executing $toolName...');
+
+                allToolCalls.add({
+                  'name': toolName,
+                  'args': toolArgs,
+                  'status': 'executing',
+                });
+
+                ExternalToolResult? mcpResult;
+                if (McpService.instance.getTool(toolName) != null) {
+                  mcpResult = await McpService.instance.executeTool(
+                    toolName,
+                    toolArgs,
+                  );
+                }
+
+                final Map<String, dynamic> toolResult;
+                if (mcpResult != null) {
+                  toolResult = mcpResult.toJson();
+                } else {
+                  toolResult = await ToolExecutorService.instance.executeTool(
+                    toolName,
+                    toolArgs,
+                  );
+                }
+
+                allToolCalls.add({
+                  'name': toolName,
+                  'args': toolArgs,
+                  'result': toolResult,
+                  'status': 'completed',
+                });
+
+                hasPendingToolCalls = true;
+              }
+            }
+
+            yield InferenceResult(
+              text: fullResponse,
+              model: selector.primaryHeavy,
+              isStreaming: true,
+              thinking: currentThinking,
+              toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+              inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+            );
+          } else if (event is ThinkingResponse) {
+            currentThinking = event.content;
+            yield InferenceResult(
+              text: fullResponse,
+              model: selector.primaryHeavy,
+              isStreaming: true,
+              thinking: currentThinking,
+              toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+              inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+            );
           }
         }
+
+        if (hasPendingToolCalls) {
+          final toolResultMessages = <Message>[];
+          for (final tc in allToolCalls.where(
+            (t) => t['status'] == 'completed' && t['result'] != null,
+          )) {
+            toolResultMessages.add(
+              Message.text(text: jsonEncode(tc['result']), isUser: true),
+            );
+          }
+          if (toolResultMessages.isNotEmpty) {
+            for (final msg in toolResultMessages) {
+              await chat.addQuery(msg);
+            }
+          }
+        }
       }
+    } finally {
+      _isStreaming = false;
+      if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+        _streamingCompleter!.complete();
+      }
+      _streamingCompleter = null;
+      _onStreamEnded();
     }
 
     inferenceStopwatch.stop();
@@ -886,11 +1039,8 @@ class ModelOrchestrator {
     // flutter_gemma_litertlm native libraries. Show a clear error message.
     yield InferenceResult(
       text:
-          'GGUF model support is not yet available.\n\n'
-          'The GGUF format requires additional integration work that is pending.\n\n'
-          'In the meantime, please use .litertlm or .task model formats.\n'
-          'You can convert GGUF models to supported formats or download\n'
-          'models in .litertlm/.task format from Hugging Face.',
+          'GGUF models are not supported for inference.\n\n'
+          'Please use a .litertlm or .task model instead.',
       model: selector.primaryHeavy,
       isStreaming: false,
     );
@@ -934,6 +1084,11 @@ class ModelOrchestrator {
       case NovaModel.gemma3_1b:
         return 2048;
       case NovaModel.gemma4E2b:
+        // Smaller KV on Android reduces RAM pressure (Poco F1 / mid-range).
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+          return 2048;
+        }
+
         return 4096;
     }
   }
@@ -1048,6 +1203,41 @@ class ModelOrchestrator {
     /// Useful for assistant mode where reliability is more important than speed.
     bool forcePrimaryModel = false,
   }) async* {
+    // Deterministic alarm shortcut: parse clock times and call set_alarm
+    // without relying on the on-device model to convert AM/PM.
+    final parsedAlarm = AlarmTimeParser.tryParse(query);
+    if (parsedAlarm != null) {
+      _statusController.add('Setting alarm...');
+      final result = await ToolExecutorService.instance.setAlarm(
+        parsedAlarm.hour,
+        parsedAlarm.minute,
+        'Nova alarm',
+      );
+      final ok = result['success'] == true;
+      final label =
+          '${parsedAlarm.hour.toString().padLeft(2, '0')}:'
+          '${parsedAlarm.minute.toString().padLeft(2, '0')}';
+      yield InferenceResult(
+        text: ok
+            ? 'Alarm set for $label.'
+            : 'Could not set the alarm: ${result['error'] ?? 'unknown error'}',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+        toolCalls: [
+          {
+            'name': 'set_alarm',
+            'args': {
+              'hour': parsedAlarm.hour,
+              'minute': parsedAlarm.minute,
+              'message': 'Nova alarm',
+            },
+            'result': result,
+          },
+        ],
+      );
+      return;
+    }
+
     // Check if there are image attachments that need vision processing
     final hasImageAttachments = attachments.any((att) {
       if (att.type != AttachedDataType.file) return false;
@@ -1163,13 +1353,15 @@ class ModelOrchestrator {
     _activeChat ??= await inferenceModel.createChat(
       systemInstruction: _systemPromptFor(model, ragContext, attachmentContext),
       tools: tools,
-      supportImage: model.hasVision,
+      supportImage: model.hasVision && _activeModelSupportsImage,
     );
 
     await _truncateContext(_activeChat!, model);
 
     final Message message;
-    if (screenshot != null) {
+    if (screenshot != null &&
+        screenshot.isNotEmpty &&
+        _activeModelSupportsImage) {
       message = Message.withImage(
         text: query,
         imageBytes: screenshot,
@@ -1301,6 +1493,7 @@ class ModelOrchestrator {
         _streamingCompleter!.complete();
       }
       _streamingCompleter = null;
+      _onStreamEnded();
     }
 
     if (toolRounds >= _maxToolRounds && hasPendingToolCalls) {
@@ -1523,12 +1716,34 @@ class ModelOrchestrator {
     }
 
     if (toolName == 'take_screenshot') {
+      // Prefer the dedicated screenshot channel (returns Uint8List directly).
+      // Tool MethodChannel maps drop/corrupt large ByteArray payloads.
+      await ScreenshotService.instance.requestCapture();
+      Uint8List? imageBytes = await ScreenshotService.instance
+          .getLatestScreenshot();
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H12',
+        location: 'model_orchestrator.dart:_sendToolResponse',
+        message: 'take_screenshot after requestCapture+getLatest',
+        data: {
+          'toolSuccess': toolResult['success'],
+          'toolHasScreenshot': toolResult['hasScreenshot'],
+          'toolBytes': toolResult['bytes'],
+          'channelBytes': imageBytes?.length ?? 0,
+          'supportsImage': _activeModelSupportsImage,
+        },
+        runId: 'post-fix',
+      );
+      // #endregion
+
       final data = toolResult['data'];
-      Uint8List? imageBytes;
-      if (data is Uint8List) {
-        imageBytes = data;
-      } else if (data is List<int>) {
-        imageBytes = Uint8List.fromList(data);
+      if ((imageBytes == null || imageBytes.isEmpty) && data != null) {
+        if (data is Uint8List) {
+          imageBytes = data;
+        } else if (data is List<int>) {
+          imageBytes = Uint8List.fromList(data);
+        }
       }
 
       if (imageBytes != null &&
@@ -1540,15 +1755,26 @@ class ModelOrchestrator {
           isUser: true,
         );
         await _activeChat!.addQuery(imageMessage);
+        // #region agent log
+        await AgentDebugLog.log(
+          hypothesisId: 'H8',
+          location: 'model_orchestrator.dart:_sendToolResponse',
+          message: 'vision image attached to chat',
+          data: {'imageBytes': imageBytes.length},
+          runId: 'post-fix',
+        );
+        // #endregion
       }
 
       final toolResponseMessage = Message.toolResponse(
         toolName: toolName,
         response: {
-          'success': toolResult['success'] ?? false,
-          if (imageBytes != null && _activeModelSupportsImage)
+          'success': imageBytes != null && imageBytes.isNotEmpty,
+          if (imageBytes != null &&
+              imageBytes.isNotEmpty &&
+              _activeModelSupportsImage)
             'message': 'Screenshot captured and displayed above'
-          else if (imageBytes != null)
+          else if (imageBytes != null && imageBytes.isNotEmpty)
             'message':
                 'Screenshot captured, but the current model cannot process images'
           else
@@ -1665,12 +1891,23 @@ class ModelOrchestrator {
     }
     _activeModel = null;
     _activeChat = null;
+    _activeModelType = null;
     _activeModelSupportsImage = false;
     _isInitialized = false;
     _idleTimer?.cancel();
     _idleTimer = null;
+    await _clearActiveInferenceIdentity();
     await _statusController.close();
     await _historyClearedController.close();
+  }
+
+  Future<void> _clearActiveInferenceIdentity() async {
+    if (!FlutterGemma.hasActiveModel()) return;
+    try {
+      await FlutterGemma.clearActiveInferenceIdentity();
+    } catch (e) {
+      debugPrint('Error clearing active inference identity: $e');
+    }
   }
 
   /// Initialize settings without loading any model.

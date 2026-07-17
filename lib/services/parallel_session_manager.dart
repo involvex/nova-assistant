@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/services/platform_adaptation_service.dart';
 import 'package:uuid/uuid.dart';
 
 /// A single chat session with its own history
@@ -74,12 +76,15 @@ class ParallelSessionManager {
       _instance ??= ParallelSessionManager._();
   ParallelSessionManager._();
 
-  static const _maxConcurrentSessions = 3;
   static const _uuid = Uuid();
 
   final Map<String, ChatSession> _sessions = {};
+  final Set<String> _streamingSessionIds = {};
   final _sessionsController = StreamController<List<ChatSession>>.broadcast();
   Stream<List<ChatSession>> get sessionsStream => _sessionsController.stream;
+
+  int get _maxConcurrentSessions =>
+      PlatformAdaptationService.instance.maxParallelSessions;
 
   /// Get all active sessions
   List<ChatSession> get sessions => List.unmodifiable(_sessions.values);
@@ -112,6 +117,7 @@ class ParallelSessionManager {
       final chat = await inferenceModel.createChat(
         systemInstruction: systemInstruction,
         tools: tools,
+        supportImage: model.hasVision,
       );
 
       final session = ChatSession(
@@ -151,8 +157,8 @@ class ParallelSessionManager {
     // Update last active time
     session.lastActiveAt = DateTime.now();
 
-    // Create the message
-    final message = screenshot != null
+    // Create the message — only attach image when the model has vision
+    final message = screenshot != null && session.model.hasVision
         ? Message.withImage(text: query, imageBytes: screenshot, isUser: true)
         : Message.text(text: query, isUser: true);
 
@@ -161,33 +167,38 @@ class ParallelSessionManager {
     String fullResponse = '';
     String? currentThinking;
 
-    await for (final event in session.chat.generateChatResponseAsync()) {
-      if (event is TextResponse) {
-        fullResponse += event.token;
-        yield ParallelInferenceResult(
-          sessionId: sessionId,
-          text: fullResponse,
-          model: session.model,
-          isStreaming: true,
-          thinking: currentThinking,
-        );
-      } else if (event is ThinkingResponse) {
-        currentThinking = event.content;
-        yield ParallelInferenceResult(
-          sessionId: sessionId,
-          text: fullResponse,
-          model: session.model,
-          isStreaming: true,
-          thinking: currentThinking,
-        );
-      } else if (event is FunctionCallResponse) {
-        // Handle function calls (simplified - in production, use ToolExecutorService)
-        final toolResponse = Message.toolResponse(
-          toolName: event.name,
-          response: {'status': 'executed'},
-        );
-        await session.chat.addQuery(toolResponse);
+    _streamingSessionIds.add(sessionId);
+    try {
+      await for (final event in session.chat.generateChatResponseAsync()) {
+        if (event is TextResponse) {
+          fullResponse += event.token;
+          yield ParallelInferenceResult(
+            sessionId: sessionId,
+            text: fullResponse,
+            model: session.model,
+            isStreaming: true,
+            thinking: currentThinking,
+          );
+        } else if (event is ThinkingResponse) {
+          currentThinking = event.content;
+          yield ParallelInferenceResult(
+            sessionId: sessionId,
+            text: fullResponse,
+            model: session.model,
+            isStreaming: true,
+            thinking: currentThinking,
+          );
+        } else if (event is FunctionCallResponse) {
+          // Handle function calls (simplified - in production, use ToolExecutorService)
+          final toolResponse = Message.toolResponse(
+            toolName: event.name,
+            response: {'status': 'executed'},
+          );
+          await session.chat.addQuery(toolResponse);
+        }
       }
+    } finally {
+      _streamingSessionIds.remove(sessionId);
     }
 
     yield ParallelInferenceResult(
@@ -204,6 +215,30 @@ class ParallelSessionManager {
     final session = _sessions[sessionId];
     if (session == null) return;
 
+    if (_streamingSessionIds.contains(sessionId)) {
+      debugPrint(
+        'ParallelSessionManager: Deferring close of streaming session $sessionId',
+      );
+      try {
+        await session.chat.stopGeneration();
+      } catch (e) {
+        debugPrint('ParallelSessionManager: stopGeneration failed: $e');
+      }
+      // Wait briefly for stream finally to clear the flag, then close.
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (_streamingSessionIds.contains(sessionId) &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      if (_streamingSessionIds.contains(sessionId)) {
+        debugPrint(
+          'ParallelSessionManager: Refusing to close still-streaming session',
+        );
+
+        return;
+      }
+    }
+
     try {
       await session.chat.close();
       session.isActive = false;
@@ -215,15 +250,21 @@ class ParallelSessionManager {
 
   /// Close all sessions
   Future<void> closeAllSessions() async {
-    for (final session in _sessions.values) {
-      try {
-        await session.chat.close();
-        session.isActive = false;
-      } catch (e) {
-        debugPrint('ParallelSessionManager: Error closing session: $e');
-      }
+    final ids = _sessions.keys.toList();
+    for (final id in ids) {
+      await closeSession(id);
     }
     _notifyListeners();
+    // Release the shared orchestrator model when no sessions remain.
+    try {
+      if (!ModelOrchestrator.instance.isStreaming) {
+        await ModelOrchestrator.instance.releaseIdleResources();
+      }
+    } catch (e) {
+      debugPrint(
+        'ParallelSessionManager: Error releasing orchestrator resources: $e',
+      );
+    }
   }
 
   /// Remove a closed session
@@ -255,6 +296,8 @@ class ParallelSessionManager {
       return await FlutterGemma.getActiveModel(
         maxTokens: _tokenLimitFor(model),
         preferredBackend: PreferredBackend.gpu,
+        supportImage: model.hasVision,
+        maxNumImages: model.hasVision ? 1 : null,
       );
     } catch (e) {
       debugPrint('ParallelSessionManager: Failed to get model: $e');
@@ -271,6 +314,10 @@ class ParallelSessionManager {
       case NovaModel.gemma3_1b:
         return 2048;
       case NovaModel.gemma4E2b:
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+          return 2048;
+        }
+
         return 4096;
     }
   }

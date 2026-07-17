@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/utils/agent_debug_log.dart';
 
 class InstalledModel {
   final String id;
@@ -118,6 +119,19 @@ class ModelManager {
       final uri = Uri.parse(url);
       final fileName = p.basename(uri.path);
 
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H1-H3',
+        location: 'model_manager.dart:installFromNetwork:start',
+        message: 'installFromNetwork started',
+        data: {
+          'url': url,
+          'fileName': fileName,
+          'modelType': modelType.name,
+        },
+      );
+      // #endregion
+
       final dir = await getApplicationDocumentsDirectory();
       final fileOnDisk = File('${dir.path}/$fileName');
       final modelsDir = Directory('${dir.path}/models');
@@ -135,25 +149,53 @@ class ModelManager {
       }
 
       if (foundOnDisk) {
-        final spec = await _findInstalledSpec(fileName);
-        final actualName = spec?['name'] as String? ?? fileName;
+        final modelPath = await _findModelFile(fileName) ?? fileOnDisk.path;
+        final fileSize = await File(modelPath).length();
         final canonicalName =
-            _findCanonicalName(actualName, modelType) ?? actualName;
+            _findCanonicalName(fileName, modelType) ?? fileName;
+
+        // #region agent log
+        await AgentDebugLog.log(
+          hypothesisId: 'H1',
+          location: 'model_manager.dart:installFromNetwork:foundOnDisk',
+          message: 'Early disk path with deferInstall=true',
+          data: {
+            'modelPath': modelPath,
+            'fileSize': fileSize,
+            'canonicalName': canonicalName,
+            'fileOnDiskExists': await fileOnDisk.exists(),
+          },
+        );
+        // #endregion
+
+        onProgress?.call(90);
+        _statusController.add('Registering model found on disk...');
+        try {
+          await registerDiskModel(
+            filePath: modelPath,
+            fileName: canonicalName,
+            modelType: modelType,
+            fileType: fileType,
+            fileSizeBytes: fileSize,
+            deferInstall: true,
+          );
+        } catch (e) {
+          debugPrint('ModelManager: registerDiskModel on early disk path: $e');
+        }
+
         final model = InstalledModel(
           id: canonicalName,
           fileName: canonicalName,
           modelType: modelType,
           installedAt: DateTime.now(),
-          fileSizeBytes: await _getFileSize(dir.path, fileName),
+          fileSizeBytes: fileSize,
         );
         _installedModels.removeWhere(
-          (m) =>
-              m.fileName == canonicalName ||
-              m.fileName == actualName ||
-              m.fileName == fileName,
+          (m) => m.fileName == canonicalName || m.fileName == fileName,
         );
         _installedModels.add(model);
         await _saveToPrefs();
+        onProgress?.call(100);
         _statusController.add('Model found on disk: $canonicalName');
         return model;
       }
@@ -173,6 +215,14 @@ class ModelManager {
         }
         final response = await request.close();
 
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          _statusController.add(
+            'Download failed: HuggingFace auth required. '
+            'Add your HF token in Settings.',
+          );
+          return null;
+        }
+
         if (response.statusCode != 200) {
           _statusController.add('Download failed: HTTP ${response.statusCode}');
           return null;
@@ -186,7 +236,8 @@ class ModelManager {
           sink.add(chunk);
           receivedBytes += chunk.length;
           if (onProgress != null && totalBytes > 0) {
-            onProgress((receivedBytes * 100 ~/ totalBytes));
+            // Reserve 90–100% for install/registration
+            onProgress((receivedBytes * 90 ~/ totalBytes).clamp(0, 90));
           }
         }
         await sink.close();
@@ -204,37 +255,12 @@ class ModelManager {
           }
           return null;
         }
-
-        // NOTE: SHA-256 hash verification is disabled until real hashes are
-        // provided. The placeholder hashes in ModelHashes will cause all
-        // downloads to fail verification. To enable, replace with real hashes
-        // from HuggingFace model pages.
-        //
-        // final downloadModel = ModelHuggingFaceURLs.modelFromUrl(url);
-        // if (downloadModel != null) {
-        //   final expectedHash = ModelHashes.hashFor(downloadModel);
-        //   if (expectedHash != null) {
-        //     _statusController.add('Verifying ${downloadModel.displayName}...');
-        //     final isValid = await _verifySha256(
-        //       tempFile,
-        //       expectedHash,
-        //       onProgress:
-        //           onProgress != null ? (p) => onProgress(50 + (p ~/ 2)) : null,
-        //     );
-        //     if (!isValid) {
-        //       _statusController.add(
-        //         'File corrupted. Try downloading again or pick a file.',
-        //       );
-        //       try {
-        //         await tempFile.delete();
-        //       } catch (_) {}
-        //       return null;
-        //     }
-        //   }
-        // }
       } finally {
         client.close();
       }
+
+      onProgress?.call(92);
+      _statusController.add('Installing $fileName...');
 
       // Delegate to installFromFile — copies to docs dir, registers with
       // flutter_gemma, and renames to canonical filename.
@@ -242,8 +268,29 @@ class ModelManager {
         filePath: tempFile.path,
         modelType: modelType,
         fileType: fileType,
-        onProgress: onProgress,
+        onProgress: onProgress == null
+            ? null
+            : (p) => onProgress(92 + (p * 8 ~/ 100).clamp(0, 8)),
       );
+
+      if (installed != null) {
+        onProgress?.call(100);
+      }
+
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H3',
+        location: 'model_manager.dart:installFromNetwork:done',
+        message: 'installFromNetwork finished',
+        data: {
+          'success': installed != null,
+          'installedFileName': installed?.fileName,
+          'installedSize': installed?.fileSizeBytes,
+          'prefsCount': _installedModels.length,
+          'prefsNames': _installedModels.map((m) => m.fileName).toList(),
+        },
+      );
+      // #endregion
 
       // Clean up temp file
       try {
@@ -262,14 +309,6 @@ class ModelManager {
       debugPrint('ModelManager: installFromNetwork failed: $e');
       return null;
     }
-  }
-
-  Future<Map<String, dynamic>?> _findInstalledSpec(String fileName) async {
-    final path = await _findModelFile(fileName);
-    if (path != null) {
-      return {'name': p.basename(path)};
-    }
-    return null;
   }
 
   /// Find a model file on disk using consistent basename matching.
@@ -402,14 +441,6 @@ class ModelManager {
     return false;
   }
 
-  Future<int> _getFileSize(String dirPath, String fileName) async {
-    final path = await _findModelFile(fileName);
-    if (path != null) {
-      return await File(path).length();
-    }
-    return 0;
-  }
-
   Future<InstalledModel?> installFromFile({
     required String filePath,
     required ModelType modelType,
@@ -440,18 +471,37 @@ class ModelManager {
       final fileName = p.basename(filePath);
       final ext = p.extension(fileName).toLowerCase();
 
-      if (ext != '.litertlm' && ext != '.task' && ext != '.gguf') {
+      if (ext != '.litertlm' && ext != '.task') {
         _statusController.add(
-          'Unsupported format: $ext — only .litertlm, .task, and .gguf are supported',
+          'Unsupported format: $ext — only .litertlm and .task are supported',
         );
         return null;
       }
 
       final docsDir = await getApplicationDocumentsDirectory();
 
-      final specName = _deriveBaseName(fileName);
-      final canonicalName = _findCanonicalName(specName, modelType) ?? fileName;
+      final cleanedName = _stripTempDownloadPrefix(fileName);
+      final specName = _deriveBaseName(cleanedName);
+      final canonicalName =
+          _findCanonicalName(cleanedName, modelType) ??
+          _findCanonicalName(specName, modelType) ??
+          cleanedName;
       canonicalPath = '${docsDir.path}/$canonicalName';
+
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H2-H4',
+        location: 'model_manager.dart:installFromFile:canonical',
+        message: 'Resolved canonical install name',
+        data: {
+          'sourceFileName': fileName,
+          'cleanedName': cleanedName,
+          'canonicalName': canonicalName,
+          'modelType': modelType.name,
+        },
+        runId: 'post-fix',
+      );
+      // #endregion
 
       bool copied = false;
       if (!await File(canonicalPath).exists()) {
@@ -534,46 +584,17 @@ class ModelManager {
 
       if (ext != '.litertlm' && ext != '.task' && ext != '.gguf') {
         _statusController.add(
-          'Unsupported format: $ext — only .litertlm, .task, and .gguf are supported',
+          'Unsupported format: $ext — only .litertlm and .task are supported',
         );
         return null;
       }
 
-      // For GGUF files, don't try to register with flutter_gemma - just copy
-      if (ext == '.gguf' && isGguf) {
-        // Just copy the file, don't register with flutter_gemma
-        final documentsDir = await getApplicationDocumentsDirectory();
-        final modelsDir = Directory(p.join(documentsDir.path, 'models'));
-        if (!await modelsDir.exists()) {
-          await modelsDir.create(recursive: true);
-        }
-        final destPath = p.join(modelsDir.path, fileName);
-        await sourceFile.copy(destPath);
-
-        final fileSize = await File(destPath).length();
-
-        final customModel = CustomModel(
-          id: displayName,
-          displayName: displayName,
-          fileName: fileName,
-          modelType: modelType,
-          fileType: ModelFileType.binary,
-          hasVision: hasVision,
-          hasThinking: hasThinking,
-          supportsFunctionCalling: supportsFunctionCalling,
-          fileSizeBytes: fileSize,
-          installedAt: DateTime.now(),
-          isGguf: true,
+      // GGUF cannot be used for inference with flutter_gemma
+      if (ext == '.gguf' || isGguf) {
+        _statusController.add(
+          'GGUF is not supported for inference — use .litertlm or .task',
         );
-
-        _customModels.removeWhere(
-          (m) => m.id == displayName || m.fileName == fileName,
-        );
-        _customModels.add(customModel);
-        await _saveCustomModelsToPrefs();
-
-        _statusController.add('GGUF model installed: $displayName');
-        return customModel;
+        return null;
       }
 
       // Call installFromFile to copy and register with flutter_gemma
@@ -636,28 +657,63 @@ class ModelManager {
     return result;
   }
 
+  /// Strip temp download prefixes like `nova_download_<ms>_`.
+  static String _stripTempDownloadPrefix(String filename) {
+    return filename.replaceFirst(RegExp(r'^nova_download_\d+_'), '');
+  }
+
   /// Find the canonical filename for a model given its flutter_gemma spec name
-  /// and model type. Returns null if no match is found.
+  /// and model type.
+  ///
+  /// Matches exact names, and also temp download names that *contain* a known
+  /// catalog basename (e.g. `nova_download_123_gemma-4-E2B-it.litertlm`).
   String? _findCanonicalName(String specName, ModelType modelType) {
+    final rawBase = p.basename(specName);
+    final cleaned = _stripTempDownloadPrefix(rawBase);
+    final normalizedSpec = cleaned
+        .replaceAll('.litertlm', '')
+        .replaceAll('.task', '')
+        .toLowerCase();
+
+    // Pass 1: exact match (cleaned name)
     for (final model in NovaModel.values) {
-      if (model.modelType == modelType) {
-        final canonical = ModelHuggingFaceURLs.fileNameFor(model);
-        // Match by comparing normalized names (strip extensions and compare)
-        final normalizedSpec = specName
-            .replaceAll('.litertlm', '')
-            .replaceAll('.task', '')
-            .toLowerCase();
-        final normalizedCanonical = canonical
-            .replaceAll('.litertlm', '')
-            .replaceAll('.task', '')
-            .toLowerCase();
-        if (normalizedSpec == normalizedCanonical ||
-            normalizedSpec.contains(normalizedCanonical) ||
-            normalizedCanonical.contains(normalizedSpec)) {
-          return canonical;
-        }
+      if (model.modelType != modelType) continue;
+      final canonical = ModelHuggingFaceURLs.fileNameFor(model);
+      final normalizedCanonical = canonical
+          .replaceAll('.litertlm', '')
+          .replaceAll('.task', '')
+          .toLowerCase();
+      if (normalizedSpec == normalizedCanonical) {
+        return canonical;
       }
     }
+
+    // Pass 2: full filename with extension equals canonical
+    final withExt = cleaned.toLowerCase();
+    for (final model in NovaModel.values) {
+      if (model.modelType != modelType) continue;
+      final canonical = ModelHuggingFaceURLs.fileNameFor(model);
+      if (canonical.toLowerCase() == withExt) {
+        return canonical;
+      }
+    }
+
+    // Pass 3: temp/partial names that contain the catalog basename
+    // (safe: catalog names are specific; do NOT match reverse contains)
+    for (final model in NovaModel.values) {
+      if (model.modelType != modelType) continue;
+      final canonical = ModelHuggingFaceURLs.fileNameFor(model);
+      final normalizedCanonical = canonical
+          .replaceAll('.litertlm', '')
+          .replaceAll('.task', '')
+          .toLowerCase();
+      if (normalizedCanonical.isNotEmpty &&
+          (normalizedSpec.endsWith(normalizedCanonical) ||
+              normalizedSpec.contains(normalizedCanonical))) {
+        return canonical;
+      }
+    }
+
     return null;
   }
 
@@ -701,6 +757,9 @@ class ModelManager {
     final path = await _findModelFile(fileName);
     return path != null;
   }
+
+  /// Public path lookup for models already on disk.
+  Future<String?> findModelPath(String fileName) => _findModelFile(fileName);
 
   bool isCustomModelInstalled(String fileName) {
     return _customModels.any((m) => m.fileName == fileName);
@@ -873,9 +932,12 @@ class ModelManager {
     return issues;
   }
 
-  /// Repair installed models list by removing entries for missing files.
+  /// Repair installed models list by removing entries for missing files,
+  /// and renaming leftover `nova_download_*` files to catalog names.
   /// Returns number of entries removed.
   Future<int> repairInstalledModels() async {
+    await _repairMisnamedTempDownloads();
+
     int removed = 0;
     final toRemove = <InstalledModel>[];
 
@@ -898,6 +960,79 @@ class ModelManager {
     }
 
     return removed;
+  }
+
+  /// Rename files like `nova_download_<ms>_gemma-4-E2B-it.litertlm` to the
+  /// catalog name and fix prefs so the orchestrator can find them.
+  Future<void> _repairMisnamedTempDownloads() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final docs = Directory(dir.path);
+      if (!await docs.exists()) return;
+
+      final entities = await docs.list().toList();
+      for (final entity in entities) {
+        if (entity is! File) continue;
+        final name = p.basename(entity.path);
+        if (!name.startsWith('nova_download_')) continue;
+        if (!name.endsWith('.litertlm') && !name.endsWith('.task')) continue;
+
+        final cleaned = _stripTempDownloadPrefix(name);
+        ModelType? matchedType;
+        String? canonical;
+        for (final model in NovaModel.values) {
+          final candidate = ModelHuggingFaceURLs.fileNameFor(model);
+          final candidateBase = candidate
+              .replaceAll('.litertlm', '')
+              .replaceAll('.task', '')
+              .toLowerCase();
+          final cleanedLower = cleaned.toLowerCase();
+          if (cleanedLower == candidate.toLowerCase() ||
+              cleanedLower.contains(candidateBase)) {
+            matchedType = model.modelType;
+            canonical = candidate;
+            break;
+          }
+        }
+        if (canonical == null || matchedType == null) continue;
+
+        final dest = File(p.join(dir.path, canonical));
+        if (!await dest.exists()) {
+          await entity.rename(dest.path);
+          debugPrint('Repair: renamed $name → $canonical');
+        } else {
+          await entity.delete();
+          debugPrint('Repair: deleted duplicate temp file $name');
+        }
+
+        final size = await dest.length();
+        _installedModels.removeWhere(
+          (m) => m.fileName == name || m.fileName == canonical,
+        );
+        _installedModels.add(
+          InstalledModel(
+            id: canonical,
+            fileName: canonical,
+            modelType: matchedType,
+            installedAt: DateTime.now(),
+            fileSizeBytes: size,
+          ),
+        );
+        await _saveToPrefs();
+
+        // #region agent log
+        await AgentDebugLog.log(
+          hypothesisId: 'H2-H4',
+          location: 'model_manager.dart:_repairMisnamedTempDownloads',
+          message: 'Repaired misnamed temp download',
+          data: {'from': name, 'to': canonical, 'size': size},
+          runId: 'post-fix',
+        );
+        // #endregion
+      }
+    } catch (e) {
+      debugPrint('ModelManager: _repairMisnamedTempDownloads failed: $e');
+    }
   }
 
   /// Get detailed info about all model files on disk (for debugging).

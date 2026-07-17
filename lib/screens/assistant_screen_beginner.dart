@@ -369,7 +369,7 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
             runSpacing: 10,
             alignment: WrapAlignment.center,
             children: [
-              _quickChip('Set an alarm for 7 AM'),
+              _quickChip('Set an alarm for 7:00 PM'),
               _quickChip('What time is it?'),
               _quickChip('Call mom'),
               _quickChip('Remind me to drink water'),

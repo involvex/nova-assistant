@@ -39,7 +39,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['litertlm', 'task', 'gguf'],
+        allowedExtensions: ['litertlm', 'task'],
       );
 
       if (result != null && result.files.isNotEmpty) {
@@ -54,6 +54,16 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
 
         final fileSize = file.size;
         final ext = p.extension(file.name).toLowerCase();
+
+        if (ext == '.gguf') {
+          setState(
+            () => _fileError =
+                'GGUF is not supported for inference. '
+                'Use .litertlm or .task models instead.',
+          );
+
+          return;
+        }
 
         // Validate file
         if (fileSize < 1024 * 1024) {
@@ -73,7 +83,6 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
         autoName = autoName
             .replaceAll('.litertlm', '')
             .replaceAll('.task', '')
-            .replaceAll('.gguf', '')
             .replaceAll('-', ' ')
             .replaceAll('_', ' ')
             .split(' ')
@@ -129,11 +138,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
 
       final fileType = _fileExtension == '.task'
           ? ModelFileType.task
-          : _fileExtension == '.gguf'
-          ? ModelFileType.binary
           : ModelFileType.litertlm;
-
-      final isGguf = _fileExtension == '.gguf';
 
       final customModel = await ModelManager.instance.installCustomModel(
         filePath: _selectedFilePath!,
@@ -143,7 +148,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
         hasVision: _hasVision,
         hasThinking: _hasThinking,
         supportsFunctionCalling: _supportsFunctionCalling,
-        isGguf: isGguf,
+        isGguf: false,
         onProgress: (progress) {
           if (mounted) {
             setState(() => _status = 'Installing: $progress%');
@@ -295,7 +300,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
                           Icon(Icons.upload_file, color: Colors.grey.shade500),
                           const SizedBox(width: 8),
                           Text(
-                            'Select .litertlm, .task, or .gguf file',
+                            'Select .litertlm or .task file',
                             style: TextStyle(color: Colors.grey.shade500),
                           ),
                         ],
@@ -309,6 +314,12 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
                 style: TextStyle(color: Colors.red.shade400, fontSize: 12),
               ),
             ],
+            const SizedBox(height: 8),
+            Text(
+              'Only .litertlm and .task formats are supported for inference. '
+              'GGUF files cannot be run in this app.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+            ),
             const SizedBox(height: 20),
 
             // Model name

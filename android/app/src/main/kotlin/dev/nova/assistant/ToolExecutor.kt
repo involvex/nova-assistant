@@ -93,8 +93,10 @@ object ToolExecutor {
     }
 
     private fun setAlarm(context: Context, args: Map<*, *>): Map<String, Any> {
-        val hour = args["hour"] as? Int ?: throw IllegalArgumentException("hour required")
-        val minute = args["minute"] as? Int ?: throw IllegalArgumentException("minute required")
+        val hour = (args["hour"] as? Number)?.toInt()
+            ?: throw IllegalArgumentException("hour required")
+        val minute = (args["minute"] as? Number)?.toInt()
+            ?: throw IllegalArgumentException("minute required")
         val message = args["message"] as? String ?: "Alarm"
 
         sendProgress("set_alarm", "executing", 0.5, "Setting alarm for $hour:$minute...")
@@ -111,8 +113,10 @@ object ToolExecutor {
     }
 
     private fun cancelAlarm(context: Context, args: Map<*, *>): Map<String, Any> {
-        val hour = args["hour"] as? Int ?: throw IllegalArgumentException("hour required")
-        val minute = args["minute"] as? Int ?: throw IllegalArgumentException("minute required")
+        val hour = (args["hour"] as? Number)?.toInt()
+            ?: throw IllegalArgumentException("hour required")
+        val minute = (args["minute"] as? Number)?.toInt()
+            ?: throw IllegalArgumentException("minute required")
 
         val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
             putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_TIME)
@@ -195,13 +199,19 @@ object ToolExecutor {
     }
 
     private fun takeScreenshot(): Map<String, Any> {
+        // Do NOT embed image bytes in this MethodChannel map — large ByteArray
+        // payloads are unreliable here. Flutter fetches via ScreenshotService.
         val frame = AssistantActivity.latestScreenshot
+            ?: ScreenCaptureHelper.latestFrame
         return buildMap {
             put("success", frame != null)
             put("hasScreenshot", frame != null)
             put("bytes", frame?.size ?: 0)
-            if (frame != null) {
-                put("data", frame)
+            if (frame == null) {
+                put(
+                    "error",
+                    "No screenshot available. Use assistant mode or attach a screenshot first.",
+                )
             }
         }
     }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:nova_assistant/utils/agent_debug_log.dart';
 
 enum McpTransport { httpSse, stdio }
 
@@ -77,11 +78,28 @@ class McpClient {
   int _requestId = 0;
   final _pendingRequests = <int, Completer<dynamic>>{};
   StreamSubscription<String>? _stdoutSub;
+  String? lastError;
 
   McpClient(this.config);
 
   Future<bool> connect() async {
+    lastError = null;
     try {
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H5',
+        location: 'mcp_client.dart:connect:start',
+        message: 'MCP connect attempt',
+        data: {
+          'name': config.name,
+          'url': config.url,
+          'transport': config.transport.name,
+          'hasCommand': config.command != null,
+          'command': config.command,
+          'hasAuth': config.authToken != null && config.authToken!.isNotEmpty,
+        },
+      );
+      // #endregion
       if (config.transport == McpTransport.stdio) {
         return await _connectStdio();
       } else {
@@ -89,6 +107,15 @@ class McpClient {
       }
     } catch (e) {
       config.connected = false;
+      lastError = e.toString();
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H5',
+        location: 'mcp_client.dart:connect:error',
+        message: 'MCP connect threw',
+        data: {'name': config.name, 'error': e.toString()},
+      );
+      // #endregion
       return false;
     }
   }
@@ -141,6 +168,29 @@ class McpClient {
     }
     request.headers.set('Accept', 'text/event-stream');
     final response = await request.close();
+
+    // #region agent log
+    await AgentDebugLog.log(
+      hypothesisId: 'H5',
+      location: 'mcp_client.dart:_connectHttpSse:response',
+      message: 'MCP HTTP/SSE response',
+      data: {
+        'url': config.url,
+        'statusCode': response.statusCode,
+        'contentType': response.headers.contentType?.toString(),
+      },
+    );
+    // #endregion
+
+    if (response.statusCode == 405 || response.statusCode == 404) {
+      lastError =
+          'This MCP server does not support legacy HTTP/SSE (got HTTP '
+          '${response.statusCode}). Have I Been Pwned and similar servers use '
+          'Streamable HTTP + OAuth, which Nova does not support yet. '
+          'Use an SSE-compatible MCP endpoint, or a local stdio server with Node.';
+      config.connected = false;
+      return false;
+    }
 
     if (response.statusCode == 200) {
       config.connected = true;

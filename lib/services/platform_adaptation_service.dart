@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
 
 /// Platform-specific feature capabilities
@@ -33,13 +34,17 @@ class PlatformCapabilities {
       );
     }
 
+    // Cap parallel sessions on Android — multiple chats × large KV is unsafe
+    // on mid/low-RAM devices (e.g. Poco F1).
+    final parallelOk = defaultTargetPlatform != TargetPlatform.android;
+
     // Native platforms (Android, iOS, macOS, Windows, Linux)
-    return const PlatformCapabilities(
+    return PlatformCapabilities(
       supportsVision: true,
       supportsThinking: true,
       supportsFunctionCalling: true,
       supportsStreaming: true,
-      supportsParallelSessions: true,
+      supportsParallelSessions: parallelOk,
       platformName: 'native',
     );
   }
@@ -257,6 +262,15 @@ class PlatformAdaptationService {
     return 'gpu'; // Prefer GPU on native too
   }
 
+  /// Prefer GPU; large models still use GPU but emit a memory warning via
+  /// [getMemoryWarning]. (CPU is available as a future low-RAM fallback.)
+  PreferredBackend preferredBackendFor(NovaModel model) {
+    if (kIsWeb) return PreferredBackend.gpu;
+    // Keep GPU for quality/latency; RAM is controlled by idle unload +
+    // clearActiveInferenceIdentity rather than forcing CPU here.
+    return PreferredBackend.gpu;
+  }
+
   /// Get memory warning for large models
   String? getMemoryWarning(NovaModel model) {
     if (kIsWeb) {
@@ -266,11 +280,20 @@ class PlatformAdaptationService {
       }
     }
 
-    if (model.sizeMB > 4000) {
-      return 'Large models require significant RAM. '
-          'Ensure your device has enough free memory.';
+    if (model.sizeMB >= 2000) {
+      return 'This model needs ~${model.sizeMB} MB on disk plus GPU runtime '
+          'memory. On devices with ≤6 GB RAM (e.g. mid-range phones), prefer '
+          'SmolLM or Gemma 3 1B for soak testing to avoid system LMK killing '
+          'other apps. Close background apps before loading.';
     }
 
     return null;
+  }
+
+  /// Max parallel chat sessions for the current platform.
+  int get maxParallelSessions {
+    if (!_capabilities.supportsParallelSessions) return 1;
+
+    return 3;
   }
 }

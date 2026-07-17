@@ -40,14 +40,22 @@ class NovaTools {
   static final Tool setAlarm = Tool(
     name: 'set_alarm',
     description:
-        'Set an alarm on the device. '
-        'Use this ONLY when the user explicitly asks to set, '
-        'create, or schedule an alarm or timer.',
+        'Set a device alarm. Call immediately when the user gives a time — '
+        'do not ask again for information already in the message. '
+        'Convert 12-hour times to 24-hour: 7 AM → hour=7, 7 PM → hour=19, '
+        'noon → 12, midnight → 0. If minutes are omitted, use minute=0. '
+        'Example: "set alarm for 7pm" → set_alarm(hour=19, minute=0).',
     parameters: {
       'type': 'object',
       'properties': {
-        'hour': {'type': 'integer', 'description': 'Hour (0-23)'},
-        'minute': {'type': 'integer', 'description': 'Minute (0-59)'},
+        'hour': {
+          'type': 'integer',
+          'description': 'Hour in 24-hour format (0-23). 7 AM=7, 7 PM=19.',
+        },
+        'minute': {
+          'type': 'integer',
+          'description': 'Minute (0-59). Default to 0 if the user did not specify minutes.',
+        },
         'message': {'type': 'string', 'description': 'Alarm label/message'},
       },
       'required': ['hour', 'minute'],

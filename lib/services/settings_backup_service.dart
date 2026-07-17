@@ -55,6 +55,10 @@ class SettingsBackupService {
           'batteryOptimization':
               prefs.getBool('settings_battery_optimization') ?? true,
           'keepModelWarm': prefs.getBool('settings_keep_model_warm') ?? true,
+          'highContext':
+              prefs.getBool('settings_high_context') ??
+              (kIsWeb || defaultTargetPlatform != TargetPlatform.android),
+          'autoCompact': prefs.getBool('settings_auto_compact') ?? true,
           'debugMode': prefs.getBool('settings_debug_mode') ?? false,
           'knowledgeBaseEnabled':
               prefs.getBool(KnowledgeBaseService.enabledPrefsKey) ?? true,
@@ -218,6 +222,15 @@ class SettingsBackupService {
     await prefs.setBool(
       'settings_keep_model_warm',
       assistant['keepModelWarm'] as bool? ?? true,
+    );
+    await prefs.setBool(
+      'settings_high_context',
+      assistant['highContext'] as bool? ??
+          (kIsWeb || defaultTargetPlatform != TargetPlatform.android),
+    );
+    await prefs.setBool(
+      'settings_auto_compact',
+      assistant['autoCompact'] as bool? ?? true,
     );
     await prefs.setBool(
       'settings_debug_mode',

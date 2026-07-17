@@ -146,6 +146,7 @@ class ModelOrchestrator {
   bool _batteryOptimizationEnabled = true;
   bool _keepModelWarm = true;
   bool _highContextEnabled = false;
+  bool _autoCompactEnabled = true;
   List<ChatMessage> _pendingReplay = const [];
   bool _debugMode = false;
   bool _isReleasing = false; // Guard against concurrent release operations
@@ -191,8 +192,20 @@ class ModelOrchestrator {
 
   bool get keepModelWarm => _keepModelWarm;
 
+  bool get highContextEnabled => _highContextEnabled;
+
+  bool get autoCompactEnabled => _autoCompactEnabled;
+
   void setKeepModelWarm(bool enabled) {
     _keepModelWarm = enabled;
+  }
+
+  void setHighContextEnabled(bool enabled) {
+    _highContextEnabled = enabled;
+  }
+
+  void setAutoCompactEnabled(bool enabled) {
+    _autoCompactEnabled = enabled;
   }
 
   void setPendingReplayMessages(List<ChatMessage> messages) {
@@ -302,6 +315,14 @@ class ModelOrchestrator {
   Future<void> _loadKeepModelWarm() async {
     final prefs = await SharedPreferences.getInstance();
     _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
+  }
+
+  Future<void> _loadContextBudgetSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    _highContextEnabled =
+        prefs.getBool('settings_high_context') ??
+        (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
+    _autoCompactEnabled = prefs.getBool('settings_auto_compact') ?? true;
   }
 
   void clearModelOverride() {
@@ -2350,6 +2371,7 @@ class ModelOrchestrator {
     await _loadAssistantRole();
     await _loadPreferredModel();
     await _loadKeepModelWarm();
+    await _loadContextBudgetSettings();
     await _loadIdentity();
     // NOTE: We deliberately do NOT load a model here.
     // Loading a 2.4GB model at startup causes memory/CPU exhaustion
@@ -2367,5 +2389,11 @@ class ModelOrchestrator {
     final roleName = prefs.getString('settings_assistant_role');
     _cachedRole = AssistantRole.fromString(roleName);
     _cachedIdentity = await IdentityService.getIdentity();
+    final orchestrator = instance;
+    orchestrator._highContextEnabled =
+        prefs.getBool('settings_high_context') ??
+        (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
+    orchestrator._autoCompactEnabled =
+        prefs.getBool('settings_auto_compact') ?? true;
   }
 }

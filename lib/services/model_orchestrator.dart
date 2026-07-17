@@ -145,6 +145,7 @@ class ModelOrchestrator {
   bool _isInitialized = false;
   bool _batteryOptimizationEnabled = true;
   bool _keepModelWarm = true;
+  bool _highContextEnabled = false;
   List<ChatMessage> _pendingReplay = const [];
   bool _debugMode = false;
   bool _isReleasing = false; // Guard against concurrent release operations
@@ -1309,21 +1310,10 @@ class ModelOrchestrator {
   String? get downloadConsentUrl => _downloadConsentUrl;
 
   int _tokenLimitFor(NovaModel model) {
-    switch (model) {
-      case NovaModel.smollm:
-        return 512;
-      case NovaModel.fastvlm:
-        return 1024;
-      case NovaModel.gemma3_1b:
-        return 2048;
-      case NovaModel.gemma4E2b:
-        // Smaller KV on Android reduces RAM pressure (Poco F1 / mid-range).
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-          return 2048;
-        }
-
-        return 4096;
-    }
+    return MessageLimits.kvTokenLimitFor(
+      model,
+      highContext: _highContextEnabled,
+    );
   }
 
   static const _contextBudgetRatio = 0.6;

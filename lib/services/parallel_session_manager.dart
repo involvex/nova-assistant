@@ -5,6 +5,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
+import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:uuid/uuid.dart';
 
 /// A single chat session with its own history
@@ -306,20 +307,7 @@ class ParallelSessionManager {
   }
 
   int _tokenLimitFor(NovaModel model) {
-    switch (model) {
-      case NovaModel.smollm:
-        return 512;
-      case NovaModel.fastvlm:
-        return 1024;
-      case NovaModel.gemma3_1b:
-        return 2048;
-      case NovaModel.gemma4E2b:
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-          return 2048;
-        }
-
-        return 4096;
-    }
+    return MessageLimits.kvTokenLimitFor(model, highContext: false);
   }
 
   void _notifyListeners() {

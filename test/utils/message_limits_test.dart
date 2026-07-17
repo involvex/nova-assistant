@@ -45,10 +45,11 @@ void main() {
     });
 
     test('validateTokenBudget rejects long Gemma 4 query', () {
-      final text = 'a' * 2000;
+      final text = 'a' * 5000;
       final error = MessageLimits.validateTokenBudget(
         text: text,
         effectiveModel: NovaModel.gemma4E2b,
+        highContext: false,
       );
       expect(error, isNotNull);
       expect(error, contains('KV limit'));
@@ -57,12 +58,13 @@ void main() {
     test('maxUserCharsForInference is lower than raw medium hard cap', () {
       final maxChars = MessageLimits.maxUserCharsForInference(
         effectiveModel: NovaModel.gemma4E2b,
+        highContext: false,
       );
       expect(
         maxChars,
         lessThan(MessageLimits.hardLimit(MessageLimitTier.medium)),
       );
-      expect(maxChars, greaterThan(200));
+      expect(maxChars, greaterThan(MessageLimits.exhaustedBudgetFloorChars));
     });
 
     test('estimateTokens approximates length / 4', () {
@@ -71,7 +73,39 @@ void main() {
     });
 
     test('kvTokenLimitFor Gemma 4 returns 2048 on all platforms in tests', () {
-      expect(MessageLimits.kvTokenLimitFor(NovaModel.gemma4E2b), 2048);
+      expect(
+        MessageLimits.kvTokenLimitFor(
+          NovaModel.gemma4E2b,
+          highContext: false,
+        ),
+        2048,
+      );
+    });
+
+    test('kvTokenLimitFor Gemma 4 highContext is 4096', () {
+      expect(
+        MessageLimits.kvTokenLimitFor(
+          NovaModel.gemma4E2b,
+          highContext: true,
+        ),
+        4096,
+      );
+    });
+
+    test('highContext empty session allows at least 4000 user chars', () {
+      final maxChars = MessageLimits.maxUserCharsForInference(
+        effectiveModel: NovaModel.gemma4E2b,
+        highContext: true,
+      );
+      expect(maxChars, greaterThanOrEqualTo(4000));
+    });
+
+    test('low context still protects mid-range RAM', () {
+      final maxChars = MessageLimits.maxUserCharsForInference(
+        effectiveModel: NovaModel.gemma4E2b,
+        highContext: false,
+      );
+      expect(maxChars, greaterThanOrEqualTo(1500));
     });
   });
 }

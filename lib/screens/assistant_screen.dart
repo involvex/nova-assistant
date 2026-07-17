@@ -10,7 +10,9 @@ import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
+import 'package:nova_assistant/services/conversation_summary_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
@@ -83,6 +85,8 @@ class _AssistantScreenState extends State<AssistantScreen>
       );
       if (conversation != null && mounted) {
         setState(() => _messages.addAll(conversation.messages));
+        ConversationSummaryService.instance.activeSummary =
+            conversation.summary;
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
       }
     } else {
@@ -100,11 +104,18 @@ class _AssistantScreenState extends State<AssistantScreen>
         widget.conversationId!,
       );
       if (conversation != null) {
-        final updated = conversation.copyWith(messages: _messages);
+        final updated = conversation.copyWith(messages: List.from(_messages));
         await ChatHistoryService.updateConversation(updated);
+        await ConversationSummaryService.instance.maybeUpdateSummary(updated);
       }
     } else {
       await ChatHistoryService.save(_messages);
+      final conversations = await ChatHistoryService.loadConversations();
+      if (conversations.isNotEmpty) {
+        await ConversationSummaryService.instance.maybeUpdateSummary(
+          conversations.first.copyWith(messages: List.from(_messages)),
+        );
+      }
     }
   }
 
@@ -338,6 +349,59 @@ class _AssistantScreenState extends State<AssistantScreen>
     _sendMessage();
   }
 
+  Future<void> _editUserMessage(int userIndex) async {
+    if (_isGenerating || userIndex < 0 || userIndex >= _messages.length) {
+      return;
+    }
+    final message = _messages[userIndex];
+    if (!message.isUser) return;
+
+    final controller = TextEditingController(text: message.text);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text(
+          'Edit message',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: TextField(
+          controller: controller,
+          maxLines: 5,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: 'Edit your message…',
+            hintStyle: TextStyle(color: Colors.grey),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Resend'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result == null || result.isEmpty || !mounted) return;
+
+    await TtsService.instance.stop();
+    setState(() {
+      _messages.removeRange(userIndex, _messages.length);
+    });
+    _inputController.text = result;
+    _sendMessage();
+  }
+
+  Future<void> _speakMessage(String text) async {
+    await TtsService.instance.speak(text);
+  }
+
   void _showPromptPresets() {
     Navigator.push(
       context,
@@ -397,6 +461,8 @@ class _AssistantScreenState extends State<AssistantScreen>
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _isGenerating) return;
+
+    await TtsService.instance.stop();
 
     // Wait for initial screenshot to load if still loading (from assistant mode)
     // This ensures screenshot is captured before model selection happens
@@ -917,6 +983,16 @@ class _AssistantScreenState extends State<AssistantScreen>
                           onRegenerate:
                               !msg.isUser && !msg.isError && !msg.isStreaming
                               ? () => _regenerateResponse(index)
+                              : null,
+                          onSpeak:
+                              !msg.isUser &&
+                                  !msg.isError &&
+                                  !msg.isStreaming &&
+                                  TtsService.instance.isEnabled
+                              ? () => _speakMessage(msg.text)
+                              : null,
+                          onEdit: msg.isUser && !_isGenerating
+                              ? () => _editUserMessage(index)
                               : null,
                         );
                       },

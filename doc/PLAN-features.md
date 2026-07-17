@@ -1,9 +1,9 @@
 # Feature plan (living)
 
-> Replaces the completed July 2026 implementation brief for streaming tools /
-> tasks / notes / documents. Those features shipped; this file tracks **what’s next**.
->
 > Product phases: [ROADMAP.md](../ROADMAP.md) · Docs: [docs/](../docs/)
+>
+> **v0.3.0 slate shipped** (KB + PDF, MCP Streamable HTTP + OAuth, TTS,
+> edit message, notification actions, conversation summaries).
 
 ---
 
@@ -13,8 +13,16 @@
 |------|--------|-------|
 | Streaming tool progress | Done | `ToolProgress` + EventChannel |
 | Tasks / notes | Done | Services + screens + AI tools |
-| Document extract/chunk | Done | Core libs; KB UI still open |
-| MCP HTTP/SSE + stdio | Done | HIBP-style Streamable HTTP **not** done |
+| Document extract/chunk | Done | + KB UI + Syncfusion PDF extract |
+| Knowledge base → RAG | Done | `KnowledgeBaseService` + settings entry |
+| MCP HTTP/SSE + stdio | Done | Legacy SSE still available |
+| MCP Streamable HTTP + OAuth/PKCE | Done | Transport picker + token exchange UI |
+| TTS speak response | Done | `flutter_tts` + Speak on bubbles |
+| Edit user message + resend | Done | Truncate from turn and resend |
+| Notification tap / actions | Done | Mirrors widget action IDs |
+| Conversation summaries | Done | Extractive rolling summary → RAG |
+| Response regeneration | Done | |
+| Prompt presets | Done | |
 | Parallel sessions | Done | Cap = 1 on Android |
 | Screen capture | Done | On-demand JPEG; FGS on API 34+ |
 | Inference stability | Done | No unload mid-stream; vision always-on |
@@ -23,36 +31,27 @@
 
 ## Next up (priority order)
 
-### P0 — Product blockers
+### P0 — Hygiene
 
-1. **MCP Streamable HTTP + OAuth**  
-   - Problem: hosts like Have I Been Pwned return **HTTP 405** on legacy GET SSE.  
-   - Work: new transport in `mcp_client.dart`, session headers, OAuth/PKCE UI.  
-   - Estimate: multi-day.
-
-2. **Soak-test cleanup**  
-   - Remove `AGENT_DBG` / ingest helpers after device verification.  
-   - Keep structured logging via `dart:developer` where useful.
+1. **Soak-test cleanup** — Remove `AGENT_DBG` / ingest helpers after device verification.
 
 ### P1 — UX / intelligence
 
-3. Conversation summaries for long chats  
-4. Response regeneration (reroll)  
-5. Conversation branching from a message  
-6. Knowledge-base UI on `DocumentChunker`  
-7. Prompt presets
+2. Conversation branching from a message  
+3. Share message / chat sheet  
+4. Continuous dictation / audio attach  
+5. Free-RAM hard gate before Gemma 4 load  
 
 ### P2 — Platform
 
-8. Windows / Linux desktop hardening  
-9. TTS + optional wake word  
-10. Notification quick-actions polish
+6. Windows / Linux desktop hardening  
+7. Optional wake word  
 
 ### P3 — Quality
 
-11. Raise unit/widget coverage toward 80%  
-12. Integration tests for onboarding + model import  
-13. Optional opt-in crash reporting
+8. Raise unit/widget coverage toward 80%  
+9. Integration tests for onboarding + model import  
+10. Optional opt-in crash reporting  
 
 ---
 
@@ -61,7 +60,7 @@
 - Re-adding `android.backup/` or any duplicate Android tree  
 - Shipping GGUF inference  
 - Starting stub `ModelService` FGS “to keep model warm” (increases RAM pressure)  
-- Continuous frame encode for screen capture
+- Continuous frame encode for screen capture  
 
 ---
 
@@ -70,4 +69,4 @@
 1. Read [AGENTS.md](../AGENTS.md) and [docs/architecture.md](../docs/architecture.md)  
 2. Load **nova-dev** skill for setup/build/model flows  
 3. Prefer small PRs; run `dart format`, `flutter analyze`, `flutter test`  
-4. Update this file + ROADMAP when a checkbox-level item ships
+4. Update this file + ROADMAP when a checkbox-level item ships  

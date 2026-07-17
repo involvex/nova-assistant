@@ -16,6 +16,7 @@ import 'package:nova_assistant/services/memory_service.dart';
 import 'package:nova_assistant/services/task_service.dart';
 import 'package:nova_assistant/services/note_service.dart';
 import 'package:nova_assistant/services/notification_service.dart';
+import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/download_progress_service.dart';
@@ -50,6 +51,7 @@ void main() async {
 
     await NotificationService.instance.initialize();
     await NotificationService.instance.requestPermission();
+    await TtsService.instance.initialize();
 
     _prefetchModels();
   } catch (e) {
@@ -140,6 +142,7 @@ class NovaApp extends StatefulWidget {
 class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<String>? _widgetActionSub;
+  StreamSubscription<String>? _notificationActionSub;
 
   String? _lastWidgetAction;
   DateTime? _lastWidgetActionTime;
@@ -150,12 +153,13 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _setupWidgetNavigation();
+    _setupNotificationNavigation();
   }
 
   void _setupWidgetNavigation() {
     _widgetActionSub = WidgetService.instance.widgetActionStream.listen(
       (String action) {
-        _handleWidgetAction(action);
+        _handleDeepLinkAction(action);
       },
       onError: (Object error) {
         debugPrint('Widget navigation error: $error');
@@ -163,7 +167,18 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     );
   }
 
-  void _handleWidgetAction(String action) {
+  void _setupNotificationNavigation() {
+    _notificationActionSub = NotificationService.instance.actionStream.listen(
+      (String action) {
+        _handleDeepLinkAction(action);
+      },
+      onError: (Object error) {
+        debugPrint('Notification navigation error: $error');
+      },
+    );
+  }
+
+  void _handleDeepLinkAction(String action) {
     final now = DateTime.now();
 
     if (action == _lastWidgetAction &&
@@ -180,31 +195,35 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     final shortAction = action.startsWith('dev.nova.assistant.widget.')
         ? action.substring('dev.nova.assistant.widget.'.length)
         : action;
-    switch (shortAction) {
-      case 'ACTION_NEW_CHAT':
-      case 'ACTION_QUICK_ASK':
-      case 'ACTION_VOICE':
-      case 'ACTION_SCREENSHOT':
-      case 'tap':
-        screen = const AssistantScreen();
-        break;
-      case 'ACTION_OPEN_TASKS':
-        screen = const TasksScreen();
-        break;
-      case 'ACTION_OPEN_NOTES':
-        screen = const NotesScreen();
-        break;
-      case 'ACTION_OPEN_MEMORY':
-        screen = const MemoryManagementScreen();
-        break;
-      case 'tap_at_glance':
-        screen = const AssistantScreen();
-        break;
-      default:
-        return;
+
+    if (shortAction.startsWith(NotificationAction.openTaskPrefix)) {
+      screen = const TasksScreen();
+    } else {
+      switch (shortAction) {
+        case 'ACTION_NEW_CHAT':
+        case 'ACTION_QUICK_ASK':
+        case 'ACTION_VOICE':
+        case 'ACTION_SCREENSHOT':
+        case 'tap':
+          screen = const AssistantScreen();
+          break;
+        case 'ACTION_OPEN_TASKS':
+          screen = const TasksScreen();
+          break;
+        case 'ACTION_OPEN_NOTES':
+          screen = const NotesScreen();
+          break;
+        case 'ACTION_OPEN_MEMORY':
+          screen = const MemoryManagementScreen();
+          break;
+        case 'tap_at_glance':
+          screen = const AssistantScreen();
+          break;
+        default:
+          return;
+      }
     }
 
-    // screen is always non-null here due to switch having default:return
     final navigator = _navigatorKey.currentState;
     if (navigator != null) {
       navigator.pushAndRemoveUntil<void>(
@@ -268,6 +287,7 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
       debugPrint('Error disposing WidgetService: $e');
     }
     _widgetActionSub?.cancel();
+    _notificationActionSub?.cancel();
   }
 
   @override

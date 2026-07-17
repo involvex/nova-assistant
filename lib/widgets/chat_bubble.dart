@@ -13,6 +13,8 @@ class ChatBubble extends StatelessWidget {
   final VoidCallback? onReactionRequest;
   final ValueChanged<String>? onReactionChipTap;
   final VoidCallback? onRegenerate;
+  final VoidCallback? onSpeak;
+  final VoidCallback? onEdit;
 
   const ChatBubble({
     super.key,
@@ -24,6 +26,8 @@ class ChatBubble extends StatelessWidget {
     this.onReactionRequest,
     this.onReactionChipTap,
     this.onRegenerate,
+    this.onSpeak,
+    this.onEdit,
   });
 
   @override
@@ -170,26 +174,34 @@ class ChatBubble extends StatelessWidget {
                 ),
               ),
 
-            // Regenerate button (for non-error, non-streaming assistant messages)
-            if (!isUser &&
-                !message.isError &&
-                !message.isStreaming &&
-                onRegenerate != null)
+            // Regenerate / Speak / Edit actions
+            if (!message.isStreaming && !message.isError)
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 12),
-                child: GestureDetector(
-                  onTap: onRegenerate,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.refresh, size: 14, color: Colors.grey[500]),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Regenerate',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!isUser && onRegenerate != null)
+                      _BubbleAction(
+                        icon: Icons.refresh,
+                        label: 'Regenerate',
+                        onTap: onRegenerate!,
+                      ),
+                    if (!isUser && onSpeak != null) ...[
+                      if (onRegenerate != null) const SizedBox(width: 12),
+                      _BubbleAction(
+                        icon: Icons.volume_up_outlined,
+                        label: 'Speak',
+                        onTap: onSpeak!,
                       ),
                     ],
-                  ),
+                    if (isUser && onEdit != null)
+                      _BubbleAction(
+                        icon: Icons.edit_outlined,
+                        label: 'Edit',
+                        onTap: onEdit!,
+                      ),
+                  ],
                 ),
               ),
 
@@ -407,6 +419,33 @@ class ChatBubble extends StatelessWidget {
     if (ms < 1000) return '${ms}ms';
     final seconds = ms / 1000;
     return '${seconds.toStringAsFixed(1)}s';
+  }
+}
+
+class _BubbleAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _BubbleAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.grey[500]),
+          const SizedBox(width: 4),
+          Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+        ],
+      ),
+    );
   }
 }
 

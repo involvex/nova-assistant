@@ -8,6 +8,7 @@ class Conversation {
   final List<ChatMessage> messages;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final String? summary;
 
   Conversation({
     String? id,
@@ -15,6 +16,7 @@ class Conversation {
     List<ChatMessage>? messages,
     DateTime? createdAt,
     DateTime? updatedAt,
+    this.summary,
   }) : id = id ?? const Uuid().v4(),
        messages = messages ?? [],
        createdAt = createdAt ?? DateTime.now(),
@@ -47,6 +49,7 @@ class Conversation {
     List<ChatMessage>? messages,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? summary,
   }) {
     return Conversation(
       id: id ?? this.id,
@@ -54,6 +57,7 @@ class Conversation {
       messages: messages ?? this.messages,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      summary: summary ?? this.summary,
     );
   }
 
@@ -63,6 +67,7 @@ class Conversation {
     'messages': messages.map((m) => m.toJson()).toList(),
     'createdAt': createdAt.toIso8601String(),
     'updatedAt': updatedAt.toIso8601String(),
+    'summary': summary,
   };
 
   factory Conversation.fromJson(Map<String, dynamic> json) => Conversation(
@@ -73,5 +78,6 @@ class Conversation {
         .toList(),
     createdAt: DateTime.parse(json['createdAt'] as String),
     updatedAt: DateTime.parse(json['updatedAt'] as String),
+    summary: json['summary'] as String?,
   );
 }

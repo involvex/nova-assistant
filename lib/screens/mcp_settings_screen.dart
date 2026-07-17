@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 import 'package:nova_assistant/models/external_tool.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/mcp_client.dart';
+import 'package:nova_assistant/services/mcp_oauth.dart';
 
 class McpSettingsScreen extends StatefulWidget {
   const McpSettingsScreen({super.key});
@@ -188,7 +189,8 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
         ),
         title: Text(server.name, style: const TextStyle(color: Colors.white)),
         subtitle: Text(
-          server.connected ? 'Connected' : 'Disconnected',
+          '${server.transport.name} · '
+          '${server.connected ? 'Connected' : 'Disconnected'}',
           style: TextStyle(
             color: server.connected ? Colors.green : Colors.grey,
             fontSize: 12,
@@ -223,6 +225,8 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
                   );
                 } else if (value == 'disconnect') {
                   await _mcpService.disconnectServer(server.id);
+                } else if (value == 'oauth') {
+                  await _authorizeServer(server);
                 } else if (value == 'delete') {
                   _showDeleteServerConfirm(server);
                 }
@@ -235,6 +239,11 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
                     value: 'disconnect',
                     child: Text('Disconnect'),
                   ),
+                if (server.hasOAuth)
+                  const PopupMenuItem(
+                    value: 'oauth',
+                    child: Text('Authorize (OAuth)'),
+                  ),
                 const PopupMenuItem(
                   value: 'delete',
                   child: Text('Delete', style: TextStyle(color: Colors.red)),
@@ -244,6 +253,87 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _authorizeServer(McpServerConfig server) async {
+    if (!server.hasOAuth) return;
+    final oauth = McpOAuthService.instance;
+    final pkce = oauth.createPkce();
+    await oauth.savePkceVerifier(server.id, pkce.verifier);
+    final opened = await oauth.openAuthorizationUrl(
+      authorizationEndpoint: server.oauthAuthUrl!,
+      clientId: server.oauthClientId!,
+      redirectUri: server.oauthRedirectUri ?? 'nova://mcp/oauth',
+      codeChallenge: pkce.challenge,
+      scope: server.oauthScope,
+      state: server.id,
+    );
+    if (!mounted) return;
+    if (!opened) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open authorization URL')),
+      );
+
+      return;
+    }
+
+    final codeController = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2E),
+        title: const Text(
+          'Paste OAuth code',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: TextField(
+          controller: codeController,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: 'Authorization code from redirect',
+            hintStyle: TextStyle(color: Colors.grey),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, codeController.text.trim()),
+            child: const Text('Exchange'),
+          ),
+        ],
+      ),
+    );
+    if (code == null || code.isEmpty || !mounted) return;
+
+    final verifier = await oauth.loadPkceVerifier(server.id);
+    if (verifier == null) return;
+    final tokens = await oauth.exchangeCode(
+      tokenEndpoint: server.oauthTokenUrl!,
+      clientId: server.oauthClientId!,
+      redirectUri: server.oauthRedirectUri ?? 'nova://mcp/oauth',
+      code: code,
+      codeVerifier: verifier,
+    );
+    if (!mounted) return;
+    if (tokens == null || tokens['access_token'] == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('OAuth token exchange failed')),
+      );
+
+      return;
+    }
+    await oauth.saveTokens(
+      serverId: server.id,
+      accessToken: tokens['access_token'] as String,
+      refreshToken: tokens['refresh_token'] as String?,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('OAuth token saved — you can Connect now')),
     );
   }
 
@@ -282,7 +372,14 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
     final urlController = TextEditingController();
     final tokenController = TextEditingController();
     final commandController = TextEditingController();
-    McpTransport transport = McpTransport.httpSse;
+    final oauthAuthController = TextEditingController();
+    final oauthTokenController = TextEditingController();
+    final oauthClientController = TextEditingController();
+    final oauthRedirectController = TextEditingController(
+      text: 'nova://mcp/oauth',
+    );
+    final oauthScopeController = TextEditingController();
+    McpTransport transport = McpTransport.streamableHttp;
 
     showDialog<void>(
       context: context,
@@ -299,84 +396,52 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
               children: [
                 _dialogTextField(nameController, 'Server name'),
                 const SizedBox(height: 12),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => setDialogState(
-                          () => transport = McpTransport.httpSse,
-                        ),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          decoration: BoxDecoration(
-                            color: transport == McpTransport.httpSse
-                                ? const Color(0xFF6C63FF).withValues(alpha: 0.2)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: transport == McpTransport.httpSse
-                                  ? const Color(0xFF6C63FF)
-                                  : Colors.grey[700]!,
-                            ),
-                          ),
-                          child: Text(
-                            'HTTP/SSE',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: transport == McpTransport.httpSse
-                                  ? const Color(0xFF6C63FF)
-                                  : Colors.grey,
-                              fontSize: 13,
-                              fontWeight: transport == McpTransport.httpSse
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
-                            ),
-                          ),
-                        ),
+                    _transportChip(
+                      label: 'Streamable HTTP',
+                      selected: transport == McpTransport.streamableHttp,
+                      onTap: () => setDialogState(
+                        () => transport = McpTransport.streamableHttp,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => setDialogState(
-                          () => transport = McpTransport.stdio,
-                        ),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          decoration: BoxDecoration(
-                            color: transport == McpTransport.stdio
-                                ? const Color(0xFF6C63FF).withValues(alpha: 0.2)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: transport == McpTransport.stdio
-                                  ? const Color(0xFF6C63FF)
-                                  : Colors.grey[700]!,
-                            ),
-                          ),
-                          child: Text(
-                            'Stdio',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: transport == McpTransport.stdio
-                                  ? const Color(0xFF6C63FF)
-                                  : Colors.grey,
-                              fontSize: 13,
-                              fontWeight: transport == McpTransport.stdio
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
-                            ),
-                          ),
-                        ),
+                    _transportChip(
+                      label: 'HTTP/SSE',
+                      selected: transport == McpTransport.httpSse,
+                      onTap: () => setDialogState(
+                        () => transport = McpTransport.httpSse,
                       ),
+                    ),
+                    _transportChip(
+                      label: 'Stdio',
+                      selected: transport == McpTransport.stdio,
+                      onTap: () =>
+                          setDialogState(() => transport = McpTransport.stdio),
                     ),
                   ],
                 ),
-                if (transport == McpTransport.httpSse) ...[
+                if (transport != McpTransport.stdio) ...[
                   const SizedBox(height: 12),
                   _dialogTextField(urlController, 'Server URL'),
                   const SizedBox(height: 12),
-                  _dialogTextField(tokenController, 'Auth token (optional)'),
+                  _dialogTextField(tokenController, 'Bearer token (optional)'),
+                  const SizedBox(height: 12),
+                  Text(
+                    'OAuth (optional)',
+                    style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  _dialogTextField(oauthAuthController, 'Authorization URL'),
+                  const SizedBox(height: 8),
+                  _dialogTextField(oauthTokenController, 'Token URL'),
+                  const SizedBox(height: 8),
+                  _dialogTextField(oauthClientController, 'Client ID'),
+                  const SizedBox(height: 8),
+                  _dialogTextField(oauthRedirectController, 'Redirect URI'),
+                  const SizedBox(height: 8),
+                  _dialogTextField(oauthScopeController, 'Scope (optional)'),
                 ] else ...[
                   const SizedBox(height: 12),
                   _dialogTextField(commandController, 'Command (e.g. npx)'),
@@ -418,6 +483,21 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
                       ? commandController.text.trim()
                       : null,
                   args: args,
+                  oauthAuthUrl: oauthAuthController.text.trim().isEmpty
+                      ? null
+                      : oauthAuthController.text.trim(),
+                  oauthTokenUrl: oauthTokenController.text.trim().isEmpty
+                      ? null
+                      : oauthTokenController.text.trim(),
+                  oauthClientId: oauthClientController.text.trim().isEmpty
+                      ? null
+                      : oauthClientController.text.trim(),
+                  oauthRedirectUri: oauthRedirectController.text.trim().isEmpty
+                      ? null
+                      : oauthRedirectController.text.trim(),
+                  oauthScope: oauthScopeController.text.trim().isEmpty
+                      ? null
+                      : oauthScopeController.text.trim(),
                 );
 
                 _mcpService.addServer(server);
@@ -426,6 +506,36 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
               child: const Text('Add'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _transportChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF6C63FF).withValues(alpha: 0.2)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? const Color(0xFF6C63FF) : Colors.grey[700]!,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? const Color(0xFF6C63FF) : Colors.grey,
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+          ),
         ),
       ),
     );

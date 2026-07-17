@@ -85,6 +85,7 @@ class TaskService {
         title: 'Task due soon',
         body: '${task.title} is due in 1 hour',
         scheduledTime: reminderTime,
+        taskId: task.id,
       );
     }
   }

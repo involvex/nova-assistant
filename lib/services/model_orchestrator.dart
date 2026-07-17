@@ -14,6 +14,7 @@ import 'package:nova_assistant/models/external_tool.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/memory_service.dart';
+import 'package:nova_assistant/services/conversation_summary_service.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/task_service.dart';
@@ -1259,7 +1260,10 @@ class ModelOrchestrator {
       attachmentContext = buffers.join('\n\n');
     }
 
-    final ragContext = await MemoryService.retrieveContext(query);
+    final ragContext = await MemoryService.retrieveContext(
+      query,
+      conversationSummary: ConversationSummaryService.instance.activeSummary,
+    );
 
     NovaModel model;
     if (_debugMode) {

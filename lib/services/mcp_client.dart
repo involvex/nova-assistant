@@ -3,9 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:nova_assistant/services/mcp_oauth.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 
-enum McpTransport { httpSse, stdio }
+enum McpTransport { httpSse, streamableHttp, stdio }
 
 class McpServerConfig {
   final String id;
@@ -15,6 +16,11 @@ class McpServerConfig {
   final String? authToken;
   final String? command;
   final List<String> args;
+  final String? oauthAuthUrl;
+  final String? oauthTokenUrl;
+  final String? oauthClientId;
+  final String? oauthRedirectUri;
+  final String? oauthScope;
   bool connected;
   bool enabled;
 
@@ -26,9 +32,22 @@ class McpServerConfig {
     this.authToken,
     this.command,
     this.args = const [],
+    this.oauthAuthUrl,
+    this.oauthTokenUrl,
+    this.oauthClientId,
+    this.oauthRedirectUri,
+    this.oauthScope,
     this.connected = false,
     this.enabled = true,
   });
+
+  bool get hasOAuth =>
+      oauthAuthUrl != null &&
+      oauthAuthUrl!.isNotEmpty &&
+      oauthTokenUrl != null &&
+      oauthTokenUrl!.isNotEmpty &&
+      oauthClientId != null &&
+      oauthClientId!.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -38,6 +57,11 @@ class McpServerConfig {
     'authToken': authToken,
     'command': command,
     'args': args,
+    'oauthAuthUrl': oauthAuthUrl,
+    'oauthTokenUrl': oauthTokenUrl,
+    'oauthClientId': oauthClientId,
+    'oauthRedirectUri': oauthRedirectUri,
+    'oauthScope': oauthScope,
     'enabled': enabled,
   };
 
@@ -53,8 +77,36 @@ class McpServerConfig {
         authToken: json['authToken'] as String?,
         command: json['command'] as String?,
         args: (json['args'] as List<dynamic>?)?.cast<String>() ?? [],
+        oauthAuthUrl: json['oauthAuthUrl'] as String?,
+        oauthTokenUrl: json['oauthTokenUrl'] as String?,
+        oauthClientId: json['oauthClientId'] as String?,
+        oauthRedirectUri: json['oauthRedirectUri'] as String?,
+        oauthScope: json['oauthScope'] as String?,
         enabled: json['enabled'] as bool? ?? true,
       );
+
+  McpServerConfig copyWith({
+    String? authToken,
+    bool? connected,
+    bool? enabled,
+  }) {
+    return McpServerConfig(
+      id: id,
+      name: name,
+      url: url,
+      transport: transport,
+      authToken: authToken ?? this.authToken,
+      command: command,
+      args: args,
+      oauthAuthUrl: oauthAuthUrl,
+      oauthTokenUrl: oauthTokenUrl,
+      oauthClientId: oauthClientId,
+      oauthRedirectUri: oauthRedirectUri,
+      oauthScope: oauthScope,
+      connected: connected ?? this.connected,
+      enabled: enabled ?? this.enabled,
+    );
+  }
 }
 
 class McpToolInfo {
@@ -79,13 +131,14 @@ class McpClient {
   final _pendingRequests = <int, Completer<dynamic>>{};
   StreamSubscription<String>? _stdoutSub;
   String? lastError;
+  String? _sessionId;
+  String? _resolvedToken;
 
   McpClient(this.config);
 
   Future<bool> connect() async {
     lastError = null;
     try {
-      // #region agent log
       await AgentDebugLog.log(
         hypothesisId: 'H5',
         location: 'mcp_client.dart:connect:start',
@@ -97,27 +150,43 @@ class McpClient {
           'hasCommand': config.command != null,
           'command': config.command,
           'hasAuth': config.authToken != null && config.authToken!.isNotEmpty,
+          'hasOAuth': config.hasOAuth,
         },
       );
-      // #endregion
-      if (config.transport == McpTransport.stdio) {
-        return await _connectStdio();
-      } else {
-        return await _connectHttpSse();
+
+      _resolvedToken = await _resolveAuthToken();
+
+      switch (config.transport) {
+        case McpTransport.stdio:
+          return await _connectStdio();
+        case McpTransport.streamableHttp:
+          return await _connectStreamableHttp();
+        case McpTransport.httpSse:
+          return await _connectHttpSse();
       }
     } catch (e) {
       config.connected = false;
       lastError = e.toString();
-      // #region agent log
       await AgentDebugLog.log(
         hypothesisId: 'H5',
         location: 'mcp_client.dart:connect:error',
         message: 'MCP connect threw',
         data: {'name': config.name, 'error': e.toString()},
       );
-      // #endregion
+
       return false;
     }
+  }
+
+  Future<String?> _resolveAuthToken() async {
+    if (config.authToken != null && config.authToken!.isNotEmpty) {
+      return config.authToken;
+    }
+    if (config.hasOAuth) {
+      return McpOAuthService.instance.loadAccessToken(config.id);
+    }
+
+    return null;
   }
 
   Future<bool> _connectStdio() async {
@@ -127,7 +196,7 @@ class McpClient {
       config.command!,
       config.args,
       environment: {
-        if (config.authToken != null) 'MCP_AUTH_TOKEN': config.authToken!,
+        if (_resolvedToken != null) 'MCP_AUTH_TOKEN': _resolvedToken!,
       },
     );
 
@@ -136,24 +205,21 @@ class McpClient {
         .transform(const LineSplitter())
         .listen(_handleMessage);
 
-    _process!.stderr.listen((data) {
-      // Log stderr for debugging
-    });
+    _process!.stderr.listen((_) {});
 
-    // Send initialize request
     final result = await _sendRequest('initialize', <String, dynamic>{
-      'protocolVersion': '2024-11-05',
+      'protocolVersion': '2025-03-26',
       'capabilities': <String, dynamic>{},
       'clientInfo': <String, dynamic>{
         'name': 'nova-assistant',
-        'version': '1.0.0',
+        'version': '0.3.0',
       },
     });
 
     if (result != null) {
-      // Send initialized notification
       _sendNotification('notifications/initialized', {});
       config.connected = true;
+
       return true;
     }
 
@@ -163,13 +229,10 @@ class McpClient {
   Future<bool> _connectHttpSse() async {
     final uri = Uri.parse(config.url);
     final request = await _httpClient.getUrl(uri);
-    if (config.authToken != null) {
-      request.headers.set('Authorization', 'Bearer ${config.authToken}');
-    }
+    _applyAuth(request);
     request.headers.set('Accept', 'text/event-stream');
     final response = await request.close();
 
-    // #region agent log
     await AgentDebugLog.log(
       hypothesisId: 'H5',
       location: 'mcp_client.dart:_connectHttpSse:response',
@@ -180,22 +243,19 @@ class McpClient {
         'contentType': response.headers.contentType?.toString(),
       },
     );
-    // #endregion
 
     if (response.statusCode == 405 || response.statusCode == 404) {
       lastError =
           'This MCP server does not support legacy HTTP/SSE (got HTTP '
-          '${response.statusCode}). Have I Been Pwned and similar servers use '
-          'Streamable HTTP + OAuth, which Nova does not support yet. '
-          'Use an SSE-compatible MCP endpoint, or a local stdio server with Node.';
+          '${response.statusCode}). Try transport "Streamable HTTP" instead '
+          '(Have I Been Pwned and similar hosts).';
       config.connected = false;
+
       return false;
     }
 
     if (response.statusCode == 200) {
       config.connected = true;
-
-      // Start listening for SSE events
       response
           .transform(utf8.decoder)
           .transform(const LineSplitter())
@@ -206,20 +266,54 @@ class McpClient {
             },
           );
 
-      // Send initialize request via HTTP POST
-      final result = await _sendHttpRequest('initialize', <String, dynamic>{
+      final result = await _sendHttpSseJsonRpc('initialize', <String, dynamic>{
         'protocolVersion': '2024-11-05',
         'capabilities': <String, dynamic>{},
         'clientInfo': <String, dynamic>{
           'name': 'nova-assistant',
-          'version': '1.0.0',
+          'version': '0.3.0',
         },
       });
 
       return result != null;
     }
 
+    lastError = 'HTTP/SSE connect failed with status ${response.statusCode}';
+
     return false;
+  }
+
+  /// MCP Streamable HTTP transport (spec 2025-03-26).
+  ///
+  /// POST JSON-RPC to the MCP endpoint with Accept for JSON and SSE.
+  /// Persist `Mcp-Session-Id` from responses for subsequent calls.
+  Future<bool> _connectStreamableHttp() async {
+    final result = await _sendStreamableRequest('initialize', <String, dynamic>{
+      'protocolVersion': '2025-03-26',
+      'capabilities': <String, dynamic>{},
+      'clientInfo': <String, dynamic>{
+        'name': 'nova-assistant',
+        'version': '0.3.0',
+      },
+    });
+
+    if (result == null) {
+      lastError ??= 'Streamable HTTP initialize failed';
+      config.connected = false;
+
+      return false;
+    }
+
+    await _sendStreamableNotification('notifications/initialized', {});
+    config.connected = true;
+
+    return true;
+  }
+
+  void _applyAuth(HttpClientRequest request) {
+    if (_resolvedToken != null && _resolvedToken!.isNotEmpty) {
+      request.headers.set('Authorization', 'Bearer $_resolvedToken');
+    }
   }
 
   void _handleSseLine(String line) {
@@ -237,17 +331,22 @@ class McpClient {
   void _handleMessage(dynamic message) {
     if (message is! Map<String, dynamic>) return;
 
-    // Handle responses to our requests
     if (message.containsKey('id') && message.containsKey('result')) {
-      final id = message['id'] as int;
-      final completer = _pendingRequests.remove(id);
-      completer?.complete(message['result']);
+      final rawId = message['id'];
+      final id = rawId is int ? rawId : int.tryParse('$rawId');
+      if (id != null) {
+        final completer = _pendingRequests.remove(id);
+        completer?.complete(message['result']);
+      }
     } else if (message.containsKey('id') && message.containsKey('error')) {
-      final id = message['id'] as int;
-      final completer = _pendingRequests.remove(id);
-      completer?.completeError(
-        Exception(message['error']['message'] ?? 'MCP error'),
-      );
+      final rawId = message['id'];
+      final id = rawId is int ? rawId : int.tryParse('$rawId');
+      if (id != null) {
+        final completer = _pendingRequests.remove(id);
+        final err = message['error'];
+        final msg = err is Map ? (err['message'] ?? 'MCP error') : 'MCP error';
+        completer?.completeError(Exception(msg));
+      }
     }
   }
 
@@ -258,8 +357,10 @@ class McpClient {
     if (result == null) return [];
 
     final tools = result['tools'] as List<dynamic>? ?? [];
+
     return tools.map((t) {
       final tool = t as Map<String, dynamic>;
+
       return McpToolInfo(
         name: tool['name'] as String,
         description: tool['description'] as String? ?? '',
@@ -281,6 +382,7 @@ class McpClient {
     });
 
     if (result is Map<String, dynamic>) return result;
+
     return null;
   }
 
@@ -296,10 +398,13 @@ class McpClient {
       'params': params,
     };
 
-    if (config.transport == McpTransport.stdio) {
-      return _sendStdioRequest(id, request);
-    } else {
-      return _sendHttpRequest(method, params);
+    switch (config.transport) {
+      case McpTransport.stdio:
+        return _sendStdioRequest(id, request);
+      case McpTransport.streamableHttp:
+        return _sendStreamableRequest(method, params, id: id);
+      case McpTransport.httpSse:
+        return _sendHttpSseJsonRpc(method, params);
     }
   }
 
@@ -312,7 +417,6 @@ class McpClient {
 
     _process?.stdin.writeln(jsonEncode(request));
 
-    // Timeout after 30 seconds
     Timer(const Duration(seconds: 30), () {
       if (!completer.isCompleted) {
         _pendingRequests.remove(id);
@@ -323,15 +427,13 @@ class McpClient {
     return completer.future;
   }
 
-  Future<dynamic> _sendHttpRequest(
+  Future<dynamic> _sendHttpSseJsonRpc(
     String method,
     Map<String, dynamic> params,
   ) async {
     final uri = Uri.parse('${config.url}/jsonrpc');
     final request = await _httpClient.postUrl(uri);
-    if (config.authToken != null) {
-      request.headers.set('Authorization', 'Bearer ${config.authToken}');
-    }
+    _applyAuth(request);
     request.headers.set('Content-Type', 'application/json');
 
     final body = jsonEncode({
@@ -347,10 +449,131 @@ class McpClient {
 
     if (response.statusCode == 200) {
       final json = jsonDecode(responseBody) as Map<String, dynamic>;
+
       return json['result'];
     }
 
     return null;
+  }
+
+  Future<dynamic> _sendStreamableRequest(
+    String method,
+    Map<String, dynamic> params, {
+    int? id,
+  }) async {
+    final requestId = id ?? ++_requestId;
+    final uri = Uri.parse(config.url);
+    final request = await _httpClient.postUrl(uri);
+    _applyAuth(request);
+    request.headers.set('Content-Type', 'application/json');
+    request.headers.set('Accept', 'application/json, text/event-stream');
+    if (_sessionId != null) {
+      request.headers.set('Mcp-Session-Id', _sessionId!);
+    }
+
+    final payload = {
+      'jsonrpc': '2.0',
+      'id': requestId,
+      'method': method,
+      'params': params,
+    };
+    request.write(jsonEncode(payload));
+
+    final response = await request.close();
+    final sessionHeader = response.headers.value('mcp-session-id');
+    if (sessionHeader != null && sessionHeader.isNotEmpty) {
+      _sessionId = sessionHeader;
+    }
+
+    final contentType = response.headers.contentType?.mimeType ?? '';
+    final responseBody = await response.transform(utf8.decoder).join();
+
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      lastError =
+          'Unauthorized (${response.statusCode}). Configure a Bearer token '
+          'or complete OAuth for this MCP server.';
+
+      return null;
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      lastError =
+          'Streamable HTTP $method failed: HTTP ${response.statusCode} '
+          '${responseBody.length > 200 ? responseBody.substring(0, 200) : responseBody}';
+
+      return null;
+    }
+
+    if (contentType.contains('text/event-stream')) {
+      return _parseSseJsonRpcResult(responseBody, requestId);
+    }
+
+    if (responseBody.trim().isEmpty) {
+      return <String, dynamic>{};
+    }
+
+    try {
+      final json = jsonDecode(responseBody) as Map<String, dynamic>;
+      if (json.containsKey('error')) {
+        final err = json['error'];
+        lastError = err is Map
+            ? (err['message']?.toString() ?? 'MCP error')
+            : 'MCP error';
+
+        return null;
+      }
+
+      return json['result'];
+    } catch (e) {
+      lastError = 'Failed to parse Streamable HTTP response: $e';
+
+      return null;
+    }
+  }
+
+  dynamic _parseSseJsonRpcResult(String body, int requestId) {
+    for (final line in body.split('\n')) {
+      if (!line.startsWith('data: ')) continue;
+      final data = line.substring(6).trim();
+      if (data.isEmpty || data == '[DONE]') continue;
+      try {
+        final json = jsonDecode(data) as Map<String, dynamic>;
+        final id = json['id'];
+        final matches =
+            id == requestId || id?.toString() == requestId.toString();
+        if (matches && json.containsKey('result')) {
+          return json['result'];
+        }
+        if (matches && json.containsKey('error')) {
+          final err = json['error'];
+          lastError = err is Map
+              ? (err['message']?.toString() ?? 'MCP error')
+              : 'MCP error';
+
+          return null;
+        }
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
+  Future<void> _sendStreamableNotification(
+    String method,
+    Map<String, dynamic> params,
+  ) async {
+    final uri = Uri.parse(config.url);
+    final request = await _httpClient.postUrl(uri);
+    _applyAuth(request);
+    request.headers.set('Content-Type', 'application/json');
+    request.headers.set('Accept', 'application/json, text/event-stream');
+    if (_sessionId != null) {
+      request.headers.set('Mcp-Session-Id', _sessionId!);
+    }
+    request.write(
+      jsonEncode({'jsonrpc': '2.0', 'method': method, 'params': params}),
+    );
+    await request.close();
   }
 
   void _sendNotification(String method, Map<String, dynamic> params) {
@@ -363,6 +586,7 @@ class McpClient {
 
   Future<void> disconnect() async {
     config.connected = false;
+    _sessionId = null;
     await _stdoutSub?.cancel();
     _process?.kill();
     _process = null;

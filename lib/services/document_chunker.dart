@@ -9,10 +9,19 @@ class DocumentChunker {
   }) {
     if (text.length <= maxChunkSize) return [text];
 
+    // Overlap must be strictly smaller than chunk size or the cursor never advances.
+    final safeOverlap = overlap >= maxChunkSize
+        ? (maxChunkSize / 4).floor().clamp(0, maxChunkSize - 1)
+        : overlap;
+
     final chunks = <String>[];
     int start = 0;
+    var guard = 0;
 
     while (start < text.length) {
+      guard++;
+      if (guard > text.length) break;
+
       int end = start + maxChunkSize;
       if (end >= text.length) {
         chunks.add(text.substring(start).trim());
@@ -38,7 +47,8 @@ class DocumentChunker {
       }
 
       chunks.add(text.substring(start, end).trim());
-      start = end - overlap;
+      final nextStart = end - safeOverlap;
+      start = nextStart <= start ? end : nextStart;
       if (start < 0) start = 0;
     }
 

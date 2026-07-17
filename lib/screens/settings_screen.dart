@@ -12,6 +12,7 @@ import 'package:nova_assistant/platform/assistant_role_service.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/identity_config_screen.dart';
 import 'package:nova_assistant/screens/mcp_settings_screen.dart';
+import 'package:nova_assistant/screens/knowledge_base_screen.dart';
 import 'package:nova_assistant/screens/memory_management_screen.dart';
 import 'package:nova_assistant/screens/tasks_screen.dart';
 import 'package:nova_assistant/screens/notes_screen.dart';
@@ -19,6 +20,7 @@ import 'package:nova_assistant/screens/conversation_search_screen.dart';
 import 'package:nova_assistant/screens/model_browser_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -36,6 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoCapture = true;
   bool _thinkingMode = false;
   bool _voiceInput = true;
+  bool _ttsEnabled = true;
   bool _ragMemory = false;
   bool _batteryOptimization = true;
   bool _isAssistantRoleHeld = false;
@@ -83,6 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _autoCapture = prefs.getBool('settings_auto_capture') ?? true;
         _thinkingMode = prefs.getBool('settings_thinking_mode') ?? false;
         _voiceInput = prefs.getBool('settings_voice_input') ?? true;
+        _ttsEnabled = prefs.getBool('settings_tts_enabled') ?? true;
         _ragMemory = prefs.getBool('settings_rag_memory') ?? false;
         _batteryOptimization =
             prefs.getBool('settings_battery_optimization') ?? true;
@@ -339,6 +343,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           _toggleTile(
+            icon: Icons.volume_up_outlined,
+            title: 'Speak responses',
+            subtitle: 'Show Speak on assistant messages (TTS)',
+            value: _ttsEnabled,
+            onChanged: (v) async {
+              setState(() => _ttsEnabled = v);
+              await TtsService.instance.setEnabled(v);
+            },
+          ),
+          _toggleTile(
             icon: Icons.auto_awesome,
             title: 'RAG Memory',
             subtitle: 'Remember conversations for contextual answers',
@@ -379,6 +393,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 context,
                 MaterialPageRoute<void>(
                   builder: (_) => const MemoryManagementScreen(),
+                ),
+              );
+            },
+          ),
+          _actionTile(
+            icon: Icons.menu_book_outlined,
+            title: 'Knowledge Base',
+            subtitle: 'Ingest PDFs and docs for RAG context',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const KnowledgeBaseScreen(),
                 ),
               );
             },

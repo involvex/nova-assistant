@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nova_assistant/services/knowledge_base_service.dart';
 import 'package:nova_assistant/services/semantic_search.dart';
 
 class MemoryService {
@@ -136,11 +137,28 @@ class MemoryService {
     }
   }
 
-  static Future<String?> retrieveContext(String query) async {
+  static Future<String?> retrieveContext(
+    String query, {
+    String? conversationSummary,
+  }) async {
     final buffer = StringBuffer();
+
+    if (conversationSummary != null && conversationSummary.isNotEmpty) {
+      buffer.writeln('Conversation summary:');
+      buffer.writeln(conversationSummary);
+    }
+
+    final kbContext = await KnowledgeBaseService.instance.retrieveContext(
+      query,
+    );
+    if (kbContext != null) {
+      if (buffer.isNotEmpty) buffer.writeln();
+      buffer.write(kbContext);
+    }
 
     final customContext = await retrieveCustomMemoriesContext(query);
     if (customContext != null) {
+      if (buffer.isNotEmpty) buffer.writeln();
       buffer.write(customContext);
     }
 

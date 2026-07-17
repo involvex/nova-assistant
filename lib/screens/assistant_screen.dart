@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/chat_message.dart';
+import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
@@ -233,6 +234,15 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool get _hasAttachments =>
       _currentScreenshot != null || _attachmentManager.attachments.isNotEmpty;
 
+  int get _historyTokenEstimate {
+    final text = _messages
+        .where((m) => !m.isStreaming && !m.isError)
+        .map((m) => m.text)
+        .join(' ');
+
+    return MessageLimits.estimateTokens(text);
+  }
+
   int get _messageHardLimit {
     if (_selectedCustomModel != null) {
       return MessageLimits.hardLimit(
@@ -243,7 +253,9 @@ class _AssistantScreenState extends State<AssistantScreen>
 
     return MessageLimits.maxUserCharsForInference(
       effectiveModel: _effectiveModel,
+      historyTokenEstimate: _historyTokenEstimate,
       hasAttachments: _hasAttachments,
+      highContext: ModelOrchestrator.instance.highContextEnabled,
     );
   }
 
@@ -257,11 +269,76 @@ class _AssistantScreenState extends State<AssistantScreen>
 
     return MessageLimits.softUserCharsForInference(
       effectiveModel: _effectiveModel,
+      historyTokenEstimate: _historyTokenEstimate,
       hasAttachments: _hasAttachments,
+      highContext: ModelOrchestrator.instance.highContextEnabled,
     );
   }
 
   bool _isOverHardLimitFor(String text) => text.length > _messageHardLimit;
+
+  Future<void> _maybeAutoCompact() async {
+    if (!ModelOrchestrator.instance.autoCompactEnabled) return;
+    final maxChars = MessageLimits.maxUserCharsForInference(
+      effectiveModel: _effectiveModel,
+      historyTokenEstimate: _historyTokenEstimate,
+      hasAttachments: _hasAttachments,
+      highContext: ModelOrchestrator.instance.highContextEnabled,
+    );
+    if (maxChars >= 800) return;
+
+    Conversation? conversation;
+    if (widget.conversationId != null) {
+      conversation = await ChatHistoryService.getConversation(
+        widget.conversationId!,
+      );
+    }
+    conversation ??= Conversation(
+      id: widget.conversationId,
+      messages: List.from(_messages),
+    );
+    conversation = conversation.copyWith(messages: List.from(_messages));
+
+    final result = await ConversationSummaryService.instance.compactNow(
+      conversation,
+    );
+    await ModelOrchestrator.instance.applyCompactedReplay(
+      result.retainedMessages,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Context compacted to free space')),
+      );
+    }
+  }
+
+  Future<void> _manualCompact() async {
+    if (_isGenerating) return;
+
+    Conversation? conversation;
+    if (widget.conversationId != null) {
+      conversation = await ChatHistoryService.getConversation(
+        widget.conversationId!,
+      );
+    }
+    conversation ??= Conversation(
+      id: widget.conversationId,
+      messages: List.from(_messages),
+    );
+    conversation = conversation.copyWith(messages: List.from(_messages));
+
+    final result = await ConversationSummaryService.instance.compactNow(
+      conversation,
+    );
+    await ModelOrchestrator.instance.applyCompactedReplay(
+      result.retainedMessages,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Context compacted to free space')),
+      );
+    }
+  }
 
   bool _canSendFor(String text) =>
       text.trim().isNotEmpty &&
@@ -692,7 +769,9 @@ class _AssistantScreenState extends State<AssistantScreen>
           : MessageLimits.validateTokenBudget(
               text: text,
               effectiveModel: _effectiveModel,
+              historyTokenEstimate: _historyTokenEstimate,
               hasAttachments: _hasAttachments,
+              highContext: ModelOrchestrator.instance.highContextEnabled,
             );
       ScaffoldMessenger.of(
         context,
@@ -700,6 +779,8 @@ class _AssistantScreenState extends State<AssistantScreen>
 
       return;
     }
+
+    await _maybeAutoCompact();
 
     // Wait for initial screenshot to load if still loading (from assistant mode)
     // This ensures screenshot is captured before model selection happens
@@ -1481,6 +1562,13 @@ class _AssistantScreenState extends State<AssistantScreen>
                       message: 'Export conversation',
                       child: Icon(Icons.download_outlined, color: Colors.grey),
                     ),
+                  ),
+
+                  // Compact context
+                  IconButton(
+                    onPressed: _isGenerating ? null : _manualCompact,
+                    icon: const Icon(Icons.compress, color: Colors.grey),
+                    tooltip: 'Compact context',
                   ),
 
                   // Chat history

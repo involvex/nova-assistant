@@ -212,6 +212,30 @@ class ModelOrchestrator {
     _pendingReplay = List<ChatMessage>.from(messages);
   }
 
+  Future<void> applyCompactedReplay(List<ChatMessage> retained) async {
+    if (_activeChat == null) {
+      setPendingReplayMessages(retained);
+      return;
+    }
+    final model = _activeModelType ?? NovaModel.gemma4E2b;
+    final ratio = _highContextEnabled
+        ? MessageLimits.highContextBudgetRatio
+        : MessageLimits.contextBudgetRatio;
+    final replay = SessionHistoryReinjection.buildReplayMessages(
+      retained,
+      maxTokens: (_tokenLimitFor(model) * ratio).round(),
+    );
+    if (replay.isEmpty) return;
+    try {
+      await _activeChat!.clearHistory(replayHistory: replay);
+    } on Exception catch (e) {
+      debugPrint('applyCompactedReplay failed: $e');
+      for (final msg in replay) {
+        await _activeChat!.addQuery(msg);
+      }
+    }
+  }
+
   void setBatteryOptimization(bool enabled) {
     _batteryOptimizationEnabled = enabled;
     if (!enabled) {
@@ -1371,6 +1395,7 @@ class ModelOrchestrator {
       historyTokenEstimate: historyTokenEstimate,
       ragTokenEstimate: ragTokenEstimate,
       hasAttachments: hasAttachments,
+      highContext: _highContextEnabled,
     );
   }
 

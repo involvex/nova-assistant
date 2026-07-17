@@ -25,8 +25,11 @@ import 'package:nova_assistant/screens/chat_history_screen.dart';
 import 'package:nova_assistant/screens/settings_screen.dart';
 import 'package:nova_assistant/screens/model_selector_sheet.dart';
 import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
-import 'package:nova_assistant/screens/prompt_presets_screen.dart';
-import 'package:nova_assistant/services/prompt_presets_service.dart';
+import 'package:nova_assistant/services/follow_up_suggestion_service.dart';
+import 'package:nova_assistant/services/memory_diagnostics_service.dart';
+import 'package:nova_assistant/services/platform_adaptation_service.dart';
+import 'package:nova_assistant/utils/message_limits.dart';
+import 'package:nova_assistant/widgets/suggestion_chip.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AssistantScreen extends StatefulWidget {
@@ -64,6 +67,14 @@ class _AssistantScreenState extends State<AssistantScreen>
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
   StreamSubscription<void>? _historyClearedSub;
   StreamSubscription<String>? _statusSub;
+  List<String> _followUpSuggestions = [];
+  bool _isLoadingSuggestions = false;
+  bool _suggestionReroll = false;
+  int _suggestionRequestId = 0;
+  bool _memoryWarningShown = false;
+  bool _debugMode = false;
+  int? _debugMemoryMb;
+  Timer? _memoryPollTimer;
 
   @override
   void initState() {
@@ -71,10 +82,10 @@ class _AssistantScreenState extends State<AssistantScreen>
     WidgetsBinding.instance.addObserver(this);
     _selectedModel = ModelOrchestrator.instance.preferredModelType;
     _loadThinkingMode();
+    _loadDebugMode();
     _loadInitialScreenshot();
     _loadHistory();
     _requestPermissions();
-    _inputController.addListener(() => setState(() {}));
     _listenToModelStatus();
     _checkModelAvailability();
     _historyClearedSub = ModelOrchestrator.instance.historyClearedStream.listen(
@@ -159,7 +170,176 @@ class _AssistantScreenState extends State<AssistantScreen>
         final modelName = status.substring('NEED_DOWNLOAD_CONSENT:'.length);
         _showDownloadConsentDialog(modelName);
       }
+      if (!_memoryWarningShown && status.contains('Gemma 4 E2B')) {
+        final warning = PlatformAdaptationService.instance.getMemoryWarning(
+          NovaModel.gemma4E2b,
+        );
+        if (warning != null && mounted) {
+          _memoryWarningShown = true;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(warning),
+              duration: const Duration(seconds: 6),
+            ),
+          );
+        }
+      }
     });
+  }
+
+  Future<void> _loadDebugMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final enabled = prefs.getBool('settings_debug_mode') ?? false;
+    if (!mounted) return;
+    setState(() => _debugMode = enabled);
+    _configureMemoryPolling(enabled);
+  }
+
+  void _configureMemoryPolling(bool enabled) {
+    _memoryPollTimer?.cancel();
+    _memoryPollTimer = null;
+    if (!enabled) return;
+
+    _memoryPollTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      final mb = await MemoryDiagnosticsService.instance.readProcessMemoryMb();
+      if (mounted && mb != _debugMemoryMb) {
+        setState(() => _debugMemoryMb = mb);
+      }
+    });
+  }
+
+  bool get _isAutoMode =>
+      _selectedModel == null && _selectedCustomModel == null;
+
+  NovaModel get _effectiveModel =>
+      ModelOrchestrator.instance.predictEffectiveModel(
+        query: _inputController.text,
+        thinkingMode: _thinkingMode,
+        hasImage: _hasAttachments,
+        forcePrimaryModel: _isAutoMode,
+      );
+
+  String get _effectiveModelLabel {
+    if (_selectedCustomModel != null) return _selectedCustomModel!.displayName;
+    if (_isAutoMode) return 'Auto → ${_effectiveModel.displayName}';
+
+    return _effectiveModel.displayName;
+  }
+
+  bool get _hasAttachments =>
+      _currentScreenshot != null || _attachmentManager.attachments.isNotEmpty;
+
+  int get _messageHardLimit {
+    if (_selectedCustomModel != null) {
+      return MessageLimits.hardLimit(
+        MessageLimitTier.large,
+        hasAttachments: _hasAttachments,
+      );
+    }
+
+    return MessageLimits.maxUserCharsForInference(
+      effectiveModel: _effectiveModel,
+      hasAttachments: _hasAttachments,
+    );
+  }
+
+  int get _messageSoftLimit {
+    if (_selectedCustomModel != null) {
+      return MessageLimits.softLimit(
+        MessageLimitTier.large,
+        hasAttachments: _hasAttachments,
+      );
+    }
+
+    return MessageLimits.softUserCharsForInference(
+      effectiveModel: _effectiveModel,
+      hasAttachments: _hasAttachments,
+    );
+  }
+
+  bool _isOverHardLimitFor(String text) => text.length > _messageHardLimit;
+
+  bool _canSendFor(String text) =>
+      text.trim().isNotEmpty &&
+      !_isGenerating &&
+      !ModelOrchestrator.instance.isBusy &&
+      !_isOverHardLimitFor(text);
+
+  String? get _lastUserMessage {
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      final msg = _messages[i];
+      if (msg.isUser && msg.text.trim().isNotEmpty) return msg.text.trim();
+    }
+
+    return null;
+  }
+
+  String? get _lastAssistantMessage {
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      final msg = _messages[i];
+      if (!msg.isUser &&
+          !msg.isStreaming &&
+          !msg.isError &&
+          msg.text.trim().isNotEmpty) {
+        return msg.text.trim();
+      }
+    }
+
+    return null;
+  }
+
+  void _clearFollowUpSuggestions() {
+    if (_followUpSuggestions.isEmpty && !_isLoadingSuggestions) return;
+    setState(() {
+      _followUpSuggestions = [];
+      _isLoadingSuggestions = false;
+    });
+  }
+
+  Future<void> _onBulbPressed() async {
+    if (_isGenerating || ModelOrchestrator.instance.isBusy) return;
+
+    final requestId = ++_suggestionRequestId;
+
+    setState(() {
+      _isLoadingSuggestions = true;
+      _followUpSuggestions = [];
+    });
+
+    final suggestions = await FollowUpSuggestionService.instance.suggest(
+      lastUserMessage: _lastUserMessage,
+      lastAssistantMessage: _lastAssistantMessage,
+      different: _suggestionReroll,
+    );
+
+    if (!mounted || requestId != _suggestionRequestId) return;
+    setState(() {
+      _followUpSuggestions = suggestions;
+      _isLoadingSuggestions = false;
+      _suggestionReroll = false;
+    });
+  }
+
+  Future<void> _rerollSuggestions() async {
+    _suggestionReroll = true;
+    await _onBulbPressed();
+  }
+
+  void _applySuggestion(String text) {
+    if (ModelOrchestrator.instance.isBusy || _isGenerating) {
+      _inputController.text = text;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wait for the current response to finish.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      return;
+    }
+
+    _inputController.text = text;
+    _sendMessage();
   }
 
   Future<void> _checkModelAvailability() async {
@@ -277,6 +457,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     WidgetsBinding.instance.removeObserver(this);
     _historyClearedSub?.cancel();
     _statusSub?.cancel();
+    _memoryPollTimer?.cancel();
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();
@@ -419,21 +600,6 @@ class _AssistantScreenState extends State<AssistantScreen>
     await TtsService.instance.speak(text);
   }
 
-  void _showPromptPresets() {
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (context) => PromptPresetsScreen(
-          selectMode: true,
-          onPresetSelected: (preset) {
-            _inputController.text = preset.prompt;
-            PromptPresetsService.instance.incrementUseCount(preset.id);
-          },
-        ),
-      ),
-    );
-  }
-
   List<Tool> _toolsForQuery(String query, {bool hasImage = false}) {
     final tools = <Tool>[];
     final q = query.toLowerCase();
@@ -498,7 +664,35 @@ class _AssistantScreenState extends State<AssistantScreen>
     final text = _inputController.text.trim();
     if (text.isEmpty || _isGenerating) return;
 
-    await TtsService.instance.stop();
+    if (ModelOrchestrator.instance.isBusy) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Model is loading or responding. Please wait.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      return;
+    }
+
+    if (_isOverHardLimitFor(text)) {
+      final error = _selectedCustomModel != null
+          ? MessageLimits.validateLength(
+              text: text,
+              isCustomModel: true,
+              hasAttachments: _hasAttachments,
+            )
+          : MessageLimits.validateTokenBudget(
+              text: text,
+              effectiveModel: _effectiveModel,
+              hasAttachments: _hasAttachments,
+            );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error ?? 'Message is too long.')));
+
+      return;
+    }
 
     // Wait for initial screenshot to load if still loading (from assistant mode)
     // This ensures screenshot is captured before model selection happens
@@ -511,7 +705,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
 
     _inputController.clear();
-    _inputFocus.unfocus();
+    _clearFollowUpSuggestions();
 
     // Add user message
     final userMessage = ChatMessage(
@@ -526,6 +720,10 @@ class _AssistantScreenState extends State<AssistantScreen>
       _messages.add(userMessage);
       _isGenerating = true;
     });
+
+    if (TtsService.instance.isSpeaking) {
+      await TtsService.instance.stop();
+    }
 
     _saveMessages();
 
@@ -965,88 +1163,155 @@ class _AssistantScreenState extends State<AssistantScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isLoadingModel = ModelOrchestrator.instance.isLoadingModel;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D1A),
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            // App Bar
-            _buildAppBar(),
+            Column(
+              children: [
+                _buildAppBar(),
+                if (_currentScreenshot != null) _buildScreenshotIndicator(),
+                if (_attachmentManager.hasAttachments)
+                  _buildAttachmentIndicator(),
+                if (_offlineMode) _buildOfflineBanner(),
+                Expanded(
+                  child: _messages.isEmpty
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.only(top: 8, bottom: 8),
+                          itemCount: _messages.length,
+                          itemBuilder: (context, index) {
+                            final msg = _messages[index];
 
-            // Screenshot and attachment indicators
-            if (_currentScreenshot != null) _buildScreenshotIndicator(),
-            if (_attachmentManager.hasAttachments) _buildAttachmentIndicator(),
-
-            // Offline indicator
-            if (_offlineMode) _buildOfflineBanner(),
-
-            // Messages
-            Expanded(
-              child: _messages.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.only(top: 8, bottom: 8),
-                      itemCount: _messages.length,
-                      itemBuilder: (context, index) {
-                        final msg = _messages[index];
-
-                        return ChatBubble(
-                          message: msg,
-                          onScreenshotTap: msg.imageData != null
-                              ? () => _showFullScreenshot(msg.imageData!)
-                              : null,
-                          onRetry: msg.isError && !msg.isUser
-                              ? () => _retryFromError(index)
-                              : null,
-                          onSettingsTap: msg.isError && !msg.isUser
-                              ? () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute<void>(
-                                      builder: (context) =>
-                                          const SettingsScreen(),
-                                    ),
-                                  );
-                                }
-                              : null,
-                          onCopy: () {
-                            Clipboard.setData(ClipboardData(text: msg.text));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Copied to clipboard'),
-                                duration: Duration(seconds: 2),
-                              ),
+                            return ChatBubble(
+                              message: msg,
+                              onScreenshotTap: msg.imageData != null
+                                  ? () => _showFullScreenshot(msg.imageData!)
+                                  : null,
+                              onRetry: msg.isError && !msg.isUser
+                                  ? () => _retryFromError(index)
+                                  : null,
+                              onSettingsTap: msg.isError && !msg.isUser
+                                  ? () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute<void>(
+                                          builder: (context) =>
+                                              const SettingsScreen(),
+                                        ),
+                                      );
+                                    }
+                                  : null,
+                              onCopy: () {
+                                Clipboard.setData(
+                                  ClipboardData(text: msg.text),
+                                );
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Copied to clipboard'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                              onReactionRequest: () =>
+                                  _showReactionPicker(index),
+                              onReactionChipTap: (emoji) =>
+                                  _toggleReaction(index, emoji),
+                              onRegenerate:
+                                  !msg.isUser &&
+                                      !msg.isError &&
+                                      !msg.isStreaming
+                                  ? () => _regenerateResponse(index)
+                                  : null,
+                              onSpeak:
+                                  !msg.isUser &&
+                                      !msg.isError &&
+                                      !msg.isStreaming &&
+                                      TtsService.instance.isEnabled
+                                  ? () => _speakMessage(msg.text)
+                                  : null,
+                              onEdit: msg.isUser && !_isGenerating
+                                  ? () => _editUserMessage(index)
+                                  : null,
                             );
                           },
-                          onReactionRequest: () => _showReactionPicker(index),
-                          onReactionChipTap: (emoji) =>
-                              _toggleReaction(index, emoji),
-                          onRegenerate:
-                              !msg.isUser && !msg.isError && !msg.isStreaming
-                              ? () => _regenerateResponse(index)
-                              : null,
-                          onSpeak:
-                              !msg.isUser &&
-                                  !msg.isError &&
-                                  !msg.isStreaming &&
-                                  TtsService.instance.isEnabled
-                              ? () => _speakMessage(msg.text)
-                              : null,
-                          onEdit: msg.isUser && !_isGenerating
-                              ? () => _editUserMessage(index)
-                              : null,
-                        );
-                      },
-                    ),
+                        ),
+                ),
+                _buildStatusBar(),
+                _buildInputBar(),
+              ],
             ),
-
-            // Status bar
-            _buildStatusBar(),
-
-            // Input bar
-            _buildInputBar(),
+            if (_debugMode) _buildDebugBanner(),
+            if (isLoadingModel) _buildModelLoadingOverlay(),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModelLoadingOverlay() {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.55),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(color: Color(0xFF6C63FF)),
+                const SizedBox(height: 16),
+                Text(
+                  _status,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'First GPU compile can take 1–2 minutes. Do not send yet.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDebugBanner() {
+    final orchestrator = ModelOrchestrator.instance;
+    final ram = _debugMemoryMb != null ? '$_debugMemoryMb MB' : '…';
+    final modelState = orchestrator.isLoadingModel
+        ? 'loading'
+        : orchestrator.isModelLoaded
+        ? 'loaded'
+        : 'idle';
+    final streamState = orchestrator.isStreaming ? 'streaming' : 'idle';
+
+    return Positioned(
+      left: 8,
+      right: 8,
+      bottom: 4,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            'DEBUG  RAM: $ram  |  Model: $modelState  |  Stream: $streamState  |  '
+            '$_effectiveModelLabel',
+            style: const TextStyle(color: Colors.white60, fontSize: 10),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       ),
     );
@@ -1514,10 +1779,23 @@ class _AssistantScreenState extends State<AssistantScreen>
                     runSpacing: 8,
                     alignment: WrapAlignment.center,
                     children: [
-                      _quickChip('What\'s on my screen?'),
-                      _quickChip('Set an alarm for 7:00 PM'),
-                      _quickChip('Summarize this page'),
-                      _quickChip('Open Settings'),
+                      SuggestionChip(
+                        label: "What's on my screen?",
+                        onTap: () => _applySuggestion("What's on my screen?"),
+                      ),
+                      SuggestionChip(
+                        label: 'Set an alarm for 7:00 PM',
+                        onTap: () =>
+                            _applySuggestion('Set an alarm for 7:00 PM'),
+                      ),
+                      SuggestionChip(
+                        label: 'Summarize this page',
+                        onTap: () => _applySuggestion('Summarize this page'),
+                      ),
+                      SuggestionChip(
+                        label: 'Open Settings',
+                        onTap: () => _applySuggestion('Open Settings'),
+                      ),
                     ],
                   ),
                 ],
@@ -1526,27 +1804,6 @@ class _AssistantScreenState extends State<AssistantScreen>
           ),
         );
       },
-    );
-  }
-
-  Widget _quickChip(String label) {
-    return GestureDetector(
-      onTap: () {
-        _inputController.text = label;
-        _sendMessage();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A1A2E),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 13),
-        ),
-      ),
     );
   }
 
@@ -1594,112 +1851,196 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Widget _buildInputBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D0D1A),
-        border: Border(
-          top: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Attachment buttons row
-          Row(
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _inputController,
+      builder: (context, value, child) {
+        final text = value.text;
+        final charCount = text.length;
+        final canSend = _canSendFor(text);
+        final counterColor = _isOverHardLimitFor(text)
+            ? Colors.redAccent
+            : charCount > _messageSoftLimit
+            ? Colors.amber
+            : Colors.grey[600];
+        final busy = ModelOrchestrator.instance.isBusy;
+
+        return Container(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0D0D1A),
+            border: Border(
+              top: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              IconButton(
-                onPressed: _captureAndAttachScreenshot,
-                icon: const Icon(
-                  Icons.screenshot_monitor_outlined,
-                  color: Colors.grey,
+              if (_isLoadingSuggestions || _followUpSuggestions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _isLoadingSuggestions
+                            ? const SizedBox(
+                                height: 32,
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    for (final suggestion
+                                        in _followUpSuggestions)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 8,
+                                        ),
+                                        child: SuggestionChip(
+                                          label: suggestion,
+                                          onTap: () {
+                                            if (!busy) {
+                                              _applySuggestion(suggestion);
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                      ),
+                      if (!_isLoadingSuggestions &&
+                          _followUpSuggestions.isNotEmpty)
+                        IconButton(
+                          onPressed: busy ? null : _rerollSuggestions,
+                          icon: const Icon(Icons.refresh, color: Colors.grey),
+                          tooltip: 'More suggestions',
+                        ),
+                    ],
+                  ),
                 ),
-                tooltip: 'Attach screenshot',
+              Row(
+                children: [
+                  IconButton(
+                    onPressed: _captureAndAttachScreenshot,
+                    icon: const Icon(
+                      Icons.screenshot_monitor_outlined,
+                      color: Colors.grey,
+                    ),
+                    tooltip: 'Attach screenshot',
+                  ),
+                  IconButton(
+                    onPressed: _pickImageFromGallery,
+                    icon: const Icon(
+                      Icons.photo_library_outlined,
+                      color: Colors.grey,
+                    ),
+                    tooltip: 'Attach from gallery',
+                  ),
+                  IconButton(
+                    onPressed: _pickFile,
+                    icon: const Icon(Icons.attach_file, color: Colors.grey),
+                    tooltip: 'Attach file',
+                  ),
+                  IconButton(
+                    onPressed: _showUrlDialog,
+                    icon: const Icon(Icons.link, color: Colors.grey),
+                    tooltip: 'Attach URL',
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: busy || _isGenerating ? null : _onBulbPressed,
+                    icon: const Icon(
+                      Icons.lightbulb_outline,
+                      color: Colors.grey,
+                    ),
+                    tooltip: 'Suggested follow-ups',
+                  ),
+                ],
               ),
-              IconButton(
-                onPressed: _pickImageFromGallery,
-                icon: const Icon(
-                  Icons.photo_library_outlined,
-                  color: Colors.grey,
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _inputController,
+                      focusNode: _inputFocus,
+                      maxLength: _messageHardLimit,
+                      maxLengthEnforcement: MaxLengthEnforcement.none,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Ask Nova anything...',
+                        hintStyle: TextStyle(color: Colors.grey[600]),
+                        filled: true,
+                        fillColor: const Color(0xFF1A1A2E),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
+                        counterText: '',
+                      ),
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) {
+                        if (canSend) _sendMessage();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  VoiceInputButton(
+                    onTranscription: (transcript) {
+                      if (transcript.isNotEmpty) {
+                        _inputController.text = transcript;
+                        _sendMessage();
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    child: IconButton(
+                      onPressed: canSend ? _sendMessage : null,
+                      icon: Icon(
+                        Icons.send_rounded,
+                        color: canSend ? const Color(0xFF6C63FF) : Colors.grey,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '$charCount / $_messageHardLimit',
+                      style: TextStyle(fontSize: 11, color: counterColor),
+                    ),
+                    if (_selectedCustomModel == null)
+                      Text(
+                        _effectiveModelLabel,
+                        style: TextStyle(fontSize: 10, color: Colors.grey[700]),
+                      ),
+                  ],
                 ),
-                tooltip: 'Attach from gallery',
-              ),
-              IconButton(
-                onPressed: _pickFile,
-                icon: const Icon(Icons.attach_file, color: Colors.grey),
-                tooltip: 'Attach file',
-              ),
-              IconButton(
-                onPressed: _showUrlDialog,
-                icon: const Icon(Icons.link, color: Colors.grey),
-                tooltip: 'Attach URL',
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: _showPromptPresets,
-                icon: const Icon(Icons.lightbulb_outline, color: Colors.grey),
-                tooltip: 'Prompt presets',
               ),
             ],
           ),
-
-          const SizedBox(height: 8),
-
-          // Text input + voice + send row
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _inputController,
-                  focusNode: _inputFocus,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'Ask Nova anything...',
-                    hintStyle: TextStyle(color: Colors.grey[600]),
-                    filled: true,
-                    fillColor: const Color(0xFF1A1A2E),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
-                  ),
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _sendMessage(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              VoiceInputButton(
-                onTranscription: (text) {
-                  if (text.isNotEmpty) {
-                    _inputController.text = text;
-                    _sendMessage();
-                  }
-                },
-              ),
-              const SizedBox(width: 8),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                child: IconButton(
-                  onPressed:
-                      _inputController.text.trim().isNotEmpty && !_isGenerating
-                      ? _sendMessage
-                      : null,
-                  icon: Icon(
-                    Icons.send_rounded,
-                    color: _inputController.text.trim().isNotEmpty
-                        ? const Color(0xFF6C63FF)
-                        : Colors.grey,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 

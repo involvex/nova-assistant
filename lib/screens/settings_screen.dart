@@ -24,6 +24,9 @@ import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
+import 'package:nova_assistant/services/settings_backup_service.dart';
+import 'package:nova_assistant/services/memory_diagnostics_service.dart';
+import 'package:nova_assistant/screens/prompt_presets_screen.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -45,6 +48,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _batteryOptimization = true;
   bool _isAssistantRoleHeld = false;
   bool _debugMode = false;
+  String _debugMemoryLabel = 'Tap to refresh';
   AssistantRole _assistantRole = AssistantRole.helpful;
   AssistantLanguage _assistantLanguage = AssistantLanguage.match;
   String _installStatus = '';
@@ -102,7 +106,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
         _hfTokenStatus = _resolveHfTokenStatus(prefs.getString('hf_token'));
       });
+      if (_debugMode) {
+        unawaited(_refreshDebugMemory());
+      }
     }
+  }
+
+  Future<void> _refreshDebugMemory() async {
+    final mb = await MemoryDiagnosticsService.instance.readProcessMemoryMb();
+    if (!mounted) return;
+    setState(() {
+      _debugMemoryLabel = mb != null
+          ? '$mb MB (process PSS/RSS)'
+          : 'Unavailable';
+    });
+  }
+
+  Future<void> _confirmResetInference() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text(
+          'Reset inference engine?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'This unloads the on-device model and clears GPU memory. '
+          'Use if chat is stuck or after a crash.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    await ModelOrchestrator.instance.resetInferenceSession();
+    await _refreshDebugMemory();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Inference engine reset')));
   }
 
   String _resolveHfTokenStatus(String? token) {
@@ -396,6 +448,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ModelOrchestrator.instance.setDebugMode(v);
             },
           ),
+          if (_debugMode) ...[
+            _actionTile(
+              icon: Icons.restart_alt,
+              title: 'Reset inference engine',
+              subtitle: 'Unload model and clear GPU memory if stuck',
+              onTap: _confirmResetInference,
+            ),
+            ListTile(
+              leading: const Icon(Icons.memory, color: Colors.white70),
+              title: const Text(
+                'Process memory',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: Text(
+                _debugMemoryLabel,
+                style: TextStyle(color: Colors.grey[500], fontSize: 12),
+              ),
+              onTap: _refreshDebugMemory,
+            ),
+          ],
           _actionTile(
             icon: Icons.psychology,
             title: 'Memory overview',
@@ -521,6 +593,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
 
           _sectionHeader('Data'),
+          _actionTile(
+            icon: Icons.upload_file_outlined,
+            title: 'Export settings',
+            subtitle: 'Share preferences as JSON (no models)',
+            onTap: () async {
+              await SettingsBackupService.instance.shareExport();
+            },
+          ),
+          _actionTile(
+            icon: Icons.download_outlined,
+            title: 'Import settings',
+            subtitle: 'Restore preferences from JSON backup',
+            onTap: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: const Color(0xFF1A1A2E),
+                  title: const Text(
+                    'Import settings?',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  content: Text(
+                    'This replaces your current settings. '
+                    'Models and OAuth tokens are not imported.',
+                    style: TextStyle(color: Colors.grey[400]),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Import'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed != true || !context.mounted) return;
+
+              final result = await SettingsBackupService.instance
+                  .importFromPicker();
+              if (!context.mounted) return;
+              if (result.cancelled) return;
+              if (result.success) {
+                await _loadSettings();
+                await ModelOrchestrator.refreshSettings();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Settings imported')),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(result.error ?? 'Import failed'),
+                    backgroundColor: Colors.redAccent,
+                  ),
+                );
+              }
+            },
+          ),
+          _actionTile(
+            icon: Icons.lightbulb_outline,
+            title: 'Prompt presets',
+            subtitle: 'Manage reusable prompt templates',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const PromptPresetsScreen(),
+                ),
+              );
+            },
+          ),
           _actionTile(
             icon: Icons.delete_outline,
             title: 'Clear conversation history',

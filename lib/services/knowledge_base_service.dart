@@ -59,6 +59,7 @@ class KnowledgeBaseService {
 
   static const _prefsKey = 'knowledge_base_documents';
   static const _enabledKey = 'settings_knowledge_base';
+  static const enabledPrefsKey = _enabledKey;
   static const _maxStoredChars = 200000;
   static const _maxFullTextChars = 50000;
 

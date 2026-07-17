@@ -23,6 +23,9 @@
 | Conversation summaries | Done | Extractive rolling summary → RAG |
 | User memory overview | Done | Stored vs derived; promote; ask / inventory prompt |
 | Assistant language | Done | Prefs `match`/`en`/`de`; system-prompt steering (UI stays English; full i18n later) |
+| Message limits + stability guards | Done | Model-aware char caps; orchestrator pre-send validation |
+| Settings JSON backup | Done | Export/import prefs, identity, MCP config, presets (no models) |
+| Follow-up suggestions (bulb) | Done | 3 contextual chips + reroll above input |
 | Response regeneration | Done | |
 | Prompt presets | Done | |
 | Parallel sessions | Done | Cap = 1 on Android |

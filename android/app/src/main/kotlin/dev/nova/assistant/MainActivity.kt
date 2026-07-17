@@ -1,7 +1,9 @@
 package dev.nova.assistant
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.role.RoleManager
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
@@ -22,6 +24,7 @@ class MainActivity : FlutterActivity() {
         private const val REQUEST_SCREEN_CAPTURE = 1001
         private const val REQUEST_ASSISTANT_ROLE = 1002
         private const val METHOD_CHANNEL = "dev.nova.assistant/main"
+        private const val DIAGNOSTICS_CHANNEL = "dev.nova.assistant/diagnostics"
         private const val EVENT_CHANNEL = "dev.nova.assistant/main_events"
         private const val WIDGET_ACTION_KEY = "home_widget_action"
         const val WIDGET_PREFS_NAME = "HomeWidgetPreferences"
@@ -55,6 +58,35 @@ class MainActivity : FlutterActivity() {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         startActivity(Intent.createChooser(intent, subject))
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DIAGNOSTICS_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getProcessMemory" -> {
+                        val activityManager =
+                            getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                        val info = ActivityManager.MemoryInfo()
+                        activityManager.getMemoryInfo(info)
+                        val pid = android.os.Process.myPid()
+                        val pids = intArrayOf(pid)
+                        val memInfo = activityManager.getProcessMemoryInfo(pids)
+                        val proc = memInfo.firstOrNull()
+                        val pssKb = proc?.totalPss ?: 0
+                        result.success(
+                            mapOf(
+                                "pssKb" to pssKb,
+                                "rssKb" to pssKb,
+                                "availMemMb" to (info.availMem / (1024 * 1024)),
+                            )
+                        )
+                    }
+                    "requestGc" -> {
+                        System.gc()
                         result.success(true)
                     }
                     else -> result.notImplemented()

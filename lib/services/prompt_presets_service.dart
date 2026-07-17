@@ -167,6 +167,12 @@ class PromptPresetsService {
     ];
   }
 
+  Future<void> replaceAll(List<PromptPreset> presets) async {
+    _presets = List<PromptPreset>.from(presets);
+    await _save();
+    _notifyListeners();
+  }
+
   Future<void> _save() async {
     final prefs = await SharedPreferences.getInstance();
     final json = jsonEncode(_presets.map((p) => p.toJson()).toList());

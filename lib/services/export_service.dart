@@ -87,7 +87,7 @@ class ExportService {
         ? exportTasksAsJson()
         : exportTasksAsText();
     final fileName = format == 'json' ? 'nova_tasks.json' : 'nova_tasks.txt';
-    await _shareText(content, fileName);
+    await shareText(content, fileName);
   }
 
   Future<void> shareNotes({String format = 'json'}) async {
@@ -95,10 +95,10 @@ class ExportService {
         ? exportNotesAsJson()
         : exportNotesAsText();
     final fileName = format == 'json' ? 'nova_notes.json' : 'nova_notes.txt';
-    await _shareText(content, fileName);
+    await shareText(content, fileName);
   }
 
-  Future<void> _shareText(String text, String subject) async {
+  Future<void> shareText(String text, String subject) async {
     try {
       await _channel.invokeMethod('shareText', {
         'text': text,

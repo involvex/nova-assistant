@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
@@ -26,6 +27,8 @@ import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
 import 'package:nova_assistant/utils/alarm_time_parser.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
+import 'package:nova_assistant/utils/message_limits.dart';
+import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 
 enum DownloadConsent { download, pickFile, cancel }
 
@@ -144,7 +147,9 @@ class ModelOrchestrator {
   Completer<void>? _releaseCompleter; // Signals when release is complete
   Timer? _idleTimer;
   bool _isStreaming = false;
+  bool _isLoadingModel = false;
   Completer<void>? _streamingCompleter;
+  Completer<void>? _inferenceLock;
 
   /// Set when idle/lifecycle release is requested while a stream is live.
   /// Never close the native model until the stream ends (SIGABRT otherwise).
@@ -157,8 +162,19 @@ class ModelOrchestrator {
   /// Shorter unload on Android to reduce LMK pressure on mid/low-RAM devices.
   static const _androidIdleTimeout = Duration(minutes: 2);
 
+  static const _gemma4AndroidLoadTimeout = Duration(seconds: 120);
+  static const _defaultLoadTimeout = Duration(seconds: 30);
+
   /// Whether an inference stream is currently active.
   bool get isStreaming => _isStreaming;
+
+  /// Whether the native engine is being loaded / compiled (GPU init).
+  bool get isLoadingModel => _isLoadingModel;
+
+  /// True while loading or streaming — UI should block sends.
+  bool get isBusy => _isLoadingModel || _isStreaming;
+
+  bool get isModelLoaded => _activeModel != null;
 
   final _statusController = StreamController<String>.broadcast();
   Stream<String> get statusStream => _statusController.stream;
@@ -315,15 +331,18 @@ class ModelOrchestrator {
       return;
     }
 
+    if (_isLoadingModel) {
+      debugPrint('Deferring idle release while model is loading');
+      _pendingIdleRelease = true;
+
+      return;
+    }
+
     // Never tear down LiteRT while the native decode thread is live —
     // force-close caused SIGABRT: "Callback invoked after it has been deleted".
     if (_isStreaming) {
       debugPrint('Deferring idle release until stream ends');
       _pendingIdleRelease = true;
-      if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
-        _streamingCompleter!.complete();
-      }
-      await _tryStopGeneration();
       // #region agent log
       await AgentDebugLog.log(
         hypothesisId: 'H6',
@@ -394,6 +413,133 @@ class ModelOrchestrator {
   }
 
   Future<void> releaseIdleResources() => _releaseIdleResources();
+
+  /// Predicts which [NovaModel] will run without loading the engine.
+  NovaModel predictEffectiveModel({
+    required String query,
+    bool thinkingMode = false,
+    bool hasImage = false,
+    bool forcePrimaryModel = false,
+  }) {
+    if (forcePrimaryModel && _preferredCustomModelOverride == null) {
+      return selector.primaryHeavy;
+    }
+    if (_modelOverrideDirty && _preferredModelOverride != null) {
+      var model = _preferredModelOverride!;
+      if (hasImage && !model.hasVision) {
+        model = selector.primaryHeavy.hasVision
+            ? selector.primaryHeavy
+            : selector.fastModel;
+      }
+
+      return model;
+    }
+    if (_preferredModelOverride != null && !_modelOverrideDirty) {
+      return _preferredModelOverride!;
+    }
+
+    return _selectModel(
+      query: query,
+      screenshot: hasImage ? Uint8List(0) : null,
+      hasImageAttachments: hasImage,
+      thinkingMode: thinkingMode,
+    );
+  }
+
+  Duration _loadTimeoutFor(NovaModel model) {
+    if (model == NovaModel.gemma4E2b &&
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      return _gemma4AndroidLoadTimeout;
+    }
+
+    return _defaultLoadTimeout;
+  }
+
+  Future<void> _teardownPartialLoad() async {
+    try {
+      await _activeModel?.close();
+    } catch (e) {
+      debugPrint('Error closing partial model load: $e');
+    }
+    _activeModel = null;
+    _activeModelType = null;
+    _activeModelSupportsImage = false;
+    _activeChat = null;
+    _isInitialized = false;
+    await _clearActiveInferenceIdentity();
+  }
+
+  Future<void> _acquireInferenceLock() async {
+    while (_inferenceLock != null) {
+      await _inferenceLock!.future;
+    }
+    _inferenceLock = Completer<void>();
+  }
+
+  void _releaseInferenceLock() {
+    if (_inferenceLock != null && !_inferenceLock!.isCompleted) {
+      _inferenceLock!.complete();
+    }
+    _inferenceLock = null;
+  }
+
+  bool _shouldPassTools(NovaModel model, List<Tool> tools) {
+    if (tools.isEmpty) return false;
+    if (!model.supportsFunctionCalling) return false;
+    if (!PlatformAdaptationService
+        .instance
+        .capabilities
+        .supportsFunctionCalling) {
+      return false;
+    }
+    // LiteRT Gemma 4 on Android logs FC unsupported; skip tools to shrink prompt.
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        model == NovaModel.gemma4E2b) {
+      return false;
+    }
+
+    return true;
+  }
+
+  List<Tool> _toolsForCreateChat(NovaModel model, List<Tool> tools) {
+    if (!_shouldPassTools(model, tools)) return const [];
+
+    return tools;
+  }
+
+  /// Stops generation, closes the engine, and clears native identity.
+  Future<void> resetInferenceSession() async {
+    _idleTimer?.cancel();
+    _idleTimer = null;
+    await _tryStopGeneration();
+    try {
+      await _activeChat?.close();
+    } catch (e) {
+      debugPrint('resetInferenceSession: chat close failed: $e');
+    }
+    _activeChat = null;
+    await _teardownPartialLoad();
+    _isStreaming = false;
+    _isLoadingModel = false;
+    _pendingIdleRelease = false;
+    _pendingModelTeardown = false;
+    if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+      _streamingCompleter!.complete();
+    }
+    _streamingCompleter = null;
+    _releaseInferenceLock();
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        const channel = MethodChannel('dev.nova.assistant/diagnostics');
+        await channel.invokeMethod<void>('requestGc');
+      } catch (e) {
+        debugPrint('resetInferenceSession: GC hint failed: $e');
+      }
+    }
+    _statusController.add('Inference engine reset');
+  }
 
   /// Called from the stream `finally` block to finish deferred teardown.
   void _onStreamEnded() {
@@ -547,177 +693,216 @@ class ModelOrchestrator {
 
     final bool supportImage = needsImageSupport;
 
-    // First, ensure the model is registered with flutter_gemma
-    final fileName = ModelHuggingFaceURLs.fileNameFor(model);
-    final existsOnDisk = await ModelManager.instance.isInstalledOnDisk(
-      fileName,
+    _isLoadingModel = true;
+    _statusController.add(
+      supportImage && model == NovaModel.gemma4E2b
+          ? 'Compiling ${model.displayName} on GPU (vision enabled; first load may take 1–2 min)...'
+          : 'Loading ${model.displayName}...',
     );
-    final prefsInstalled = ModelManager.instance.isModelInstalled(fileName);
 
-    // #region agent log
-    await AgentDebugLog.log(
-      hypothesisId: 'H2-H4',
-      location: 'model_orchestrator.dart:_getOrCreateModel:check',
-      message: 'Model availability check before load',
-      data: {
-        'model': model.name,
-        'fileName': fileName,
-        'existsOnDisk': existsOnDisk,
-        'prefsInstalled': prefsInstalled,
-      },
-    );
-    // #endregion
-
-    if (existsOnDisk) {
-      _statusController.add(
-        'Found ${model.displayName} on disk, registering...',
+    try {
+      // First, ensure the model is registered with flutter_gemma
+      final fileName = ModelHuggingFaceURLs.fileNameFor(model);
+      final existsOnDisk = await ModelManager.instance.isInstalledOnDisk(
+        fileName,
       );
-      try {
-        final modelPath = await _findModelPath(fileName);
-        if (modelPath != null) {
-          final fileSize = await File(modelPath).length();
-          // Always call registerDiskModel to ensure model is properly registered
-          await ModelManager.instance.registerDiskModel(
-            filePath: modelPath,
-            fileName: fileName,
-            modelType: model.modelType,
-            fileType: model.fileType,
-            fileSizeBytes: fileSize,
-          );
+      final prefsInstalled = ModelManager.instance.isModelInstalled(fileName);
 
-          // Now get the active model
-          _statusController.add('Loading ${model.displayName}...');
-          _activeModel = await FlutterGemma.getActiveModel(
-            maxTokens: _tokenLimitFor(model),
-            preferredBackend: PlatformAdaptationService.instance
-                .preferredBackendFor(model),
-            supportImage: supportImage,
-            maxNumImages: supportImage ? 1 : null,
-          ).timeout(const Duration(seconds: 30));
-          _activeModelType = model;
-          _activeModelSupportsImage = supportImage;
-          _isInitialized = true;
-          _statusController.add('${model.displayName} ready');
-          _resetIdleTimer();
-          return _activeModel!;
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'H2-H4',
+        location: 'model_orchestrator.dart:_getOrCreateModel:check',
+        message: 'Model availability check before load',
+        data: {
+          'model': model.name,
+          'fileName': fileName,
+          'existsOnDisk': existsOnDisk,
+          'prefsInstalled': prefsInstalled,
+        },
+      );
+      // #endregion
+
+      if (existsOnDisk) {
+        _statusController.add(
+          'Found ${model.displayName} on disk, registering...',
+        );
+        try {
+          final modelPath = await _findModelPath(fileName);
+          if (modelPath != null) {
+            final fileSize = await File(modelPath).length();
+            // Always call registerDiskModel to ensure model is properly registered
+            await ModelManager.instance.registerDiskModel(
+              filePath: modelPath,
+              fileName: fileName,
+              modelType: model.modelType,
+              fileType: model.fileType,
+              fileSizeBytes: fileSize,
+            );
+
+            // Now get the active model
+            _statusController.add('Loading ${model.displayName}...');
+            if (_debugMode) {
+              unawaited(
+                MemoryDiagnosticsService.instance.readProcessMemoryMb(),
+              );
+            }
+            _activeModel = await FlutterGemma.getActiveModel(
+              maxTokens: _tokenLimitFor(model),
+              preferredBackend: PlatformAdaptationService.instance
+                  .preferredBackendFor(model),
+              supportImage: supportImage,
+              maxNumImages: supportImage ? 1 : null,
+            ).timeout(_loadTimeoutFor(model));
+            _activeModelType = model;
+            _activeModelSupportsImage = supportImage;
+            _isInitialized = true;
+            _statusController.add('${model.displayName} ready');
+            _resetIdleTimer();
+            return _activeModel!;
+          }
+        } on TimeoutException catch (e) {
+          debugPrint('Failed to load local model: $e');
+          await _teardownPartialLoad();
+          throw ModelLoadException(
+            '${model.displayName} is still loading.',
+            model: model,
+            suggestion:
+                'First boot GPU compile can take 1–2 minutes. Wait and try again, '
+                'or use Settings → Debug → Reset inference engine.',
+            underlyingError: e,
+          );
+        } catch (e) {
+          debugPrint('Failed to load local model: $e');
+          // File exists but failed to load — likely corrupted or incompatible.
+          // Convert to a typed exception so the UI can show actionable info.
+          if (e is ModelException) rethrow;
+          if (e is TimeoutException) {
+            await _teardownPartialLoad();
+            throw ModelLoadException(
+              '${model.displayName} is still loading.',
+              model: model,
+              suggestion: 'First boot GPU compile can take 1–2 minutes. Wait and try again.',
+              underlyingError: e,
+            );
+          }
+          await _teardownPartialLoad();
+          throw ModelLoadException(
+            'Failed to load ${model.displayName} from disk.',
+            model: model,
+            suggestion:
+                'The model file may be corrupted. '
+                'Try re-downloading, reset inference in Settings, or pick a different file.',
+            underlyingError: e,
+          );
         }
-      } catch (e) {
-        debugPrint('Failed to load local model: $e');
-        // File exists but failed to load — likely corrupted or incompatible.
-        // Convert to a typed exception so the UI can show actionable info.
-        if (e is ModelException) rethrow;
+      }
+
+      // No active model or load failed — ask user before downloading
+      final url = ModelHuggingFaceURLs.urlFor(model);
+      final choice = await _showDownloadConsent(model: model, url: url);
+
+      if (choice == DownloadConsent.pickFile) {
+        // User wants to pick a file from device — throw a special exception
+        // so the UI can handle the file picker flow.
+        throw ModelNeedsFilePickException(model);
+      }
+
+      if (choice == DownloadConsent.cancel) {
+        throw Exception('Download cancelled by user');
+      }
+
+      // choice == DownloadConsent.download — proceed with network install
+      _statusController.add('Downloading ${model.displayName}...');
+      try {
+        final installed = await ModelManager.instance
+            .installFromNetwork(
+              url: url,
+              modelType: model.modelType,
+              fileType: model.fileType,
+              onProgress: (progress) {
+                _statusController.add(
+                  'Downloading ${model.displayName}: $progress%',
+                );
+              },
+            )
+            .timeout(const Duration(seconds: 300));
+
+        if (installed == null) {
+          throw ModelDownloadException(
+            'Download of ${model.displayName} failed.',
+            model: model,
+            suggestion: 'Check your internet connection and try again.',
+          );
+        }
+
+        // Now get the model after install
+        _statusController.add('Loading ${model.displayName}...');
+        _activeModel = await FlutterGemma.getActiveModel(
+          maxTokens: _tokenLimitFor(model),
+          preferredBackend: PlatformAdaptationService.instance
+              .preferredBackendFor(model),
+          supportImage: supportImage,
+          maxNumImages: supportImage ? 1 : null,
+        ).timeout(_loadTimeoutFor(model));
+        _activeModelType = model;
+        _activeModelSupportsImage = supportImage;
+        _isInitialized = true;
+        _statusController.add('${model.displayName} ready');
+        _resetIdleTimer();
+        return _activeModel!;
+      } on ModelException {
+        rethrow;
+      } on TimeoutException catch (e) {
+        await _teardownPartialLoad();
         throw ModelLoadException(
-          'Failed to load ${model.displayName} from disk.',
+          '${model.displayName} is still loading.',
           model: model,
           suggestion:
-              'The model file may be corrupted. '
-              'Try re-downloading or pick a different file.',
+              'First boot GPU compile can take 1–2 minutes. Wait and try again, '
+              'or use Settings → Debug → Reset inference engine.',
           underlyingError: e,
         );
-      }
-    }
-
-    // No active model or load failed — ask user before downloading
-    final url = ModelHuggingFaceURLs.urlFor(model);
-    final choice = await _showDownloadConsent(model: model, url: url);
-
-    if (choice == DownloadConsent.pickFile) {
-      // User wants to pick a file from device — throw a special exception
-      // so the UI can handle the file picker flow.
-      throw ModelNeedsFilePickException(model);
-    }
-
-    if (choice == DownloadConsent.cancel) {
-      throw Exception('Download cancelled by user');
-    }
-
-    // choice == DownloadConsent.download — proceed with network install
-    _statusController.add('Downloading ${model.displayName}...');
-    try {
-      final installed = await ModelManager.instance
-          .installFromNetwork(
-            url: url,
-            modelType: model.modelType,
-            fileType: model.fileType,
-            onProgress: (progress) {
-              _statusController.add(
-                'Downloading ${model.displayName}: $progress%',
-              );
-            },
-          )
-          .timeout(const Duration(seconds: 300));
-
-      if (installed == null) {
-        throw ModelDownloadException(
-          'Download of ${model.displayName} failed.',
-          model: model,
-          suggestion: 'Check your internet connection and try again.',
-        );
-      }
-
-      // Now get the model after install
-      _statusController.add('Loading ${model.displayName}...');
-      _activeModel = await FlutterGemma.getActiveModel(
-        maxTokens: _tokenLimitFor(model),
-        preferredBackend: PlatformAdaptationService.instance
-            .preferredBackendFor(model),
-        supportImage: supportImage,
-        maxNumImages: supportImage ? 1 : null,
-      ).timeout(const Duration(seconds: 30));
-      _activeModelType = model;
-      _activeModelSupportsImage = supportImage;
-      _isInitialized = true;
-      _statusController.add('${model.displayName} ready');
-      _resetIdleTimer();
-      return _activeModel!;
-    } on ModelException {
-      rethrow;
-    } on TimeoutException {
-      throw ModelLoadException(
-        '${model.displayName} loading timed out.',
-        model: model,
-        suggestion:
-            'The model may be too large for your device, or the file may be corrupted. '
-            'Try a smaller model or pick a file from your device.',
-      );
-    } catch (e) {
-      _statusController.add('Failed to load ${model.displayName}: $e');
-      // Classify the error
-      final msg = e.toString().toLowerCase();
-      if (msg.contains('storage') || msg.contains('no space')) {
-        throw ModelStorageException(
-          'Not enough storage for ${model.displayName}.',
-          model: model,
-          suggestion: 'Free up storage space and try again.',
-          underlyingError: e,
-        );
-      }
-      if (msg.contains('corrupt') ||
-          msg.contains('invalid') ||
-          msg.contains('unsupported')) {
+      } catch (e) {
+        _statusController.add('Failed to load ${model.displayName}: $e');
+        // Classify the error
+        final msg = e.toString().toLowerCase();
+        if (msg.contains('storage') || msg.contains('no space')) {
+          throw ModelStorageException(
+            'Not enough storage for ${model.displayName}.',
+            model: model,
+            suggestion: 'Free up storage space and try again.',
+            underlyingError: e,
+          );
+        }
+        if (msg.contains('corrupt') ||
+            msg.contains('invalid') ||
+            msg.contains('unsupported')) {
+          throw ModelLoadException(
+            '${model.displayName} file is corrupted or incompatible.',
+            model: model,
+            suggestion: 'Re-download the model or pick a different file.',
+            underlyingError: e,
+          );
+        }
+        if (msg.contains('network') ||
+            msg.contains('connection') ||
+            msg.contains('socket')) {
+          throw ModelDownloadException(
+            'Network error downloading ${model.displayName}.',
+            model: model,
+            suggestion: 'Check your internet connection and try again.',
+            underlyingError: e,
+          );
+        }
         throw ModelLoadException(
-          '${model.displayName} file is corrupted or incompatible.',
+          'Failed to load ${model.displayName}.',
           model: model,
-          suggestion: 'Re-download the model or pick a different file.',
+          suggestion: 'Try again or pick a file from your device.',
           underlyingError: e,
         );
       }
-      if (msg.contains('network') ||
-          msg.contains('connection') ||
-          msg.contains('socket')) {
-        throw ModelDownloadException(
-          'Network error downloading ${model.displayName}.',
-          model: model,
-          suggestion: 'Check your internet connection and try again.',
-          underlyingError: e,
-        );
-      }
-      throw ModelLoadException(
-        'Failed to load ${model.displayName}.',
-        model: model,
-        suggestion: 'Try again or pick a file from your device.',
-        underlyingError: e,
-      );
+    } finally {
+      _isLoadingModel = false;
     }
   }
 
@@ -730,6 +915,7 @@ class ModelOrchestrator {
     String? ragContext,
     String? attachmentContext,
     required bool hasImageAttachments,
+    required bool hasExtraContext,
   }) async* {
     final customModel = _preferredCustomModelOverride!;
     _statusController.add('Using custom model: ${customModel.displayName}');
@@ -864,10 +1050,12 @@ class ModelOrchestrator {
     buffer.write('\n\n${await _languageInstruction()}');
 
     if (ragContext != null && ragContext.isNotEmpty) {
-      buffer.write('\n\n$ragContext');
+      buffer.write('\n\n${_capContextInjection(ragContext)}');
     }
     if (attachmentContext != null && attachmentContext.isNotEmpty) {
-      buffer.write('\n\n--- Attached Data ---\n$attachmentContext');
+      buffer.write(
+        '\n\n--- Attached Data ---\n${_capContextInjection(attachmentContext)}',
+      );
     }
 
     final chat = await inferenceModel.createChat(
@@ -875,6 +1063,24 @@ class ModelOrchestrator {
       tools: tools,
       supportImage: customModel.hasVision && _activeModelSupportsImage,
     );
+
+    await _truncateContext(chat, NovaModel.gemma4E2b);
+
+    final queryError = _validateQueryLength(
+      query: query,
+      isCustomModel: true,
+      hasAttachments: hasExtraContext,
+    );
+    if (queryError != null) {
+      _statusController.add('Message too long');
+      yield InferenceResult(
+        text: '⚠️ $queryError',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+      );
+
+      return;
+    }
 
     // Add the user message
     final Message message;
@@ -1100,6 +1306,40 @@ class ModelOrchestrator {
 
   static const _contextBudgetRatio = 0.6;
   static const _imageTokenEstimate = 500;
+  static const _maxContextInjectionChars = 3000;
+
+  String _capContextInjection(String context) {
+    if (context.length <= _maxContextInjectionChars) return context;
+
+    return '${context.substring(0, _maxContextInjectionChars)}…\n'
+        '[truncated for context budget]';
+  }
+
+  String? _validateQueryLength({
+    required String query,
+    NovaModel? model,
+    bool isCustomModel = false,
+    bool hasAttachments = false,
+    int historyTokenEstimate = 0,
+    int ragTokenEstimate = 0,
+  }) {
+    if (model == null || isCustomModel) {
+      return MessageLimits.validateLength(
+        text: query,
+        model: model,
+        isCustomModel: isCustomModel,
+        hasAttachments: hasAttachments,
+      );
+    }
+
+    return MessageLimits.validateTokenBudget(
+      text: query,
+      effectiveModel: model,
+      historyTokenEstimate: historyTokenEstimate,
+      ragTokenEstimate: ragTokenEstimate,
+      hasAttachments: hasAttachments,
+    );
+  }
 
   Future<void> _truncateContext(InferenceChat chat, NovaModel model) async {
     final limit = _tokenLimitFor(model);
@@ -1208,395 +1448,455 @@ class ModelOrchestrator {
     /// Useful for assistant mode where reliability is more important than speed.
     bool forcePrimaryModel = false,
   }) async* {
-    // Deterministic alarm shortcut: parse clock times and call set_alarm
-    // without relying on the on-device model to convert AM/PM.
-    final parsedAlarm = AlarmTimeParser.tryParse(query);
-    if (parsedAlarm != null) {
-      _statusController.add('Setting alarm...');
-      final result = await ToolExecutorService.instance.setAlarm(
-        parsedAlarm.hour,
-        parsedAlarm.minute,
-        'Nova alarm',
-      );
-      final ok = result['success'] == true;
-      final label =
-          '${parsedAlarm.hour.toString().padLeft(2, '0')}:'
-          '${parsedAlarm.minute.toString().padLeft(2, '0')}';
-      yield InferenceResult(
-        text: ok
-            ? 'Alarm set for $label.'
-            : 'Could not set the alarm: ${result['error'] ?? 'unknown error'}',
-        model: selector.primaryHeavy,
-        isStreaming: false,
-        toolCalls: [
-          {
-            'name': 'set_alarm',
-            'args': {
-              'hour': parsedAlarm.hour,
-              'minute': parsedAlarm.minute,
-              'message': 'Nova alarm',
-            },
-            'result': result,
-          },
-        ],
-      );
-      return;
-    }
-
-    // Check if there are image attachments that need vision processing
-    final hasImageAttachments = attachments.any((att) {
-      if (att.type != AttachedDataType.file) return false;
-      final name = att.name.toLowerCase();
-      return name.endsWith('.jpg') ||
-          name.endsWith('.jpeg') ||
-          name.endsWith('.png') ||
-          name.endsWith('.gif') ||
-          name.endsWith('.webp');
-    });
-
-    // Build attachment context if any
-    String attachmentContext = '';
-    if (attachments.isNotEmpty) {
-      final buffers = <String>[];
-      for (final att in attachments) {
-        buffers.add(await att.buildContextString());
-      }
-      attachmentContext = buffers.join('\n\n');
-    }
-
-    final ragContext = await MemoryService.retrieveContext(
-      query,
-      conversationSummary: ConversationSummaryService.instance.activeSummary,
-    );
-
-    NovaModel model;
-    if (_debugMode) {
-      _statusController.add(
-        '[DEBUG] Model selection: overrideDirty=$_modelOverrideDirty, '
-        'preferred=${_preferredModelOverride?.displayName ?? "null"}, '
-        'screenshot=${screenshot != null}, '
-        'hasImageAttachments=$hasImageAttachments, thinking=$thinkingMode, '
-        'forcePrimaryModel=$forcePrimaryModel',
-      );
-    }
-
-    // Force primary model when requested - ensures heavy model is used for
-    // reliability-critical scenarios like assistant mode
-    if (forcePrimaryModel && _preferredCustomModelOverride == null) {
-      model = selector.primaryHeavy;
-      if (_debugMode) {
-        _statusController.add(
-          '[DEBUG] Force Primary Model: ${model.displayName}',
-        );
-      }
-    } else if (_preferredCustomModelOverride != null) {
-      // Custom model selected - use it directly (bypasses NovaModel selection)
-      // Return early with custom model loading path
-      yield* _processWithCustomModel(
-        query: query,
-        screenshot: screenshot,
-        thinkingMode: thinkingMode,
-        tools: tools,
-        ragContext: ragContext,
-        attachmentContext: attachmentContext,
-        hasImageAttachments: hasImageAttachments,
-      );
-      return;
-    } else if (_modelOverrideDirty && _preferredModelOverride != null) {
-      model = _preferredModelOverride!;
-      if ((screenshot != null || hasImageAttachments) && !model.hasVision) {
-        model = selector.primaryHeavy.hasVision
-            ? selector.primaryHeavy
-            : selector.fastModel;
-        _statusController.add(
-          'Auto-switched to ${model.displayName} for image input',
-        );
-      }
-    } else {
-      model = _selectModel(
-        query: query,
-        screenshot: screenshot,
-        hasImageAttachments: hasImageAttachments,
-        thinkingMode: thinkingMode,
-      );
-    }
-
-    if (_debugMode) {
-      _statusController.add(
-        '[DEBUG] Selected model: ${model.displayName} '
-        '(hasVision=${model.hasVision}, hasThinking=${model.hasThinking})',
-      );
-    }
-
-    _statusController.add('Using ${model.displayName}');
-
-    InferenceModel inferenceModel;
-    try {
-      inferenceModel = await _getOrCreateModel(model, screenshot);
-    } on ModelNeedsFilePickException {
-      rethrow; // Let the UI handle this
-    } on ModelException catch (e) {
-      _statusController.add('Error: ${e.message}');
+    if (_inferenceLock != null) {
       yield InferenceResult(
         text:
-            '⚠️ ${e.message}\n\n${e.suggestion ?? 'Check Settings > AI Models.'}',
-        model: model,
+            '⚠️ Wait for the current response to finish before sending again.',
+        model: selector.primaryHeavy,
         isStreaming: false,
       );
-      return;
-    } catch (e) {
-      _statusController.add('Error: $e');
-      yield InferenceResult(
-        text: 'Failed to load model: $e\n\nCheck Settings > AI Models.',
-        model: model,
-        isStreaming: false,
-      );
+
       return;
     }
 
-    if (_modelOverrideDirty) {
-      _modelOverrideDirty = false;
-    }
-
-    _activeChat ??= await inferenceModel.createChat(
-      systemInstruction: await _systemPromptFor(
-        model,
-        ragContext,
-        attachmentContext,
-      ),
-      tools: tools,
-      supportImage: model.hasVision && _activeModelSupportsImage,
-    );
-
-    await _truncateContext(_activeChat!, model);
-
-    final Message message;
-    if (screenshot != null &&
-        screenshot.isNotEmpty &&
-        _activeModelSupportsImage) {
-      message = Message.withImage(
-        text: query,
-        imageBytes: screenshot,
-        isUser: true,
-      );
-    } else {
-      message = Message.text(text: query, isUser: true);
-    }
-
-    await _activeChat!.addQuery(message);
-
-    String fullResponse = '';
-    String? currentThinking;
-    final textBuffer = StringBuffer();
-    final inferenceStopwatch = Stopwatch()..start();
-
-    // Tool call loop: after executing a tool, re-generate so the model
-    // can incorporate the tool result into its response.
-    bool hasPendingToolCalls = true;
-    int toolRounds = 0;
-    final List<Map<String, dynamic>> allToolCalls = [];
-
-    _isStreaming = true;
-    _streamingCompleter = Completer<void>();
-
-    // If the user already provided an image this turn, never re-capture.
-    var imageAlreadyAvailable =
-        (screenshot != null && screenshot.isNotEmpty) ||
-        attachments.any(
-          (a) => a.filePath != null && DocumentExtractor.isImageFile(a.name),
-        );
-    var screenshotToolCallsThisTurn = 0;
+    await _acquireInferenceLock();
 
     try {
-      while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
-        hasPendingToolCalls = false;
-        toolRounds++;
+      // Deterministic alarm shortcut: parse clock times and call set_alarm
+      // without relying on the on-device model to convert AM/PM.
+      final parsedAlarm = AlarmTimeParser.tryParse(query);
+      if (parsedAlarm != null) {
+        _statusController.add('Setting alarm...');
+        final result = await ToolExecutorService.instance.setAlarm(
+          parsedAlarm.hour,
+          parsedAlarm.minute,
+          'Nova alarm',
+        );
+        final ok = result['success'] == true;
+        final label =
+            '${parsedAlarm.hour.toString().padLeft(2, '0')}:'
+            '${parsedAlarm.minute.toString().padLeft(2, '0')}';
+        yield InferenceResult(
+          text: ok
+              ? 'Alarm set for $label.'
+              : 'Could not set the alarm: ${result['error'] ?? 'unknown error'}',
+          model: selector.primaryHeavy,
+          isStreaming: false,
+          toolCalls: [
+            {
+              'name': 'set_alarm',
+              'args': {
+                'hour': parsedAlarm.hour,
+                'minute': parsedAlarm.minute,
+                'message': 'Nova alarm',
+              },
+              'result': result,
+            },
+          ],
+        );
+        return;
+      }
 
-        await for (final event in _activeChat!.generateChatResponseAsync()) {
-          if (_streamingCompleter?.isCompleted ?? false) {
-            debugPrint('Stream aborted by releaseIdleResources');
-            break;
-          }
-          if (event is TextResponse) {
-            final token = event.token;
-            fullResponse += token;
-            textBuffer.write(token);
+      // Check if there are image attachments that need vision processing
+      final hasImageAttachments = attachments.any((att) {
+        if (att.type != AttachedDataType.file) return false;
+        final name = att.name.toLowerCase();
+        return name.endsWith('.jpg') ||
+            name.endsWith('.jpeg') ||
+            name.endsWith('.png') ||
+            name.endsWith('.gif') ||
+            name.endsWith('.webp');
+      });
 
-            // Try to parse function calls from the accumulated buffer.
-            final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
-            if (parsedCalls != null && parsedCalls.isNotEmpty) {
-              // Remove the raw JSON tool call text from fullResponse
-              final toolText = textBuffer.toString();
-              final idx = fullResponse.lastIndexOf(toolText);
-              if (idx >= 0) {
-                fullResponse =
-                    fullResponse.substring(0, idx) +
-                    fullResponse.substring(idx + toolText.length);
-              }
-              textBuffer.clear();
+      // Build attachment context if any
+      String attachmentContext = '';
+      if (attachments.isNotEmpty) {
+        final buffers = <String>[];
+        for (final att in attachments) {
+          buffers.add(await att.buildContextString());
+        }
+        attachmentContext = buffers.join('\n\n');
+      }
 
-              // Execute all tool calls found in this response
-              for (final parsed in parsedCalls) {
-                final toolName = parsed['name'] as String;
-                final toolArgs = Map<String, dynamic>.from(
-                  parsed['args'] as Map,
-                );
+      final ragContext = _capContextInjection(
+        await MemoryService.retrieveContext(
+              query,
+              conversationSummary:
+                  ConversationSummaryService.instance.activeSummary,
+            ) ??
+            '',
+      );
 
-                // Block redundant screen captures when an image is already
-                // in context (attached photo / prior screenshot this turn).
-                if (toolName == 'take_screenshot' &&
-                    (imageAlreadyAvailable ||
-                        screenshotToolCallsThisTurn > 0)) {
+      final hasExtraContext =
+          attachments.isNotEmpty ||
+          (screenshot != null && screenshot.isNotEmpty);
+      NovaModel model;
+      if (_debugMode) {
+        _statusController.add(
+          '[DEBUG] Model selection: overrideDirty=$_modelOverrideDirty, '
+          'preferred=${_preferredModelOverride?.displayName ?? "null"}, '
+          'screenshot=${screenshot != null}, '
+          'hasImageAttachments=$hasImageAttachments, thinking=$thinkingMode, '
+          'forcePrimaryModel=$forcePrimaryModel',
+        );
+      }
+
+      // Force primary model when requested - ensures heavy model is used for
+      // reliability-critical scenarios like assistant mode
+      if (forcePrimaryModel && _preferredCustomModelOverride == null) {
+        model = selector.primaryHeavy;
+        if (_debugMode) {
+          _statusController.add(
+            '[DEBUG] Force Primary Model: ${model.displayName}',
+          );
+        }
+      } else if (_preferredCustomModelOverride != null) {
+        // Custom model selected - use it directly (bypasses NovaModel selection)
+        // Return early with custom model loading path
+        yield* _processWithCustomModel(
+          query: query,
+          screenshot: screenshot,
+          thinkingMode: thinkingMode,
+          tools: tools,
+          ragContext: ragContext,
+          attachmentContext: _capContextInjection(attachmentContext),
+          hasImageAttachments: hasImageAttachments,
+          hasExtraContext: hasExtraContext,
+        );
+        return;
+      } else if (_modelOverrideDirty && _preferredModelOverride != null) {
+        model = _preferredModelOverride!;
+        if ((screenshot != null || hasImageAttachments) && !model.hasVision) {
+          model = selector.primaryHeavy.hasVision
+              ? selector.primaryHeavy
+              : selector.fastModel;
+          _statusController.add(
+            'Auto-switched to ${model.displayName} for image input',
+          );
+        }
+      } else {
+        model = _selectModel(
+          query: query,
+          screenshot: screenshot,
+          hasImageAttachments: hasImageAttachments,
+          thinkingMode: thinkingMode,
+        );
+      }
+
+      if (_debugMode) {
+        _statusController.add(
+          '[DEBUG] Selected model: ${model.displayName} '
+          '(hasVision=${model.hasVision}, hasThinking=${model.hasThinking})',
+        );
+      }
+
+      _statusController.add('Using ${model.displayName}');
+
+      InferenceModel inferenceModel;
+      try {
+        inferenceModel = await _getOrCreateModel(model, screenshot);
+      } on ModelNeedsFilePickException {
+        rethrow; // Let the UI handle this
+      } on ModelException catch (e) {
+        _statusController.add('Error: ${e.message}');
+        yield InferenceResult(
+          text:
+              '⚠️ ${e.message}\n\n${e.suggestion ?? 'Check Settings > AI Models.'}',
+          model: model,
+          isStreaming: false,
+        );
+        return;
+      } catch (e) {
+        _statusController.add('Error: $e');
+        yield InferenceResult(
+          text: 'Failed to load model: $e\n\nCheck Settings > AI Models.',
+          model: model,
+          isStreaming: false,
+        );
+        return;
+      }
+
+      if (_modelOverrideDirty) {
+        _modelOverrideDirty = false;
+      }
+
+      final chatTools = _toolsForCreateChat(model, tools);
+      if (_activeChat == null) {
+        _isLoadingModel = true;
+        _statusController.add('Preparing chat session...');
+      }
+      try {
+        _activeChat ??= await inferenceModel.createChat(
+          systemInstruction: await _systemPromptFor(
+            model,
+            ragContext,
+            _capContextInjection(attachmentContext),
+          ),
+          tools: chatTools,
+          supportImage: model.hasVision && _activeModelSupportsImage,
+        );
+      } finally {
+        if (_isLoadingModel) {
+          _isLoadingModel = false;
+        }
+      }
+
+      final ragTokenEstimate = MessageLimits.estimateTokens(ragContext);
+      final historyTokenEstimate = _activeChat!.fullHistory.fold<int>(
+        0,
+        (sum, msg) => sum + _estimateTokens(msg),
+      );
+
+      await _truncateContext(_activeChat!, model);
+
+      final queryError = _validateQueryLength(
+        query: query,
+        model: model,
+        hasAttachments: hasExtraContext,
+        historyTokenEstimate: historyTokenEstimate,
+        ragTokenEstimate: ragTokenEstimate,
+      );
+      if (queryError != null) {
+        _statusController.add('Message too long');
+        yield InferenceResult(
+          text: '⚠️ $queryError',
+          model: model,
+          isStreaming: false,
+        );
+
+        return;
+      }
+
+      final Message message;
+      if (screenshot != null &&
+          screenshot.isNotEmpty &&
+          _activeModelSupportsImage) {
+        message = Message.withImage(
+          text: query,
+          imageBytes: screenshot,
+          isUser: true,
+        );
+      } else {
+        message = Message.text(text: query, isUser: true);
+      }
+
+      await _activeChat!.addQuery(message);
+
+      String fullResponse = '';
+      String? currentThinking;
+      final textBuffer = StringBuffer();
+      final inferenceStopwatch = Stopwatch()..start();
+
+      // Tool call loop: after executing a tool, re-generate so the model
+      // can incorporate the tool result into its response.
+      bool hasPendingToolCalls = true;
+      int toolRounds = 0;
+      final List<Map<String, dynamic>> allToolCalls = [];
+
+      _isStreaming = true;
+      _streamingCompleter = Completer<void>();
+
+      // If the user already provided an image this turn, never re-capture.
+      var imageAlreadyAvailable =
+          (screenshot != null && screenshot.isNotEmpty) ||
+          attachments.any(
+            (a) => a.filePath != null && DocumentExtractor.isImageFile(a.name),
+          );
+      var screenshotToolCallsThisTurn = 0;
+
+      try {
+        while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
+          hasPendingToolCalls = false;
+          toolRounds++;
+
+          await for (final event in _activeChat!.generateChatResponseAsync()) {
+            if (_streamingCompleter?.isCompleted ?? false) {
+              debugPrint('Stream aborted by releaseIdleResources');
+              break;
+            }
+            if (event is TextResponse) {
+              final token = event.token;
+              fullResponse += token;
+              textBuffer.write(token);
+
+              // Try to parse function calls from the accumulated buffer.
+              final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
+              if (parsedCalls != null && parsedCalls.isNotEmpty) {
+                // Remove the raw JSON tool call text from fullResponse
+                final toolText = textBuffer.toString();
+                final idx = fullResponse.lastIndexOf(toolText);
+                if (idx >= 0) {
+                  fullResponse =
+                      fullResponse.substring(0, idx) +
+                      fullResponse.substring(idx + toolText.length);
+                }
+                textBuffer.clear();
+
+                // Execute all tool calls found in this response
+                for (final parsed in parsedCalls) {
+                  final toolName = parsed['name'] as String;
+                  final toolArgs = Map<String, dynamic>.from(
+                    parsed['args'] as Map,
+                  );
+
+                  // Block redundant screen captures when an image is already
+                  // in context (attached photo / prior screenshot this turn).
+                  if (toolName == 'take_screenshot' &&
+                      (imageAlreadyAvailable ||
+                          screenshotToolCallsThisTurn > 0)) {
+                    allToolCalls.add({
+                      'name': toolName,
+                      'args': toolArgs,
+                      'status': 'done',
+                    });
+                    await _activeChat!.addQuery(
+                      Message.toolResponse(
+                        toolName: toolName,
+                        response: {
+                          'success': true,
+                          'message':
+                              'An image is already available in this turn. '
+                              'Describe that image. Do not call take_screenshot again.',
+                        },
+                      ),
+                    );
+                    hasPendingToolCalls = true;
+                    continue;
+                  }
+
+                  _statusController.add('Executing $toolName...');
+
                   allToolCalls.add({
                     'name': toolName,
                     'args': toolArgs,
-                    'status': 'done',
+                    'status': 'executing',
                   });
-                  await _activeChat!.addQuery(
-                    Message.toolResponse(
-                      toolName: toolName,
-                      response: {
-                        'success': true,
-                        'message':
-                            'An image is already available in this turn. '
-                            'Describe that image. Do not call take_screenshot again.',
-                      },
-                    ),
-                  );
+
+                  await for (final update in _executeToolWithProgress(
+                    toolName,
+                    toolArgs,
+                    allToolCalls,
+                    model,
+                    currentThinking,
+                    fullResponse,
+                    thinkingMode,
+                  )) {
+                    yield update;
+                  }
+
+                  if (toolName == 'take_screenshot') {
+                    screenshotToolCallsThisTurn++;
+                    imageAlreadyAvailable = true;
+                  }
+
                   hasPendingToolCalls = true;
-                  continue;
                 }
-
-                _statusController.add('Executing $toolName...');
-
-                allToolCalls.add({
-                  'name': toolName,
-                  'args': toolArgs,
-                  'status': 'executing',
-                });
-
-                await for (final update in _executeToolWithProgress(
-                  toolName,
-                  toolArgs,
-                  allToolCalls,
-                  model,
-                  currentThinking,
-                  fullResponse,
-                  thinkingMode,
-                )) {
-                  yield update;
-                }
-
-                if (toolName == 'take_screenshot') {
-                  screenshotToolCallsThisTurn++;
-                  imageAlreadyAvailable = true;
-                }
-
-                hasPendingToolCalls = true;
+              } else {
+                yield InferenceResult(
+                  text: fullResponse,
+                  model: model,
+                  isStreaming: true,
+                  thinking: thinkingMode ? currentThinking : null,
+                  toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+                );
               }
-            } else {
+            } else if (event is ThinkingResponse) {
+              currentThinking = event.content;
               yield InferenceResult(
                 text: fullResponse,
                 model: model,
                 isStreaming: true,
-                thinking: thinkingMode ? currentThinking : null,
+                thinking: currentThinking,
                 toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
               );
-            }
-          } else if (event is ThinkingResponse) {
-            currentThinking = event.content;
-            yield InferenceResult(
-              text: fullResponse,
-              model: model,
-              isStreaming: true,
-              thinking: currentThinking,
-              toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
-            );
-          } else if (event is FunctionCallResponse) {
-            if (event.name == 'take_screenshot' &&
-                (imageAlreadyAvailable || screenshotToolCallsThisTurn > 0)) {
+            } else if (event is FunctionCallResponse) {
+              if (event.name == 'take_screenshot' &&
+                  (imageAlreadyAvailable || screenshotToolCallsThisTurn > 0)) {
+                allToolCalls.add({
+                  'name': event.name,
+                  'args': Map<String, dynamic>.from(event.args),
+                  'status': 'done',
+                });
+                await _activeChat!.addQuery(
+                  Message.toolResponse(
+                    toolName: event.name,
+                    response: {
+                      'success': true,
+                      'message':
+                          'An image is already available in this turn. '
+                          'Describe that image. Do not call take_screenshot again.',
+                    },
+                  ),
+                );
+                hasPendingToolCalls = true;
+                continue;
+              }
+
+              // Plugin-level function call detected
+              _statusController.add('Executing ${event.name}...');
+
               allToolCalls.add({
                 'name': event.name,
                 'args': Map<String, dynamic>.from(event.args),
-                'status': 'done',
+                'status': 'executing',
               });
-              await _activeChat!.addQuery(
-                Message.toolResponse(
-                  toolName: event.name,
-                  response: {
-                    'success': true,
-                    'message':
-                        'An image is already available in this turn. '
-                        'Describe that image. Do not call take_screenshot again.',
-                  },
-                ),
-              );
+
+              await for (final update in _executeToolWithProgress(
+                event.name,
+                Map<String, dynamic>.from(event.args),
+                allToolCalls,
+                model,
+                currentThinking,
+                fullResponse,
+                thinkingMode,
+              )) {
+                yield update;
+              }
+
+              if (event.name == 'take_screenshot') {
+                screenshotToolCallsThisTurn++;
+                imageAlreadyAvailable = true;
+              }
+
               hasPendingToolCalls = true;
-              continue;
             }
-
-            // Plugin-level function call detected
-            _statusController.add('Executing ${event.name}...');
-
-            allToolCalls.add({
-              'name': event.name,
-              'args': Map<String, dynamic>.from(event.args),
-              'status': 'executing',
-            });
-
-            await for (final update in _executeToolWithProgress(
-              event.name,
-              Map<String, dynamic>.from(event.args),
-              allToolCalls,
-              model,
-              currentThinking,
-              fullResponse,
-              thinkingMode,
-            )) {
-              yield update;
-            }
-
-            if (event.name == 'take_screenshot') {
-              screenshotToolCallsThisTurn++;
-              imageAlreadyAvailable = true;
-            }
-
-            hasPendingToolCalls = true;
           }
         }
+      } finally {
+        _isStreaming = false;
+        if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+          _streamingCompleter!.complete();
+        }
+        _streamingCompleter = null;
+        _onStreamEnded();
       }
-    } finally {
-      _isStreaming = false;
-      if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
-        _streamingCompleter!.complete();
-      }
-      _streamingCompleter = null;
-      _onStreamEnded();
-    }
 
-    if (toolRounds >= _maxToolRounds && hasPendingToolCalls) {
+      if (toolRounds >= _maxToolRounds && hasPendingToolCalls) {
+        inferenceStopwatch.stop();
+        yield InferenceResult(
+          text: '$fullResponse\n\n[Tool call limit reached]',
+          model: model,
+          isStreaming: false,
+          thinking: thinkingMode ? currentThinking : null,
+          inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+        );
+        await MemoryService.storeConversation(query, fullResponse);
+        return;
+      }
+
       inferenceStopwatch.stop();
       yield InferenceResult(
-        text: '$fullResponse\n\n[Tool call limit reached]',
+        text: fullResponse,
         model: model,
         isStreaming: false,
         thinking: thinkingMode ? currentThinking : null,
         inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
       );
+
       await MemoryService.storeConversation(query, fullResponse);
-      return;
+    } finally {
+      _releaseInferenceLock();
     }
-
-    inferenceStopwatch.stop();
-    yield InferenceResult(
-      text: fullResponse,
-      model: model,
-      isStreaming: false,
-      thinking: thinkingMode ? currentThinking : null,
-      inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
-    );
-
-    await MemoryService.storeConversation(query, fullResponse);
   }
 
   /// Try to extract function calls from accumulated text.
@@ -1884,39 +2184,54 @@ class ModelOrchestrator {
     String? ragContext,
     String? attachmentContext,
   ]) async {
+    final compact =
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        model == NovaModel.gemma4E2b;
+
     final identity = _getCachedIdentity();
 
     String base;
     if (identity != null && identity.name != 'Nova') {
-      base = identity.buildSystemPrompt();
+      base = compact
+          ? 'You are ${identity.name}. Be concise and helpful.'
+          : identity.buildSystemPrompt();
     } else {
-      base = _getAssistantRole().systemPrompt;
+      base = compact
+          ? _getAssistantRole().systemPrompt.split('\n').first
+          : _getAssistantRole().systemPrompt;
     }
 
-    final thinkingSuffix = model.hasThinking
+    final thinkingSuffix = model.hasThinking && !compact
         ? ' When asked to think step by step, show your reasoning in <thinking> tags '
               'before your final answer.'
         : '';
 
     final buffer = StringBuffer('$base$thinkingSuffix');
-    buffer.write('\n\n${await _languageInstruction()}');
+    if (!compact) {
+      buffer.write('\n\n${await _languageInstruction()}');
+    }
 
     if (ragContext != null && ragContext.isNotEmpty) {
-      buffer.write('\n\n$ragContext');
+      buffer.write('\n\n${_capContextInjection(ragContext)}');
     }
 
     if (attachmentContext != null && attachmentContext.isNotEmpty) {
-      buffer.write('\n\n--- Attached Data ---\n$attachmentContext');
+      buffer.write(
+        '\n\n--- Attached Data ---\n${_capContextInjection(attachmentContext)}',
+      );
     }
 
-    // Add data source context from MCP sources
-    final enabledSources = McpService.instance.sources
-        .where((s) => s.enabled)
-        .toList();
-    if (enabledSources.isNotEmpty) {
-      buffer.write('\n\n--- Connected Data Sources ---');
-      for (final source in enabledSources) {
-        buffer.write('\n- ${source.name}: ${source.description}');
+    if (!compact) {
+      // Add data source context from MCP sources
+      final enabledSources = McpService.instance.sources
+          .where((s) => s.enabled)
+          .toList();
+      if (enabledSources.isNotEmpty) {
+        buffer.write('\n\n--- Connected Data Sources ---');
+        for (final source in enabledSources) {
+          buffer.write('\n- ${source.name}: ${source.description}');
+        }
       }
     }
 

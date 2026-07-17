@@ -17,6 +17,7 @@ import 'package:nova_assistant/services/task_service.dart';
 import 'package:nova_assistant/services/note_service.dart';
 import 'package:nova_assistant/services/notification_service.dart';
 import 'package:nova_assistant/services/tts_service.dart';
+import 'package:nova_assistant/services/prompt_presets_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/download_progress_service.dart';
@@ -52,6 +53,7 @@ void main() async {
     await NotificationService.instance.initialize();
     await NotificationService.instance.requestPermission();
     await TtsService.instance.initialize();
+    await PromptPresetsService.instance.initialize();
 
     _prefetchModels();
   } catch (e) {

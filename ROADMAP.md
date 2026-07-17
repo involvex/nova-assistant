@@ -17,6 +17,9 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 - [x] Tool visualization + streaming progress (EventChannel)
 - [x] RAG memory + custom memories
 - [x] **Memory overview** (stored vs derived, promote, ask-about-me)
+- [x] **Message limits** (model-aware caps + pre-send guards)
+- [x] **Follow-up suggestions** (bulb button chips + reroll)
+- [x] **Settings JSON backup** (export/import, no models)
 - [x] **Knowledge base UI** + real PDF text extraction → RAG
 - [x] **Conversation summaries** (extractive, injected into RAG)
 - [x] **Edit user message + resend**
@@ -75,7 +78,7 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 
 - [x] Semantic search (TF-IDF)
 - [x] Conversation summaries
-- [ ] Proactive suggestions
+- [x] Proactive suggestions (bulb follow-up chips)
 - [ ] Multi-language support
 - [x] Code syntax highlighting (Markdown)
 - [x] Document extract/chunk + Knowledge base UI + PDF extract

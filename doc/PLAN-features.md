@@ -25,6 +25,7 @@
 | Assistant language | Done | Prefs `match`/`en`/`de`; system-prompt steering (UI stays English; full i18n later) |
 | Message limits + stability guards | Done | Model-aware char caps; orchestrator pre-send validation |
 | High context window + compact | Done | Gemma 4 KV 2048→4096 toggle; auto + manual compact of older turns |
+| Adult mode | Done | Local prefs + system-prompt suffix; confirm dialog; still refuses illegal content |
 | Settings JSON backup | Done | Export/import prefs, identity, MCP config, presets (no models) |
 | Follow-up suggestions (bulb) | Done | 3 contextual chips + reroll above input |
 | Response regeneration | Done | |

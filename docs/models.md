@@ -45,6 +45,10 @@ Enable **High context window** in **Settings** to raise the KV limit to **4096**
 
 When a thread gets long, **Compact context** (manual button in chat) or **Auto-compact context** (Settings, on by default) summarizes older turns so new messages still fit without starting a new chat. The full message list stays visible; only the inference session is replayed from the summary plus recent turns.
 
+## Adult mode
+
+**Adult mode** (Settings, default off) is a local-only preference that appends a short system-prompt suffix so Nova answers legal adult topics more directly. It does not unlock illegal content and cannot fully override the base model’s own refusals.
+
 ## RAM guidance
 
 | Device RAM | Recommendation |

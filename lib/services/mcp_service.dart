@@ -181,8 +181,8 @@ class McpService {
       return true;
     }
 
-    lastConnectError = client.lastError ??
-        'Failed to connect to MCP server: ${config.name}';
+    lastConnectError =
+        client.lastError ?? 'Failed to connect to MCP server: ${config.name}';
     debugPrint(lastConnectError);
     return false;
   }

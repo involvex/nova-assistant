@@ -124,11 +124,7 @@ class ModelManager {
         hypothesisId: 'H1-H3',
         location: 'model_manager.dart:installFromNetwork:start',
         message: 'installFromNetwork started',
-        data: {
-          'url': url,
-          'fileName': fileName,
-          'modelType': modelType.name,
-        },
+        data: {'url': url, 'fileName': fileName, 'modelType': modelType.name},
       );
       // #endregion
 

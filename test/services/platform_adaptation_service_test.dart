@@ -7,12 +7,14 @@ void main() {
     test('current returns capabilities for current platform', () {
       final capabilities = PlatformCapabilities.current;
 
-      // On test environment (not web), all features should be supported
+      // Test default target platform is Android — vision/thinking/FC/streaming
+      // stay on; parallel sessions are capped off on Android for RAM safety.
       expect(capabilities.supportsVision, true);
       expect(capabilities.supportsThinking, true);
       expect(capabilities.supportsFunctionCalling, true);
       expect(capabilities.supportsStreaming, true);
-      expect(capabilities.supportsParallelSessions, true);
+      expect(capabilities.supportsParallelSessions, false);
+      expect(capabilities.platformName, 'native');
     });
 
     test('supportsFeature returns correct value', () {
@@ -82,9 +84,16 @@ void main() {
       final service = PlatformAdaptationService.instance;
       final warning = service.getMemoryWarning(NovaModel.gemma4E2b);
 
-      // On native, threshold is 4000MB. Gemma 4 E2B is 2400MB, so no warning.
-      // SmolLM is 135MB, so no warning either.
-      expect(warning, isNull);
+      // Gemma 4 E2B is ~2400MB — warn so mid-range devices avoid LMK.
+      expect(warning, isNotNull);
+      expect(warning, contains('2400'));
+      expect(warning!.toLowerCase(), contains('ram'));
+    });
+
+    test('maxParallelSessions is 1 on Android', () {
+      final service = PlatformAdaptationService.instance;
+
+      expect(service.maxParallelSessions, 1);
     });
 
     test('getPlatformError returns original error on native', () {

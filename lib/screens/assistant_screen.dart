@@ -13,6 +13,7 @@ import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/services/model_release_policy.dart';
 import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
@@ -127,21 +128,24 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _saveMessages() async {
+    final persistable = _messages
+        .where((m) => !m.isStreaming && !(m.text.isEmpty && !m.isUser))
+        .toList();
     if (widget.conversationId != null) {
       final conversation = await ChatHistoryService.getConversation(
         widget.conversationId!,
       );
       if (conversation != null) {
-        final updated = conversation.copyWith(messages: List.from(_messages));
+        final updated = conversation.copyWith(messages: List.from(persistable));
         await ChatHistoryService.updateConversation(updated);
         await ConversationSummaryService.instance.maybeUpdateSummary(updated);
       }
     } else {
-      await ChatHistoryService.save(_messages);
+      await ChatHistoryService.save(persistable);
       final conversations = await ChatHistoryService.loadConversations();
       if (conversations.isNotEmpty) {
         await ConversationSummaryService.instance.maybeUpdateSummary(
-          conversations.first.copyWith(messages: List.from(_messages)),
+          conversations.first.copyWith(messages: List.from(persistable)),
         );
       }
     }
@@ -467,9 +471,12 @@ class _AssistantScreenState extends State<AssistantScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      // Never unload while LiteRT is generating — causes SIGABRT.
-      if (!ModelOrchestrator.instance.isStreaming) {
-        ModelOrchestrator.instance.releaseIdleResources();
+      final shouldRelease = ModelReleasePolicy.shouldReleaseOnPause(
+        keepModelWarm: ModelOrchestrator.instance.keepModelWarm,
+        isStreaming: ModelOrchestrator.instance.isStreaming,
+      );
+      if (shouldRelease) {
+        ModelOrchestrator.instance.releaseIdleResources(force: true);
       }
     } else if (state == AppLifecycleState.resumed) {
       _checkModelAvailability();
@@ -704,6 +711,10 @@ class _AssistantScreenState extends State<AssistantScreen>
       debugPrint('Screenshot loaded: ${_currentScreenshot != null}');
     }
 
+    ModelOrchestrator.instance.setPendingReplayMessages(
+      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+    );
+
     _inputController.clear();
     _clearFollowUpSuggestions();
 
@@ -818,6 +829,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         }
         _shouldPreserveScreenshot = false;
       });
+      await _saveMessages();
       _attachmentManager.clear();
     }
   }

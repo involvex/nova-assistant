@@ -5,10 +5,7 @@ import 'package:nova_assistant/services/chat_history_service.dart';
 
 /// Result of an explicit context compact: extractive summary plus replay list.
 class CompactResult {
-  const CompactResult({
-    required this.summary,
-    required this.retainedMessages,
-  });
+  const CompactResult({required this.summary, required this.retainedMessages});
 
   final String summary;
   final List<ChatMessage> retainedMessages;

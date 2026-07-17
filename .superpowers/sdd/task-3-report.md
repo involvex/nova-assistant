@@ -8,7 +8,7 @@
 
 | Hash | Message |
 |------|---------|
-| `3614ac9` | fix: stop unloading model on every pause; reinject on send; persist replies after stream |
+| `6493f29` | fix: stop unloading model on every pause; reinject on send; persist replies after stream |
 
 ## What Was Implemented
 

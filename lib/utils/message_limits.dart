@@ -58,10 +58,7 @@ class MessageLimits {
     return MessageLimitTier.fast;
   }
 
-  static int kvTokenLimitFor(
-    NovaModel model, {
-    bool highContext = false,
-  }) {
+  static int kvTokenLimitFor(NovaModel model, {bool highContext = false}) {
     switch (model) {
       case NovaModel.smollm:
         return 512;
@@ -113,10 +110,7 @@ class MessageLimits {
     bool hasAttachments = false,
     bool highContext = false,
   }) {
-    final kvLimit = kvTokenLimitFor(
-      effectiveModel,
-      highContext: highContext,
-    );
+    final kvLimit = kvTokenLimitFor(effectiveModel, highContext: highContext);
     final ratio = highContext ? highContextBudgetRatio : contextBudgetRatio;
     final usableBudget = (kvLimit * ratio).round();
 
@@ -199,10 +193,7 @@ class MessageLimits {
     );
     if (text.length <= maxChars) return null;
 
-    final kvLimit = kvTokenLimitFor(
-      effectiveModel,
-      highContext: highContext,
-    );
+    final kvLimit = kvTokenLimitFor(effectiveModel, highContext: highContext);
     final queryTokens = estimateTokens(text);
 
     return 'Prompt too large (~$queryTokens tokens, KV limit $kvLimit). '

@@ -74,20 +74,14 @@ void main() {
 
     test('kvTokenLimitFor Gemma 4 returns 2048 on all platforms in tests', () {
       expect(
-        MessageLimits.kvTokenLimitFor(
-          NovaModel.gemma4E2b,
-          highContext: false,
-        ),
+        MessageLimits.kvTokenLimitFor(NovaModel.gemma4E2b, highContext: false),
         2048,
       );
     });
 
     test('kvTokenLimitFor Gemma 4 highContext is 4096', () {
       expect(
-        MessageLimits.kvTokenLimitFor(
-          NovaModel.gemma4E2b,
-          highContext: true,
-        ),
+        MessageLimits.kvTokenLimitFor(NovaModel.gemma4E2b, highContext: true),
         4096,
       );
     });

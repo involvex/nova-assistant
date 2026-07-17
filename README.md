@@ -2,182 +2,128 @@
 
 > An on-device AI assistant powered by Gemma, built with Flutter.
 
-Nova runs AI models entirely on your device - no data is sent to external servers. Get fast, private AI assistance with voice input, screen awareness, and tool execution capabilities.
+Nova runs AI models entirely on your device — no chat data is sent to external servers. Voice input, screen awareness, tools, RAG memory, and MCP integrations are all local-first.
+
+**Docs site:** [GitHub Pages](https://involvex.github.io/nova-assistant/) (after Pages is enabled) · source in [`docs/`](docs/)
+
+**Agent skill:** [`.cursor/skills/nova-dev`](.cursor/skills/nova-dev/SKILL.md) — tell any coding agent: *use the nova_dev skill to setup and build the app*
 
 ## Features
 
-- **On-Device AI** - All inference runs locally using Gemma models via `flutter_gemma`
-- **Multiple Models** - Automatic model selection based on query complexity and capabilities
-- **Voice Input** - Speak to Nova using speech-to-text transcription
-- **Screen Capture** - Share your screen context with the assistant
-- **File & URL Attachments** - Attach files and URLs as context for queries
-- **Tool Execution** - Set alarms, open apps, search the web, and more
-- **Tool Visualization** - See tools execute in real-time with status chips
-- **RAG Memory** - Nova remembers past conversations for contextual responses
-- **Custom Memories** - Add personal information Nova should remember
-- **Agent Identity** - Customize Nova's name, avatar, skills, and knowledge sources
-- **Multiple Roles** - Helpful, Coder, Creative, Student, or Analyst personas
-- **Error Recovery** - Actionable error chips with retry and settings actions
-- **Context Management** - Smart history truncation when approaching token limits
-- **Battery Optimization** - Idle model release with lifecycle-aware suspend
-- **Model Import** - Install models from local files with canonical naming
+- **On-device AI** — Gemma / LiteRT via `flutter_gemma`
+- **Multi-model** — SmolLM, FastVLM, Gemma 3 1B, Gemma 4 E2B + custom import
+- **Voice** — speech-to-text input
+- **Screen awareness** — MediaProjection screenshots for vision models
+- **Tools** — alarms, apps, web, weather, SMS, settings, screenshot
+- **Tasks & notes** — local productivity tools exposed to the model
+- **RAG memory** — conversation + custom memories
+- **MCP** — HTTP/SSE and stdio external tools (Streamable HTTP TBD)
+- **Beginner / Expert** UI modes and onboarding
+- **Battery-aware** idle model unload (safe with active streams)
 
-## Supported Models
+## Supported models
 
 | Model | Size | Vision | Thinking | Tools | Format |
 |-------|------|--------|----------|-------|--------|
-| SmolLM-135M | 135MB | No | No | Yes | .task |
-| FastVLM-0.5B | 500MB | Yes | No | Yes | .litertlm |
-| Gemma 3 1B | 500MB | No | No | Yes | .litertlm |
-| Gemma 4 E2B | 2400MB | Yes | Yes | Yes | .litertlm |
+| SmolLM-135M | 135MB | No | No | Yes | `.task` |
+| FastVLM-0.5B | 500MB | Yes | No | Yes | `.litertlm` |
+| Gemma 3 1B | 500MB | No | No | Yes | `.litertlm` |
+| Gemma 4 E2B | 2400MB | Yes | Yes | Yes | `.litertlm` |
 
-## Getting Started
+GGUF is not supported. Prefer SmolLM / Gemma 3 1B on phones with ≤6 GB RAM.
+
+## Getting started
 
 ### Prerequisites
 
-- Flutter SDK >=3.44.0
-- Dart SDK >=3.12.0 <4.0.0
-- Android Studio or VS Code
-- Android device or emulator (API 26+)
+- Flutter **3.47.0-0.1.pre** (beta) — see `pubspec.yaml`
+- Android device/emulator **API 26+** (arm64 recommended)
+- Android Studio or VS Code / Cursor
 
-### Installation
+### Install and run
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/nova_assistant.git
-cd nova_assistant
-```
-
-2. Install dependencies:
-```bash
+git clone https://github.com/involvex/nova-assistant.git
+cd nova-assistant
 flutter pub get
+flutter run -d android
 ```
 
-3. Run the app:
-```bash
-flutter run
-```
-
-### Building
+### Build
 
 ```bash
-# Android APK (debug)
-flutter build apk --debug
-
-# Android APK (release)
+flutter build apk --debug --target-platform android-arm64
 flutter build apk --release
-
-# Web
-flutter build web --release
+flutter build appbundle --release
 ```
 
-## Project Structure
+### Agent-assisted setup
 
-```
-nova_assistant/
-  lib/
-    main.dart                    # App entry point
-    models/                      # Data models
-    screens/                     # UI screens
-    services/                    # Business logic
-    platform/                    # Platform channels
-    tools/                       # AI tool definitions
-    widgets/                     # Reusable UI components
-  test/                          # Tests
-  android/                       # Android native code
+```text
+use the nova_dev skill to setup and build the app
+use nova_dev to configure my own model
 ```
 
-## Architecture
+## Project structure
 
-### Core Patterns
+```
+nova-assistant/
+  lib/                 # Dart app (models, screens, services, tools)
+  android/             # Kotlin native (tools, capture, assistant)
+  docs/                # Documentation site (GitHub Pages)
+  test/                # Unit / widget tests
+  .cursor/skills/      # Agent skills (nova-dev)
+  AGENTS.md            # Full coding agent guide
+  ROADMAP.md           # Product roadmap
+```
 
-- **Singleton Services** - Services use lazy singleton initialization
-- **Stream-Based Communication** - Services communicate via broadcast streams
-- **Platform Channels** - Native functionality via MethodChannel
+There is **no** `android.backup/` — that stale tree was removed.
 
-### Model Selection
+## Architecture (brief)
 
-Nova automatically selects the best model based on your query:
-- Short queries (<8 words) use SmolLM for fast responses
-- Image input switches to FastVLM or Gemma 4 (vision-capable)
-- Thinking mode uses Gemma 4 E2B (reasoning-capable)
-- Complex queries default to Gemma 4 E2B (most capable)
+1. UI → `ModelOrchestrator.processMessage`
+2. RAG + model select + `flutter_gemma` stream
+3. Tool calls → Dart services or Android `ToolExecutor`
+4. Idle / lifecycle unload **after** streaming completes
 
-### Available Tools
-
-| Tool | Description |
-|------|-------------|
-| `get_time` | Get current time, date, and day |
-| `set_alarm` | Set a device alarm |
-| `cancel_alarm` | Cancel an existing alarm |
-| `open_app` | Open an app by package name |
-| `search_web` | Open browser with search query |
-| `get_weather` | Get weather for a location |
-| `send_sms` | Send an SMS message |
-| `open_settings` | Open device Settings |
-| `take_screenshot` | Capture current screen |
-
-## Privacy
-
-- **100% On-Device** - All AI inference runs locally
-- **No Data Collection** - No analytics or telemetry
-- **Local Storage** - Chat history stored via SharedPreferences
-- **Trusted Sources** - Models downloaded from HuggingFace
-
-## Platform Support
-
-| Platform | Status |
-|----------|--------|
-| Android | Fully supported |
-| Web | Limited (no vision, thinking, or tools) |
-| Windows | Experimental |
+Details: [docs/architecture.md](docs/architecture.md) · [AGENTS.md](AGENTS.md)
 
 ## Development
 
-### Commands
-
 ```bash
-# Install dependencies
 flutter pub get
-
-# Run tests
-flutter test
-
-# Run tests with coverage
-flutter test --coverage
-
-# Analyze code
-flutter analyze
-
-# Format code
 dart format .
+flutter analyze --no-pub
+flutter test
 ```
 
-### Code Style
+CI (`.github/workflows/ci.yml`) runs format, analyze, tests, and a debug APK build on `main`.
 
-This project enforces strict Dart style via `analysis_options.yaml`. Key rules:
-- Prefer `final` for local variables
-- Always use trailing commas
-- Use `const` constructors when possible
-- Prefer `SizedBox` over `Container` for spacing
+## Privacy
 
-See [AGENTS.md](AGENTS.md) for complete coding guidelines.
+- 100% on-device inference
+- No analytics by default
+- Local storage only (SharedPreferences / SQLite / app files)
+
+## Platform support
+
+| Platform | Status |
+|----------|--------|
+| Android | Supported |
+| Web | Limited (vision / thinking / tools constrained) |
+| Windows | Experimental |
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+See [docs/contributing.md](docs/contributing.md) and [ROADMAP.md](ROADMAP.md).
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-- [Flutter](https://flutter.dev/) - Cross-platform UI framework
-- [flutter_gemma](https://pub.dev/packages/flutter_gemma) - On-device AI inference
-- [Gemma](https://ai.google.dev/gemma) - Google's open-source AI models
-- [HuggingFace](https://huggingface.co/) - Model hosting and distribution
+- [Flutter](https://flutter.dev/)
+- [flutter_gemma](https://pub.dev/packages/flutter_gemma)
+- [Gemma](https://ai.google.dev/gemma)
+- [HuggingFace](https://huggingface.co/)

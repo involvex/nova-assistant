@@ -1,55 +1,31 @@
 # Nova Assistant Roadmap
 
-This document outlines the planned features and improvements for Nova Assistant.
+This document outlines planned features and improvements for Nova Assistant.
+Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 
 ---
 
-## Current Status (v0.2.0)
+## Current Status (v0.2.1)
 
 - [x] Basic chat interface with streaming responses
 - [x] Multiple AI model support (SmolLM, FastVLM, Gemma 3, Gemma 4)
 - [x] Automatic model selection based on query complexity
 - [x] Voice input via speech-to-text
-- [x] Screen capture and image attachment
+- [x] Screen capture and image attachment (on-demand MediaProjection)
 - [x] Tool execution (alarms, apps, web search, weather, SMS)
-- [x] RAG memory for conversation context
-- [x] Custom memories system
-- [x] Agent identity customization
-- [x] Assistant roles (helpful, coder, creative, student, analyst)
-- [x] Model download and management
-- [x] Dark theme UI
-- [x] Fix model re-download bug (canonical filename consistency)
-- [x] Fix tool call truncation (fullResponse cleanup, multi-call support, string args)
-- [x] Error handling improvements (ModelException hierarchy, retry/settings action chips)
-- [x] File/URL attachment support
-- [x] Conversation export (JSON/text)
-- [x] Search in history
-- [x] Message timestamps and copy support
-- [x] Message reactions (data model, rendering, picker UI)
-- [x] Battery optimization (idle model release, lifecycle-aware suspend)
-- [x] Offline mode indicator with direct Install button
-- [x] Context window management (token-budget truncation)
-- [x] Tool call visualization (executing/done chips in ChatBubble)
-- [x] Model performance metrics (Stopwatch-based inference time)
-- [x] MCP-like integration (platform-channel tools + JSON schema definitions)
-- [x] Code syntax highlighting (MarkdownStyleSheet enhancement)
-- [x] Onboarding flow (welcome, mode selection, beginner setup wizard)
-- [x] Beginner/Expert mode system (simplified UI for beginners)
-- [x] Model Browser with HuggingFace search and download
-- [x] Custom model import from file (.litertlm, .task, .gguf)
-- [x] Model selector bottom sheet (auto/manual toggle)
-- [x] Debug mode with verbose logging
-- [x] HuggingFace token configuration for authenticated downloads
-- [x] External tool provider abstraction (HTTP, MCP, Local)
-- [x] Multi-turn tool call loop (up to 5 sequential rounds)
-- [x] Streaming tool results - Real-time progress via EventChannel (ToolProgress model, progress bars in ChatBubble)
-- [x] Task management - Task model, TaskService (CRUD, persistence, AI tools), TasksScreen with filters/sort/tags
-- [x] Note taking - Note model, NoteService (CRUD, search, pin, AI tools), NotesScreen with search/tags
-- [x] Document analysis - DocumentExtractor (text/PDF), DocumentChunker with relevance scoring
-- [x] MCP client - McpClient with JSON-RPC 2.0 over HTTP/SSE and stdio
-- [x] MCP server support - McpService server management, MCP Settings UI with add/connect/disconnect
-- [x] Parallel session management - Up to 3 concurrent chat sessions
-- [x] Platform adaptation - Web-specific workarounds for vision, thinking, function calling
+- [x] Tool visualization + streaming progress (EventChannel)
+- [x] RAG memory + custom memories
+- [x] Agent identity + assistant roles
+- [x] Model download, HF token, custom import (`.litertlm` / `.task`)
+- [x] Beginner/Expert modes + onboarding
+- [x] Tasks, notes, document analysis helpers
+- [x] MCP client (HTTP/SSE + stdio) + MCP settings UI
+- [x] Parallel sessions (capped to 1 on Android for RAM safety)
+- [x] CI + release workflows; docs GitHub Pages workflow
+- [x] **Stability:** no idle unload during LiteRT streaming (SIGABRT fix)
+- [x] **Stability:** vision engines always load with `supportImage`
+- [x] **Stability:** screenshot bytes via dedicated channel; capture not continuous
+- [x] Agent skill [`.cursor/skills/nova-dev`](.cursor/skills/nova-dev/SKILL.md)
 
 ---
 
@@ -57,29 +33,23 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### High Priority
 
-- [x] **Fix model re-download** - Canonical filename consistency across install/detection paths
-- [x] **Fix tool call truncation** - Clean fullResponse, multi-call support, string args
-- [x] **Error handling improvements** - `ModelException` hierarchy with actionable suggestions, error bubbles with retry/settings action chips
-- [x] **Memory management** - Optimized RAG memory retrieval with recency weighting, length normalization, and entry truncation
-- [x] **Battery optimization** - 5-minute idle model release, lifecycle-aware suspend, Settings toggle
-- [x] **Offline mode indicator** - Red banner when no model installed, with direct "Install" button
+- [x] Fix model re-download (canonical filename consistency)
+- [x] Fix tool call truncation / multi-call support
+- [x] Error handling (`ModelException` + action chips)
+- [x] Memory management (RAG scoring / truncation)
+- [x] Battery optimization (idle release, lifecycle-aware)
+- [x] Offline mode indicator with Install action
+- [x] Inference lifecycle hardening (stream vs unload race)
+- [x] Vision engine always-on for vision models
+- [x] Low-RAM Android defaults (shorter idle, session cap, memory warning)
 
 ### Medium Priority
 
-- [x] **File/URL attachment** - Attach files and URLs as custom context for queries
-- [x] **Conversation export** - Export chat history as JSON or text
-- [x] **Search in history** - Search through past conversations
-- [x] **Message timestamps** - Show full timestamps (not just time)
-- [x] **Copy message** - Long-press to copy individual messages
-- [x] **Message reactions** - Data model, rendering, and picker UI fully wired
-- [x] **Onboarding flow** - Multi-screen wizard: welcome, mode selection, beginner setup (name, permissions, model download, ready)
-- [x] **Beginner/Expert mode** - `UserMode` system with simplified `AssistantScreenBeginner` UI
-- [x] **Model Browser** - HuggingFace API search with download for built-in and custom models
-- [x] **Custom model import** - Import `.litertlm`, `.task`, `.gguf` files via `file_picker`
-- [x] **Model selector sheet** - Bottom sheet with auto/manual toggle and model cards
-- [x] **Debug mode** - Settings toggle with verbose `[DEBUG]` logging in orchestrator
-- [x] **HuggingFace token** - Settings dialog for authenticated model downloads
-- [x] **External tool providers** - `ExternalToolProvider` factory pattern (HTTP, MCP, Local)
+- [x] File/URL attachment, export, history search, timestamps, copy, reactions
+- [x] Onboarding + beginner/expert + model browser + import + selector
+- [x] Debug mode + HF token + external tool providers
+- [ ] Strip leftover debug `AGENT_DBG` instrumentation after soak verification
+- [ ] Optional crash reporting (opt-in only)
 
 ---
 
@@ -87,27 +57,25 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### High Priority
 
-- [x] **Context window management** - Smart truncation via `clearHistory(replayHistory:)` when conversation exceeds 60% token budget
-- [x] **Multi-turn tool calls** - Sequential tool execution loop (up to 5 rounds) in `ModelOrchestrator.processMessage()`
-- [x] **Tool call visualization** - Tool call chips in `ChatBubble` show executing/done state
-- [x] **Streaming tool results** - Real-time progress via EventChannel (ToolProgress model, progress bars in ChatBubble)
-- [x] **Model performance metrics** - `Stopwatch`-based inference time tracking shown per response
-- [x] **MCP-like integration** - External tools via platform channels + JSON schema tool definitions
-- [x] **Auto-model selection** - `ModelSelector.selectForQuery` routes by length, vision, thinking mode
+- [x] Context window management
+- [x] Multi-turn tool calls + visualization + streaming progress
+- [x] Model performance metrics
+- [x] MCP-like tool schemas + auto-model selection
+- [ ] **MCP Streamable HTTP + OAuth** (HIBP and similar hosts; today HTTP 405 on legacy SSE)
 
 ### Medium Priority
 
-- [x] **Semantic search** - TF-IDF scoring with stop-word filtering, IDF weighting, and recency bonus
-- [ ] **Conversation summaries** - Automatic conversation summarization
-- [ ] **Proactive suggestions** - AI-suggested quick actions based on context
-- [ ] **Multi-language support** - Detect and respond in user's language
-- [x] **Code syntax highlighting** - Enhanced code block rendering via `MarkdownStyleSheet`
-- [x] **Custom knowledge bases** - DocumentExtractor and DocumentChunker implemented; knowledge base UI pending
-- [ ] **Prompt presets** - Context-based prompt templates that adapt to conversation type
-- [ ] **Conversation branching** - Start new chat from any previous message
-- [ ] **Response regeneration** - Reroll/regenerate AI responses (not just retry on error)
-- [x] **Parallel session management** - Up to 3 concurrent chat sessions
-- [x] **Platform adaptation** - Web-specific workarounds for vision, thinking, function calling
+- [x] Semantic search (TF-IDF)
+- [ ] Conversation summaries
+- [ ] Proactive suggestions
+- [ ] Multi-language support
+- [x] Code syntax highlighting (Markdown)
+- [x] Document extract/chunk (KB UI still pending)
+- [ ] Prompt presets
+- [ ] Conversation branching
+- [ ] Response regeneration (reroll)
+- [x] Parallel session management
+- [x] Platform adaptation helpers
 
 ---
 
@@ -115,17 +83,17 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### High Priority
 
-- [ ] **Windows support** - Native Windows application
-- [ ] **Linux support** - Native Linux application
-- [ ] **Watch companion** - Basic query/response on smartwatches
-- [ ] **Widget support** - Home screen widgets for quick queries
-- [ ] **Notification actions** - Respond to queries from notifications
+- [ ] Windows support (native)
+- [ ] Linux support (native)
+- [ ] Watch companion
+- [x] Widget support (home screen widget; polish ongoing)
+- [ ] Notification actions
 
 ### Medium Priority
 
-- [ ] **Voice synthesis** - Text-to-speech for responses
-- [ ] **Wake word detection** - "Hey Nova" voice activation
-- [ ] **Real-time translation** - Live translation during conversations
+- [ ] Voice synthesis (TTS)
+- [ ] Wake word detection
+- [ ] Real-time translation
 
 ---
 
@@ -133,16 +101,17 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### High Priority
 
-- [ ] **Multi-modal input** - Support for audio, video, and document input
-- [ ] **Plugin system** - User-created tools and integrations
-- [ ] **Cloud sync** - Optional encrypted sync across devices
-- [x] **MCP client** - McpClient with JSON-RPC 2.0 over HTTP/SSE and stdio
+- [ ] Multi-modal input (audio/video/docs beyond current attachments)
+- [ ] Plugin system
+- [ ] Optional encrypted cloud sync
+- [x] MCP client (SSE/stdio)
+- [ ] MCP Streamable HTTP transport
 
 ### Medium Priority
 
-- [ ] **Collaboration** - Share conversations with other Nova users
-- [ ] **Learning mode** - Teach Nova custom responses and behaviors
-- [ ] **Custom tool creation** - UI for defining new tools without code
+- [ ] Collaboration
+- [ ] Learning mode
+- [ ] Custom tool creation UI
 
 ---
 
@@ -150,17 +119,17 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### High Priority
 
-- [ ] **Nova API** - Public API for third-party integrations
-- [x] **MCP server support** - McpService server management, MCP Settings UI with add/connect/disconnect
-- [ ] **Home automation** - Smart home device control
-- [ ] **Calendar integration** - Event creation and management
+- [ ] Nova API
+- [x] MCP server management UI
+- [ ] Home automation
+- [ ] Calendar integration
 
 ### Medium Priority
 
-- [ ] **Email integration** - Read and compose emails
-- [x] **Task management** - Task model, TaskService (CRUD, persistence, AI tools), TasksScreen with filters/sort/tags
-- [x] **Note taking** - Note model, NoteService (CRUD, search, pin, AI tools), NotesScreen with search/tags
-- [x] **Document analysis** - DocumentExtractor (text/PDF), DocumentChunker with relevance scoring
+- [ ] Email integration
+- [x] Task management
+- [x] Note taking
+- [x] Document analysis (core)
 
 ---
 
@@ -168,139 +137,77 @@ This document outlines the planned features and improvements for Nova Assistant.
 
 ### Code Quality
 
-- [ ] **Unit test coverage** - Increase coverage to 80%+ (currently ~10 test files covering models, services, tools, widgets)
-- [ ] **Widget tests** - Add comprehensive widget tests (only `chat_bubble_test.dart` exists)
-- [ ] **Integration tests** - End-to-end testing suite
-- [ ] **Performance profiling** - Regular performance audits
-- [ ] **Code documentation** - Comprehensive API documentation
-- [ ] **Beginner mode tests** - Add tests for `AssistantScreenBeginner` and `UserPreferencesService`
+- [ ] Unit test coverage → 80%+
+- [ ] Broader widget + integration tests
+- [ ] Performance profiling cadence
+- [ ] Public API docs beyond `docs/` + `AGENTS.md`
 
 ### Architecture
 
-- [ ] **State management** - Evaluate Riverpod or Bloc migration
-- [ ] **Dependency injection** - Implement proper DI container
-- [ ] **Navigation** - Migrate to GoRouter for better deep linking
-- [ ] **Localization** - Implement i18n for multi-language support
+- [ ] Evaluate Riverpod/Bloc
+- [ ] Explicit DI
+- [ ] GoRouter migration
+- [ ] i18n
 
 ### Build and CI/CD
 
-- [x] **Release workflow** - GitHub Actions release.yml for tag-based APK builds
-- [x] **CI testing workflow** - GitHub Actions: analyze, test, coverage check, build on PR/push
-- [ ] **Automated releases** - Streamlined release process (currently manual tag trigger)
-- [ ] **Crash reporting** - Optional crash analytics (opt-in)
+- [x] Release workflow (tag APK)
+- [x] CI analyze/test/build
+- [x] Docs GitHub Pages workflow
+- [ ] Fully automated release notes
+- [ ] Optional opt-in crash analytics
 
 ---
 
 ## Model Roadmap
 
-### Current Models
+### Current
 
 | Model | Status | Notes |
 |-------|--------|-------|
-| SmolLM-135M | Stable | Fast, lightweight, tool support |
-| FastVLM-0.5B | Stable | Vision capable |
-| Gemma 3 1B | Stable | Balanced performance |
-| Gemma 4 E2B | Stable | Most capable, vision + thinking |
+| SmolLM-135M | Stable | Fast / low RAM |
+| FastVLM-0.5B | Stable | Vision |
+| Gemma 3 1B | Stable | Balanced |
+| Gemma 4 E2B | Stable | Vision + thinking; high RAM |
 
-### Planned Models
+### Planned
 
 | Model | Status | Notes |
 |-------|--------|-------|
-| Gemma 4 E4B | Planned | Larger context window |
-| Llama 3.2 | Planned | Alternative architecture |
-| Phi-3 | Planned | Microsoft's compact model |
-| Mistral | Planned | European AI model |
+| Gemma 4 E4B | Planned | Larger context |
+| Llama 3.2 | Planned | Alt architecture |
+| Phi-3 | Planned | Compact |
+| Mistral | Planned | Alt |
 
 ---
 
-## Release Schedule
+## Release schedule
 
-### v0.2.0 (Current)
-- ~~Fix model re-download bug (canonical filename)~~
-- ~~Fix tool call truncation (fullResponse cleanup, multi-call)~~
-- ~~Error handling improvements~~ (`ModelException` hierarchy with retry/settings chips)
-- ~~Battery optimization~~ (idle release, lifecycle-aware, Settings toggle)
-- ~~File/URL attachments~~
-- ~~Conversation export~~
-- ~~Search in history~~
-- ~~Message timestamps~~
-- ~~Copy message~~
-- ~~Message reactions~~ (data model, rendering, and picker UI)
-- ~~Memory management optimization~~ (recency-weighted scoring, entry truncation)
-- ~~Onboarding flow~~ (welcome, mode selection, beginner setup wizard)
-- ~~Beginner/Expert mode~~ (simplified UI + mode switching)
-- ~~Model Browser~~ (HuggingFace search + download)
-- ~~Custom model import~~ (.litertlm, .task, .gguf via file picker)
-- ~~Model selector sheet~~ (auto/manual toggle)
-- ~~Debug mode~~ (verbose logging)
-- ~~HuggingFace token config~~
-- ~~External tool provider abstraction~~ (HTTP, MCP, Local)
+### v0.2.1 (current)
 
-### v0.3.0
-- ~~MCP-like data source integration~~ (platform-channel tools + JSON schemas)
-- ~~Auto-model selection based on content type~~ (`ModelSelector.selectForQuery`)
-- ~~Tool call visualization~~ (executing/done chips in `ChatBubble`)
-- ~~Context window management~~ (token-budget truncation via `clearHistory(replayHistory:)`)
-- ~~Model performance metrics~~ (Stopwatch-based `inferenceTimeMs`)
-- ~~Multi-turn sequential tool execution~~ (5-round loop in `processMessage`)
-- ~~Streaming tool results via platform channels~~ (ToolProgress model, EventChannel, progress bars)
-- ~~Task management~~ (Task model, TaskService, TasksScreen, AI tools)
-- ~~Note taking~~ (Note model, NoteService, NotesScreen, AI tools)
-- ~~Document analysis~~ (DocumentExtractor, DocumentChunker)
-- ~~MCP client~~ (McpClient with HTTP/SSE + stdio)
-- ~~MCP server support~~ (McpService, MCP Settings UI)
-- ~~Semantic search~~ (TF-IDF scoring in MemoryService, stop-word removal, IDF weighting)
-- ~~CI testing workflow~~ (GitHub Actions: analyze, test, coverage, build on PR/push; release workflow for tags)
-- ~~Parallel session management~~ (up to 3 concurrent chat sessions)
-- ~~Platform adaptation~~ (web-specific workarounds)
-- Unit test coverage to 80%+
-- Widget tests for key screens (TasksScreen, NotesScreen, AssistantScreen)
-- Beginner mode tests (AssistantScreenBeginner, UserPreferencesService)
-- Conversation summaries
-- Proactive suggestions
-- Prompt presets (context-based)
-- Conversation branching (start from message)
-- Response regeneration (reroll)
+- Stability: stream-safe idle unload, vision load, screenshot pipeline
+- Android low-RAM guards
+- Docs site + `nova-dev` agent skill
+- Repo cleanup (`android.backup` removed)
+
+### v0.3.0 (next)
+
+- MCP Streamable HTTP + OAuth
+- Conversation summaries / regenerate / branching
+- Coverage and widget test expansion
+- Knowledge-base UI on top of document chunker
 
 ### v0.4.0
-- Windows support
-- Linux support
-- Voice synthesis
-- Wake word detection
-- Plugin system
-- Multi-language support
 
-### v1.0.0
-- Stable release with comprehensive features
-- Complete documentation
-- Cloud sync
+- Desktop targets, TTS, wake word
+
+### Later
+
+- Plugins, optional sync, ecosystem integrations
 
 ---
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-### Priority Areas
-
-1. **Testing** - Write unit, widget, and integration tests
-2. **Windows/Linux development** - Help bring Nova to desktop platforms
-3. **Documentation** - Improve guides and API documentation
-4. **Localization** - Help translate Nova into other languages
-5. **Bug fixes** - Check our [issue tracker](https://github.com/yourusername/nova_assistant/issues)
-
----
-
-## Feedback
-
-We value your input! Please share your ideas and feedback:
-
-- **GitHub Issues** - Report bugs and request features
-- **Discussions** - Share ideas and ask questions
-- **Discord** - Join our community chat
-
----
-
-## License
-
-This roadmap is subject to change based on community feedback and technical requirements.
+See [README](README.md), [docs/contributing.md](docs/contributing.md), and [AGENTS.md](AGENTS.md).
+Use Conventional Commits. Ask coding agents to load **nova-dev** for setup/build/model import.

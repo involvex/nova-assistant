@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="LaunchTheme" parent="@android:style/Theme.Translucent.NoTitleBar">
-        <item name="android:windowBackground">@color/nova_background</item>
-    </style>
-
-    <color name="nova_background">#0D0D1A</color>
-    <color name="nova_icon_background">#6C63FF</color>
-</resources>

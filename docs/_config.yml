@@ -1,0 +1,14 @@
+title: Nova Assistant
+description: On-device AI assistant powered by Gemma — developer documentation
+remote_theme: pages-themes/cayman@v0.2.0
+plugins:
+  - jekyll-remote-theme
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: true
+markdown: kramdown
+permalink: pretty
+show_downloads: false
+github:
+  repository_url: https://github.com/involvex/nova-assistant

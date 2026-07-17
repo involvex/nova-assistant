@@ -3,6 +3,11 @@
 > **Nova** is an on-device AI assistant powered by Gemma, built with Flutter.
 > All AI inference runs locally on the device - no data is sent to external servers.
 
+**Human docs:** [`docs/`](docs/) (GitHub Pages) · **Agent skill:** [`.cursor/skills/nova-dev`](.cursor/skills/nova-dev/SKILL.md)
+
+When a developer says *use the nova_dev skill to setup and build the app* or
+*configure my own model*, follow that skill first, then this file for coding standards.
+
 ---
 
 ## Table of Contents

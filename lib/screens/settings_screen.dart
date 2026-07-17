@@ -46,6 +46,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _ttsEnabled = true;
   bool _ragMemory = false;
   bool _batteryOptimization = true;
+  bool _keepModelWarm = true;
   bool _isAssistantRoleHeld = false;
   bool _debugMode = false;
   String _debugMemoryLabel = 'Tap to refresh';
@@ -97,6 +98,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _ragMemory = prefs.getBool('settings_rag_memory') ?? false;
         _batteryOptimization =
             prefs.getBool('settings_battery_optimization') ?? true;
+        _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
         _debugMode = prefs.getBool('settings_debug_mode') ?? false;
         _assistantRole = AssistantRole.fromString(
           prefs.getString('settings_assistant_role'),
@@ -435,6 +437,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() => _batteryOptimization = v);
               _saveSetting('settings_battery_optimization', v);
               ModelOrchestrator.instance.setBatteryOptimization(v);
+            },
+          ),
+          _toggleTile(
+            icon: Icons.memory,
+            title: 'Keep model warm',
+            subtitle: 'Stay loaded when you switch apps. Uses more RAM; turn off on low-memory phones.',
+            value: _keepModelWarm,
+            onChanged: (v) async {
+              setState(() => _keepModelWarm = v);
+              await _saveSetting('settings_keep_model_warm', v);
+              ModelOrchestrator.instance.setKeepModelWarm(v);
             },
           ),
           _toggleTile(

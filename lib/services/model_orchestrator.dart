@@ -8,6 +8,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/models/agent_identity.dart';
@@ -29,6 +30,7 @@ import 'package:nova_assistant/utils/alarm_time_parser.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
+import 'package:nova_assistant/services/session_history_reinjection.dart';
 
 enum DownloadConsent { download, pickFile, cancel }
 
@@ -142,6 +144,8 @@ class ModelOrchestrator {
   bool _modelOverrideDirty = false;
   bool _isInitialized = false;
   bool _batteryOptimizationEnabled = true;
+  bool _keepModelWarm = true;
+  List<ChatMessage> _pendingReplay = const [];
   bool _debugMode = false;
   bool _isReleasing = false; // Guard against concurrent release operations
   Completer<void>? _releaseCompleter; // Signals when release is complete
@@ -183,6 +187,16 @@ class ModelOrchestrator {
   Stream<void> get historyClearedStream => _historyClearedController.stream;
 
   bool get isInitialized => _isInitialized;
+
+  bool get keepModelWarm => _keepModelWarm;
+
+  void setKeepModelWarm(bool enabled) {
+    _keepModelWarm = enabled;
+  }
+
+  void setPendingReplayMessages(List<ChatMessage> messages) {
+    _pendingReplay = List<ChatMessage>.from(messages);
+  }
 
   void setBatteryOptimization(bool enabled) {
     _batteryOptimizationEnabled = enabled;
@@ -282,6 +296,11 @@ class ModelOrchestrator {
         _preferredModelOverride = null;
       }
     }
+  }
+
+  Future<void> _loadKeepModelWarm() async {
+    final prefs = await SharedPreferences.getInstance();
+    _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
   }
 
   void clearModelOverride() {
@@ -412,7 +431,10 @@ class ModelOrchestrator {
     }
   }
 
-  Future<void> releaseIdleResources() => _releaseIdleResources();
+  Future<void> releaseIdleResources({bool force = false}) async {
+    if (!force && _keepModelWarm) return;
+    await _releaseIdleResources();
+  }
 
   /// Predicts which [NovaModel] will run without loading the engine.
   NovaModel predictEffectiveModel({
@@ -1621,7 +1643,8 @@ class ModelOrchestrator {
       }
 
       final chatTools = _toolsForCreateChat(model, tools);
-      if (_activeChat == null) {
+      final wasNull = _activeChat == null;
+      if (wasNull) {
         _isLoadingModel = true;
         _statusController.add('Preparing chat session...');
       }
@@ -1635,6 +1658,24 @@ class ModelOrchestrator {
           tools: chatTools,
           supportImage: model.hasVision && _activeModelSupportsImage,
         );
+        if (wasNull && _pendingReplay.isNotEmpty) {
+          final budget = (_tokenLimitFor(model) * _contextBudgetRatio).round();
+          final replay = SessionHistoryReinjection.buildReplayMessages(
+            _pendingReplay,
+            maxTokens: budget,
+          );
+          _pendingReplay = const [];
+          if (replay.isNotEmpty) {
+            try {
+              await _activeChat!.clearHistory(replayHistory: replay);
+            } on Exception catch (e) {
+              debugPrint('History reinjection failed: $e');
+              for (final msg in replay) {
+                await _activeChat!.addQuery(msg);
+              }
+            }
+          }
+        }
       } finally {
         if (_isLoadingModel) {
           _isLoadingModel = false;
@@ -2318,6 +2359,7 @@ class ModelOrchestrator {
   Future<void> initializeDefaultModel() async {
     await _loadAssistantRole();
     await _loadPreferredModel();
+    await _loadKeepModelWarm();
     await _loadIdentity();
     // NOTE: We deliberately do NOT load a model here.
     // Loading a 2.4GB model at startup causes memory/CPU exhaustion

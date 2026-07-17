@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/agent_identity.dart';
 import 'package:nova_assistant/models/assistant_language.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
@@ -59,6 +60,7 @@ class SettingsBackupService {
               prefs.getBool('settings_high_context') ??
               (kIsWeb || defaultTargetPlatform != TargetPlatform.android),
           'autoCompact': prefs.getBool('settings_auto_compact') ?? true,
+          'adultMode': prefs.getBool(AdultModePolicy.prefsKey) ?? false,
           'debugMode': prefs.getBool('settings_debug_mode') ?? false,
           'knowledgeBaseEnabled':
               prefs.getBool(KnowledgeBaseService.enabledPrefsKey) ?? true,
@@ -231,6 +233,10 @@ class SettingsBackupService {
     await prefs.setBool(
       'settings_auto_compact',
       assistant['autoCompact'] as bool? ?? true,
+    );
+    await prefs.setBool(
+      AdultModePolicy.prefsKey,
+      assistant['adultMode'] as bool? ?? false,
     );
     await prefs.setBool(
       'settings_debug_mode',

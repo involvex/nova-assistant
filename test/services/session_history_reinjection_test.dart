@@ -1,4 +1,3 @@
-import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/services/session_history_reinjection.dart';

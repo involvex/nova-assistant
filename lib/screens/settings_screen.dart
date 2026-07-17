@@ -6,6 +6,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/models/assistant_language.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:nova_assistant/platform/assistant_role_service.dart';
@@ -14,6 +15,7 @@ import 'package:nova_assistant/screens/identity_config_screen.dart';
 import 'package:nova_assistant/screens/mcp_settings_screen.dart';
 import 'package:nova_assistant/screens/knowledge_base_screen.dart';
 import 'package:nova_assistant/screens/memory_management_screen.dart';
+import 'package:nova_assistant/screens/user_memory_overview_screen.dart';
 import 'package:nova_assistant/screens/tasks_screen.dart';
 import 'package:nova_assistant/screens/notes_screen.dart';
 import 'package:nova_assistant/screens/conversation_search_screen.dart';
@@ -44,6 +46,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isAssistantRoleHeld = false;
   bool _debugMode = false;
   AssistantRole _assistantRole = AssistantRole.helpful;
+  AssistantLanguage _assistantLanguage = AssistantLanguage.match;
   String _installStatus = '';
   String _appVersion = '0.1.0';
   String _hfTokenStatus = 'Not configured';
@@ -93,6 +96,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _debugMode = prefs.getBool('settings_debug_mode') ?? false;
         _assistantRole = AssistantRole.fromString(
           prefs.getString('settings_assistant_role'),
+        );
+        _assistantLanguage = AssistantLanguage.fromString(
+          prefs.getString(AssistantLanguage.prefsKey),
         );
         _hfTokenStatus = _resolveHfTokenStatus(prefs.getString('hf_token'));
       });
@@ -352,6 +358,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await TtsService.instance.setEnabled(v);
             },
           ),
+          _actionTile(
+            icon: Icons.translate,
+            title: 'Assistant language',
+            subtitle: _assistantLanguage.displayName,
+            onTap: () => _showLanguageSelector(),
+          ),
           _toggleTile(
             icon: Icons.auto_awesome,
             title: 'RAG Memory',
@@ -386,8 +398,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           _actionTile(
             icon: Icons.psychology,
+            title: 'Memory overview',
+            subtitle: 'What Nova knows about you — view, ask, edit',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const UserMemoryOverviewScreen(),
+                ),
+              );
+            },
+          ),
+          _actionTile(
+            icon: Icons.bookmark_border,
             title: 'Custom Memories',
-            subtitle: 'Add personal info Nova should remember',
+            subtitle: 'Manually manage saved entries',
             onTap: () {
               Navigator.push(
                 context,
@@ -696,6 +721,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       onTap: () => Navigator.pop(ctx, type),
     );
+  }
+
+  Future<void> _showLanguageSelector() async {
+    final selected = await showModalBottomSheet<AssistantLanguage>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Assistant language',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ...AssistantLanguage.values.map(
+              (lang) => ListTile(
+                title: Text(
+                  lang.displayName,
+                  style: TextStyle(
+                    color: _assistantLanguage == lang
+                        ? const Color(0xFF6C63FF)
+                        : Colors.white,
+                    fontWeight: _assistantLanguage == lang
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
+                ),
+                subtitle: Text(
+                  lang.subtitle,
+                  style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                ),
+                trailing: _assistantLanguage == lang
+                    ? const Icon(Icons.check, color: Color(0xFF6C63FF))
+                    : null,
+                onTap: () => Navigator.pop(ctx, lang),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+
+    if (selected != null && selected != _assistantLanguage) {
+      setState(() => _assistantLanguage = selected);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(AssistantLanguage.prefsKey, selected.prefsValue);
+    }
   }
 
   Future<void> _showRoleSelector() async {

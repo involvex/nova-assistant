@@ -69,7 +69,11 @@ class MemoryService {
     }
   }
 
-  static Future<void> addCustomMemory(String title, String content) async {
+  static Future<void> addCustomMemory(
+    String title,
+    String content, {
+    String source = 'manual',
+  }) async {
     try {
       final p = await _p;
       final existing = p.getString(_customMemoriesKey);
@@ -84,11 +88,54 @@ class MemoryService {
         'title': title,
         'content': content,
         'createdAt': DateTime.now().toIso8601String(),
+        'source': source,
       });
 
       await p.setString(_customMemoriesKey, jsonEncode(memories));
     } catch (e) {
       debugPrint('MemoryService.addCustomMemory error: $e');
+    }
+  }
+
+  /// Returns all RAG conversation memory entries (newest last).
+  static Future<List<Map<String, String>>>
+  getConversationMemoryEntries() async {
+    try {
+      final p = await _p;
+      final existing = p.getString(_key);
+      if (existing == null) return [];
+
+      return List<Map<String, String>>.from(
+        (jsonDecode(existing) as List<dynamic>).map(
+          (e) => Map<String, String>.from(e as Map),
+        ),
+      );
+    } catch (e) {
+      debugPrint('MemoryService.getConversationMemoryEntries error: $e');
+
+      return [];
+    }
+  }
+
+  /// Deletes a RAG entry by matching query+time (stable enough for UI).
+  static Future<void> deleteConversationMemoryEntry({
+    required String query,
+    required String time,
+  }) async {
+    try {
+      final p = await _p;
+      final existing = p.getString(_key);
+      if (existing == null) return;
+
+      final entries = List<Map<String, String>>.from(
+        (jsonDecode(existing) as List<dynamic>).map(
+          (e) => Map<String, String>.from(e as Map),
+        ),
+      );
+      entries.removeWhere((e) => e['query'] == query && e['time'] == time);
+      await p.setString(_key, jsonEncode(entries));
+    } catch (e) {
+      debugPrint('MemoryService.deleteConversationMemoryEntry error: $e');
     }
   }
 

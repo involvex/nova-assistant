@@ -16,6 +16,7 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 - [x] Tool execution (alarms, apps, web search, weather, SMS)
 - [x] Tool visualization + streaming progress (EventChannel)
 - [x] RAG memory + custom memories
+- [x] **Memory overview** (stored vs derived, promote, ask-about-me)
 - [x] **Knowledge base UI** + real PDF text extraction → RAG
 - [x] **Conversation summaries** (extractive, injected into RAG)
 - [x] **Edit user message + resend**

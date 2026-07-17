@@ -167,9 +167,12 @@ class NovaTools {
   static final Tool takeScreenshot = Tool(
     name: 'take_screenshot',
     description:
-        'Capture a single screenshot of the current screen. '
-        'Use this ONLY when the user explicitly asks to take '
-        'a screenshot or capture what is on screen. '
+        'Capture a single screenshot of the current device screen. '
+        'Use ONLY when the user explicitly asks to capture what is on '
+        'their screen right now (e.g. "what\'s on my screen?"). '
+        'Do NOT use this when the user already attached a photo/image, '
+        'or asks about "the picture", "the image", or "the screenshot" '
+        'already shown in the chat — describe that attached image instead. '
         'This captures ONE static image, not a video or stream.',
     parameters: <String, Object>{
       'type': 'object',

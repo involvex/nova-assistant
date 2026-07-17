@@ -9,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
@@ -30,8 +31,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class AssistantScreen extends StatefulWidget {
   final String? conversationId;
+  final String? initialPrompt;
+  final bool autoSendInitialPrompt;
 
-  const AssistantScreen({super.key, this.conversationId});
+  const AssistantScreen({
+    super.key,
+    this.conversationId,
+    this.initialPrompt,
+    this.autoSendInitialPrompt = true,
+  });
 
   @override
   State<AssistantScreen> createState() => _AssistantScreenState();
@@ -76,6 +84,15 @@ class _AssistantScreenState extends State<AssistantScreen>
         }
       },
     );
+    if (widget.initialPrompt != null && widget.initialPrompt!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _inputController.text = widget.initialPrompt!;
+        if (widget.autoSendInitialPrompt) {
+          _sendMessage();
+        }
+      });
+    }
   }
 
   Future<void> _loadHistory() async {
@@ -417,19 +434,38 @@ class _AssistantScreenState extends State<AssistantScreen>
     );
   }
 
-  List<Tool> _toolsForQuery(String query) {
+  List<Tool> _toolsForQuery(String query, {bool hasImage = false}) {
     final tools = <Tool>[];
     final q = query.toLowerCase();
 
-    // Always available: time, alarm, settings, screenshot, openApp
+    // Core tools (no screenshot — gated below)
     tools.addAll([
       NovaTools.getTime,
       NovaTools.setAlarm,
       NovaTools.cancelAlarm,
       NovaTools.openSettings,
-      NovaTools.takeScreenshot,
       NovaTools.openApp,
     ]);
+
+    // Only offer screen capture when the user asks for the *device screen*
+    // and no image is already attached (gallery / prior capture).
+    final wantsDeviceScreen =
+        !hasImage &&
+        (q.contains('screenshot') ||
+            q.contains('capture the screen') ||
+            q.contains('capture my screen') ||
+            q.contains("what's on my screen") ||
+            q.contains('whats on my screen') ||
+            q.contains('what is on my screen') ||
+            q.contains('on my screen') ||
+            (q.contains('screen') &&
+                (q.contains('look') ||
+                    q.contains('see') ||
+                    q.contains('show') ||
+                    q.contains('what'))));
+    if (wantsDeviceScreen) {
+      tools.add(NovaTools.takeScreenshot);
+    }
 
     // Weather only if explicitly asked
     if (q.contains('weather') ||
@@ -511,11 +547,17 @@ class _AssistantScreenState extends State<AssistantScreen>
     try {
       String accumulated = '';
 
+      final hasImageAttachment =
+          _currentScreenshot != null ||
+          _attachmentManager.attachments.any(
+            (a) => a.filePath != null && DocumentExtractor.isImageFile(a.name),
+          );
+
       await for (final result in ModelOrchestrator.instance.processMessage(
         query: text,
         screenshot: _currentScreenshot,
         thinkingMode: _thinkingMode,
-        tools: _toolsForQuery(text),
+        tools: _toolsForQuery(text, hasImage: hasImageAttachment),
         attachments: _attachmentManager.attachments,
         // Force heavy model only in auto mode; respect model overrides
         forcePrimaryModel:
@@ -1425,56 +1467,65 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6C63FF), Color(0xFF9D4EDD)],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: IntrinsicHeight(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF6C63FF), Color(0xFF9D4EDD)],
+                      ),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: const Icon(
+                      Icons.auto_awesome,
+                      color: Colors.white,
+                      size: 36,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Hi, I\'m Nova',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Your on-device AI assistant, powered by Gemma.\n'
+                    'Tap the mic or type to start.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey[400], height: 1.5),
+                  ),
+                  const SizedBox(height: 24),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      _quickChip('What\'s on my screen?'),
+                      _quickChip('Set an alarm for 7:00 PM'),
+                      _quickChip('Summarize this page'),
+                      _quickChip('Open Settings'),
+                    ],
+                  ),
+                ],
               ),
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: const Icon(
-              Icons.auto_awesome,
-              color: Colors.white,
-              size: 40,
             ),
           ),
-          const SizedBox(height: 24),
-          const Text(
-            'Hi, I\'m Nova',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your on-device AI assistant, powered by Gemma.\n'
-            'Tap the mic or type to start.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey[400], height: 1.5),
-          ),
-          const SizedBox(height: 32),
-          // Quick suggestion chips
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              _quickChip('What\'s on my screen?'),
-              _quickChip('Set an alarm for 7:00 PM'),
-              _quickChip('Summarize this page'),
-              _quickChip('Open Settings'),
-            ],
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 

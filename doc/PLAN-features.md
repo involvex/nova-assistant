@@ -21,6 +21,8 @@
 | Edit user message + resend | Done | Truncate from turn and resend |
 | Notification tap / actions | Done | Mirrors widget action IDs |
 | Conversation summaries | Done | Extractive rolling summary → RAG |
+| User memory overview | Done | Stored vs derived; promote; ask / inventory prompt |
+| Assistant language | Done | Prefs `match`/`en`/`de`; system-prompt steering (UI stays English; full i18n later) |
 | Response regeneration | Done | |
 | Prompt presets | Done | |
 | Parallel sessions | Done | Cap = 1 on Android |

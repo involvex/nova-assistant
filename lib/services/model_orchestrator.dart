@@ -8,7 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/models/attached_data.dart';
+import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/models/agent_identity.dart';
+import 'package:nova_assistant/models/assistant_language.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/external_tool.dart';
 import 'package:nova_assistant/models/model_info.dart';
@@ -859,6 +861,8 @@ class ModelOrchestrator {
       );
     }
 
+    buffer.write('\n\n${await _languageInstruction()}');
+
     if (ragContext != null && ragContext.isNotEmpty) {
       buffer.write('\n\n$ragContext');
     }
@@ -1355,7 +1359,11 @@ class ModelOrchestrator {
     }
 
     _activeChat ??= await inferenceModel.createChat(
-      systemInstruction: _systemPromptFor(model, ragContext, attachmentContext),
+      systemInstruction: await _systemPromptFor(
+        model,
+        ragContext,
+        attachmentContext,
+      ),
       tools: tools,
       supportImage: model.hasVision && _activeModelSupportsImage,
     );
@@ -1391,6 +1399,14 @@ class ModelOrchestrator {
     _isStreaming = true;
     _streamingCompleter = Completer<void>();
 
+    // If the user already provided an image this turn, never re-capture.
+    var imageAlreadyAvailable =
+        (screenshot != null && screenshot.isNotEmpty) ||
+        attachments.any(
+          (a) => a.filePath != null && DocumentExtractor.isImageFile(a.name),
+        );
+    var screenshotToolCallsThisTurn = 0;
+
     try {
       while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
         hasPendingToolCalls = false;
@@ -1425,6 +1441,32 @@ class ModelOrchestrator {
                 final toolArgs = Map<String, dynamic>.from(
                   parsed['args'] as Map,
                 );
+
+                // Block redundant screen captures when an image is already
+                // in context (attached photo / prior screenshot this turn).
+                if (toolName == 'take_screenshot' &&
+                    (imageAlreadyAvailable ||
+                        screenshotToolCallsThisTurn > 0)) {
+                  allToolCalls.add({
+                    'name': toolName,
+                    'args': toolArgs,
+                    'status': 'done',
+                  });
+                  await _activeChat!.addQuery(
+                    Message.toolResponse(
+                      toolName: toolName,
+                      response: {
+                        'success': true,
+                        'message':
+                            'An image is already available in this turn. '
+                            'Describe that image. Do not call take_screenshot again.',
+                      },
+                    ),
+                  );
+                  hasPendingToolCalls = true;
+                  continue;
+                }
+
                 _statusController.add('Executing $toolName...');
 
                 allToolCalls.add({
@@ -1443,6 +1485,11 @@ class ModelOrchestrator {
                   thinkingMode,
                 )) {
                   yield update;
+                }
+
+                if (toolName == 'take_screenshot') {
+                  screenshotToolCallsThisTurn++;
+                  imageAlreadyAvailable = true;
                 }
 
                 hasPendingToolCalls = true;
@@ -1466,6 +1513,28 @@ class ModelOrchestrator {
               toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
             );
           } else if (event is FunctionCallResponse) {
+            if (event.name == 'take_screenshot' &&
+                (imageAlreadyAvailable || screenshotToolCallsThisTurn > 0)) {
+              allToolCalls.add({
+                'name': event.name,
+                'args': Map<String, dynamic>.from(event.args),
+                'status': 'done',
+              });
+              await _activeChat!.addQuery(
+                Message.toolResponse(
+                  toolName: event.name,
+                  response: {
+                    'success': true,
+                    'message':
+                        'An image is already available in this turn. '
+                        'Describe that image. Do not call take_screenshot again.',
+                  },
+                ),
+              );
+              hasPendingToolCalls = true;
+              continue;
+            }
+
             // Plugin-level function call detected
             _statusController.add('Executing ${event.name}...');
 
@@ -1485,6 +1554,11 @@ class ModelOrchestrator {
               thinkingMode,
             )) {
               yield update;
+            }
+
+            if (event.name == 'take_screenshot') {
+              screenshotToolCallsThisTurn++;
+              imageAlreadyAvailable = true;
             }
 
             hasPendingToolCalls = true;
@@ -1796,11 +1870,20 @@ class ModelOrchestrator {
     }
   }
 
-  String _systemPromptFor(
+  Future<String> _languageInstruction() async {
+    final prefs = await SharedPreferences.getInstance();
+    final language = AssistantLanguage.fromString(
+      prefs.getString(AssistantLanguage.prefsKey),
+    );
+
+    return language.systemPromptLine;
+  }
+
+  Future<String> _systemPromptFor(
     NovaModel model, [
     String? ragContext,
     String? attachmentContext,
-  ]) {
+  ]) async {
     final identity = _getCachedIdentity();
 
     String base;
@@ -1816,6 +1899,7 @@ class ModelOrchestrator {
         : '';
 
     final buffer = StringBuffer('$base$thinkingSuffix');
+    buffer.write('\n\n${await _languageInstruction()}');
 
     if (ragContext != null && ragContext.isNotEmpty) {
       buffer.write('\n\n$ragContext');

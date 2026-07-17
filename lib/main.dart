@@ -11,7 +11,7 @@ import 'package:nova_assistant/screens/onboarding/onboarding_screen.dart';
 import 'package:nova_assistant/screens/chat_history_screen.dart';
 import 'package:nova_assistant/screens/tasks_screen.dart';
 import 'package:nova_assistant/screens/notes_screen.dart';
-import 'package:nova_assistant/screens/memory_management_screen.dart';
+import 'package:nova_assistant/screens/user_memory_overview_screen.dart';
 import 'package:nova_assistant/services/memory_service.dart';
 import 'package:nova_assistant/services/task_service.dart';
 import 'package:nova_assistant/services/note_service.dart';
@@ -214,7 +214,7 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
           screen = const NotesScreen();
           break;
         case 'ACTION_OPEN_MEMORY':
-          screen = const MemoryManagementScreen();
+          screen = const UserMemoryOverviewScreen();
           break;
         case 'tap_at_glance':
           screen = const AssistantScreen();

@@ -44,5 +44,19 @@ void main() {
     test('returns null without open intent', () {
       expect(OpenAppIntentParser.tryParsePackage('what is youtube'), isNull);
     });
+
+    test('does not match geöffnet as open intent', () {
+      expect(
+        OpenAppIntentParser.tryParsePackage('Ist YouTube schon geöffnet?'),
+        isNull,
+      );
+    });
+
+    test('parses German öffnen infinitive', () {
+      expect(
+        OpenAppIntentParser.tryParsePackage('kannst du YouTube öffnen'),
+        'com.google.android.youtube',
+      );
+    });
   });
 }

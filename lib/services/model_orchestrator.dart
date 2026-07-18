@@ -2341,7 +2341,10 @@ class ModelOrchestrator {
 
     // Compact Android prompts drop the role's tool list — restore capability
     // so the model does not claim it cannot open apps / set alarms.
-    if (compact || (textTools != null && textTools.isNotEmpty)) {
+    // Gate to Android only: web FC-off must not get "Android device" wording.
+    final isAndroid =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    if (isAndroid && (compact || (textTools != null && textTools.isNotEmpty))) {
       buffer.write(_deviceToolsCapabilitySuffix(textTools));
     }
 

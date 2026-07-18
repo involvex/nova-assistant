@@ -2,9 +2,9 @@
 class OpenAppIntentParser {
   OpenAppIntentParser._();
 
-  /// ASCII open verbs (safe with `\b`). Umlaut forms checked separately.
+  /// ASCII open verbs (safe with `\b`). Umlaut forms use normalized matching.
   static final RegExp _asciiOpenIntent = RegExp(
-    r'\b(open|launch|start|starte|oeffne|aufmachen)\b',
+    r'\b(open|launch|start|starte|oeffne|oeffnen|aufmachen)\b',
     caseSensitive: false,
   );
 
@@ -34,12 +34,21 @@ class OpenAppIntentParser {
     'wecker': 'com.android.deskclock',
   };
 
+  /// Normalize German umlauts so ASCII `\b` works ("öffne" → "oeffne").
+  /// Also prevents "geöffnet" → "geoeffnet" from matching `\boeffne\b`.
+  static String _normalize(String query) {
+    return query
+        .toLowerCase()
+        .replaceAll('ö', 'oe')
+        .replaceAll('ä', 'ae')
+        .replaceAll('ü', 'ue')
+        .replaceAll('ß', 'ss');
+  }
+
   static bool _hasOpenIntent(String query) {
-    final lower = query.toLowerCase();
-    // Dart `\b` is ASCII-only; "öffne" must be matched without word bounds.
-    if (lower.contains('öffne')) return true;
-    if (_asciiOpenIntent.hasMatch(lower)) return true;
-    if (_machAufIntent.hasMatch(lower)) return true;
+    final normalized = _normalize(query);
+    if (_asciiOpenIntent.hasMatch(normalized)) return true;
+    if (_machAufIntent.hasMatch(normalized)) return true;
 
     return false;
   }

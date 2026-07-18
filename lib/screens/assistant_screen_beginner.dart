@@ -498,7 +498,9 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
             onTranscription: (text) {
               if (text.isEmpty) return;
               _inputController.text = text;
-              if (_isGenerating) return;
+              if (_isGenerating || ModelOrchestrator.instance.isBusy) {
+                return;
+              }
               _sendMessage();
             },
           ),

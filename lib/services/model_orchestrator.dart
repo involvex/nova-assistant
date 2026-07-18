@@ -774,13 +774,55 @@ class ModelOrchestrator {
     }
 
     // Free-RAM hard gate before a cold load of heavy models (Android).
-    final ramBlock = await PlatformAdaptationService.instance.checkCanLoadModel(
-      model,
+    // If blocked, auto-fallback to a smaller installed-capable model instead of
+    // failing the whole turn (POCO F1 / ~1.2GB free cannot load Gemma 4).
+    var modelToLoad = model;
+    var ramBlock = await PlatformAdaptationService.instance.checkCanLoadModel(
+      modelToLoad,
     );
+    // #region agent log
+    await AgentDebugLog.log(
+      hypothesisId: 'C',
+      location: 'model_orchestrator.dart:_getOrCreateModel:ramGate',
+      message: 'RAM gate decision',
+      data: {
+        'requested': model.displayName,
+        'blocked': ramBlock != null,
+        'blockMsg': ramBlock,
+        'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
+      },
+    );
+    // #endregion
+    if (ramBlock != null) {
+      final fallback = await _pickRamFallback(modelToLoad);
+      if (fallback != null) {
+        // #region agent log
+        await AgentDebugLog.log(
+          hypothesisId: 'C',
+          location: 'model_orchestrator.dart:_getOrCreateModel:fallback',
+          message: 'RAM gate fallback',
+          data: {
+            'from': modelToLoad.displayName,
+            'to': fallback.displayName,
+            'fileName': ModelHuggingFaceURLs.fileNameFor(fallback),
+            'onDisk': await ModelManager.instance.isInstalledOnDisk(
+              ModelHuggingFaceURLs.fileNameFor(fallback),
+            ),
+          },
+        );
+        // #endregion
+        _statusController.add(
+          'Low free RAM — using ${fallback.displayName} instead of '
+          '${modelToLoad.displayName}',
+        );
+        modelToLoad = fallback;
+        ramBlock = null;
+      }
+    }
     if (ramBlock != null) {
       throw ModelException(
         ramBlock,
-        model: model,
+        model: modelToLoad,
         suggestion:
             'Free RAM by closing apps, or use a smaller model in Settings.',
       );
@@ -810,18 +852,18 @@ class ModelOrchestrator {
       }
     }
 
-    final bool supportImage = needsImageSupport;
+    final bool supportImage = modelToLoad.hasVision;
 
     _isLoadingModel = true;
     _statusController.add(
-      supportImage && model == NovaModel.gemma4E2b
-          ? 'Compiling ${model.displayName} on GPU (vision enabled; first load may take 1–2 min)...'
-          : 'Loading ${model.displayName}...',
+      supportImage && modelToLoad == NovaModel.gemma4E2b
+          ? 'Compiling ${modelToLoad.displayName} on GPU (vision enabled; first load may take 1–2 min)...'
+          : 'Loading ${modelToLoad.displayName}...',
     );
 
     try {
       // First, ensure the model is registered with flutter_gemma
-      final fileName = ModelHuggingFaceURLs.fileNameFor(model);
+      final fileName = ModelHuggingFaceURLs.fileNameFor(modelToLoad);
       final existsOnDisk = await ModelManager.instance.isInstalledOnDisk(
         fileName,
       );
@@ -833,7 +875,7 @@ class ModelOrchestrator {
         location: 'model_orchestrator.dart:_getOrCreateModel:check',
         message: 'Model availability check before load',
         data: {
-          'model': model.name,
+          'model': modelToLoad.name,
           'fileName': fileName,
           'existsOnDisk': existsOnDisk,
           'prefsInstalled': prefsInstalled,
@@ -843,7 +885,7 @@ class ModelOrchestrator {
 
       if (existsOnDisk) {
         _statusController.add(
-          'Found ${model.displayName} on disk, registering...',
+          'Found ${modelToLoad.displayName} on disk, registering...',
         );
         try {
           final modelPath = await _findModelPath(fileName);
@@ -853,29 +895,29 @@ class ModelOrchestrator {
             await ModelManager.instance.registerDiskModel(
               filePath: modelPath,
               fileName: fileName,
-              modelType: model.modelType,
-              fileType: model.fileType,
+              modelType: modelToLoad.modelType,
+              fileType: modelToLoad.fileType,
               fileSizeBytes: fileSize,
             );
 
             // Now get the active model
-            _statusController.add('Loading ${model.displayName}...');
+            _statusController.add('Loading ${modelToLoad.displayName}...');
             if (_debugMode) {
               unawaited(
                 MemoryDiagnosticsService.instance.readProcessMemoryMb(),
               );
             }
             _activeModel = await FlutterGemma.getActiveModel(
-              maxTokens: _tokenLimitFor(model),
+              maxTokens: _tokenLimitFor(modelToLoad),
               preferredBackend: PlatformAdaptationService.instance
-                  .preferredBackendFor(model),
+                  .preferredBackendFor(modelToLoad),
               supportImage: supportImage,
               maxNumImages: supportImage ? 1 : null,
-            ).timeout(_loadTimeoutFor(model));
-            _activeModelType = model;
+            ).timeout(_loadTimeoutFor(modelToLoad));
+            _activeModelType = modelToLoad;
             _activeModelSupportsImage = supportImage;
             _isInitialized = true;
-            _statusController.add('${model.displayName} ready');
+            _statusController.add('${modelToLoad.displayName} ready');
             _resetIdleTimer();
             return _activeModel!;
           }
@@ -883,8 +925,8 @@ class ModelOrchestrator {
           debugPrint('Failed to load local model: $e');
           await _teardownPartialLoad();
           throw ModelLoadException(
-            '${model.displayName} is still loading.',
-            model: model,
+            '${modelToLoad.displayName} is still loading.',
+            model: modelToLoad,
             suggestion:
                 'First boot GPU compile can take 1–2 minutes. Wait and try again, '
                 'or use Settings → Debug → Reset inference engine.',
@@ -898,16 +940,16 @@ class ModelOrchestrator {
           if (e is TimeoutException) {
             await _teardownPartialLoad();
             throw ModelLoadException(
-              '${model.displayName} is still loading.',
-              model: model,
+              '${modelToLoad.displayName} is still loading.',
+              model: modelToLoad,
               suggestion: 'First boot GPU compile can take 1–2 minutes. Wait and try again.',
               underlyingError: e,
             );
           }
           await _teardownPartialLoad();
           throw ModelLoadException(
-            'Failed to load ${model.displayName} from disk.',
-            model: model,
+            'Failed to load ${modelToLoad.displayName} from disk.',
+            model: modelToLoad,
             suggestion:
                 'The model file may be corrupted. '
                 'Try re-downloading, reset inference in Settings, or pick a different file.',
@@ -917,13 +959,13 @@ class ModelOrchestrator {
       }
 
       // No active model or load failed — ask user before downloading
-      final url = ModelHuggingFaceURLs.urlFor(model);
-      final choice = await _showDownloadConsent(model: model, url: url);
+      final url = ModelHuggingFaceURLs.urlFor(modelToLoad);
+      final choice = await _showDownloadConsent(model: modelToLoad, url: url);
 
       if (choice == DownloadConsent.pickFile) {
         // User wants to pick a file from device — throw a special exception
         // so the UI can handle the file picker flow.
-        throw ModelNeedsFilePickException(model);
+        throw ModelNeedsFilePickException(modelToLoad);
       }
 
       if (choice == DownloadConsent.cancel) {
@@ -931,16 +973,16 @@ class ModelOrchestrator {
       }
 
       // choice == DownloadConsent.download — proceed with network install
-      _statusController.add('Downloading ${model.displayName}...');
+      _statusController.add('Downloading ${modelToLoad.displayName}...');
       try {
         final installed = await ModelManager.instance
             .installFromNetwork(
               url: url,
-              modelType: model.modelType,
-              fileType: model.fileType,
+              modelType: modelToLoad.modelType,
+              fileType: modelToLoad.fileType,
               onProgress: (progress) {
                 _statusController.add(
-                  'Downloading ${model.displayName}: $progress%',
+                  'Downloading ${modelToLoad.displayName}: $progress%',
                 );
               },
             )
@@ -948,25 +990,25 @@ class ModelOrchestrator {
 
         if (installed == null) {
           throw ModelDownloadException(
-            'Download of ${model.displayName} failed.',
-            model: model,
+            'Download of ${modelToLoad.displayName} failed.',
+            model: modelToLoad,
             suggestion: 'Check your internet connection and try again.',
           );
         }
 
         // Now get the model after install
-        _statusController.add('Loading ${model.displayName}...');
+        _statusController.add('Loading ${modelToLoad.displayName}...');
         _activeModel = await FlutterGemma.getActiveModel(
-          maxTokens: _tokenLimitFor(model),
+          maxTokens: _tokenLimitFor(modelToLoad),
           preferredBackend: PlatformAdaptationService.instance
-              .preferredBackendFor(model),
+              .preferredBackendFor(modelToLoad),
           supportImage: supportImage,
           maxNumImages: supportImage ? 1 : null,
-        ).timeout(_loadTimeoutFor(model));
-        _activeModelType = model;
+        ).timeout(_loadTimeoutFor(modelToLoad));
+        _activeModelType = modelToLoad;
         _activeModelSupportsImage = supportImage;
         _isInitialized = true;
-        _statusController.add('${model.displayName} ready');
+        _statusController.add('${modelToLoad.displayName} ready');
         _resetIdleTimer();
         return _activeModel!;
       } on ModelException {
@@ -974,21 +1016,21 @@ class ModelOrchestrator {
       } on TimeoutException catch (e) {
         await _teardownPartialLoad();
         throw ModelLoadException(
-          '${model.displayName} is still loading.',
-          model: model,
+          '${modelToLoad.displayName} is still loading.',
+          model: modelToLoad,
           suggestion:
               'First boot GPU compile can take 1–2 minutes. Wait and try again, '
               'or use Settings → Debug → Reset inference engine.',
           underlyingError: e,
         );
       } catch (e) {
-        _statusController.add('Failed to load ${model.displayName}: $e');
+        _statusController.add('Failed to load ${modelToLoad.displayName}: $e');
         // Classify the error
         final msg = e.toString().toLowerCase();
         if (msg.contains('storage') || msg.contains('no space')) {
           throw ModelStorageException(
-            'Not enough storage for ${model.displayName}.',
-            model: model,
+            'Not enough storage for ${modelToLoad.displayName}.',
+            model: modelToLoad,
             suggestion: 'Free up storage space and try again.',
             underlyingError: e,
           );
@@ -997,8 +1039,8 @@ class ModelOrchestrator {
             msg.contains('invalid') ||
             msg.contains('unsupported')) {
           throw ModelLoadException(
-            '${model.displayName} file is corrupted or incompatible.',
-            model: model,
+            '${modelToLoad.displayName} file is corrupted or incompatible.',
+            model: modelToLoad,
             suggestion: 'Re-download the model or pick a different file.',
             underlyingError: e,
           );
@@ -1007,21 +1049,69 @@ class ModelOrchestrator {
             msg.contains('connection') ||
             msg.contains('socket')) {
           throw ModelDownloadException(
-            'Network error downloading ${model.displayName}.',
-            model: model,
+            'Network error downloading ${modelToLoad.displayName}.',
+            model: modelToLoad,
             suggestion: 'Check your internet connection and try again.',
             underlyingError: e,
           );
         }
         throw ModelLoadException(
-          'Failed to load ${model.displayName}.',
-          model: model,
+          'Failed to load ${modelToLoad.displayName}.',
+          model: modelToLoad,
           suggestion: 'Try again or pick a file from your device.',
           underlyingError: e,
         );
       }
     } finally {
       _isLoadingModel = false;
+    }
+  }
+
+  /// Pick a smaller model that fits free RAM.
+  ///
+  /// Prefers models already on disk (no download), then SmolLM (tiny download)
+  /// before Gemma 3 1B. Avoids falling back to a missing mid-size model while
+  /// the device only has Gemma 4 installed (POCO F1).
+  Future<NovaModel?> _pickRamFallback(NovaModel blocked) async {
+    const candidates = <NovaModel>[NovaModel.smollm, NovaModel.gemma3_1b];
+    NovaModel? firstDownloadable;
+
+    for (final candidate in candidates) {
+      if (candidate == blocked) continue;
+      final block = await PlatformAdaptationService.instance.checkCanLoadModel(
+        candidate,
+      );
+      if (block != null) continue;
+
+      final fileName = ModelHuggingFaceURLs.fileNameFor(candidate);
+      final onDisk = await ModelManager.instance.isInstalledOnDisk(fileName);
+      if (onDisk) {
+        return candidate;
+      }
+      firstDownloadable ??= candidate;
+    }
+
+    return firstDownloadable;
+  }
+
+  /// Apply Auto-mode defaults for low free-RAM devices (call at startup).
+  Future<void> applyRamAwareModelDefaults() async {
+    final recommended = await PlatformAdaptationService.instance
+        .recommendModelForDevice();
+    if (selector.primaryHeavy != recommended) {
+      selector.primaryHeavy = recommended;
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'E',
+        location: 'model_orchestrator.dart:applyRamAwareModelDefaults',
+        message: 'Adjusted Auto primaryHeavy for free RAM',
+        data: {
+          'primaryHeavy': recommended.displayName,
+          'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
+        },
+        runId: 'post-fix',
+      );
+      // #endregion
     }
   }
 

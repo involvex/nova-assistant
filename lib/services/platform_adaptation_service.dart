@@ -297,10 +297,40 @@ class PlatformAdaptationService {
     if (kIsWeb) return null;
     if (defaultTargetPlatform != TargetPlatform.android) return null;
 
-    if (model.sizeMB >= 2000) return 3500;
-    if (model.sizeMB >= 400) return 1200;
+    // Softened for 6GB devices (POCO F1 etc.): hard-block only when truly
+    // starved. Prefer auto-fallback in the orchestrator over refusing chat.
+    if (model.sizeMB >= 2000) return 1800;
+    if (model.sizeMB >= 400) return 700;
 
     return null;
+  }
+
+  /// Onboarding / default model for device RAM class.
+  ///
+  /// Free RAM alone is unreliable: a wiped POCO F1 (6 GB total) can report
+  /// >1800 MB free at boot and wrongly recommend Gemma 4, which then fails to
+  /// load once the system fills. Prefer **total RAM** for onboarding.
+  Future<NovaModel> recommendModelForDevice() async {
+    if (kIsWeb) return NovaModel.smollm;
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return NovaModel.gemma4E2b;
+    }
+
+    final mem = MemoryDiagnosticsService.instance;
+    final avail = await mem.readAvailableMemMb();
+    final total = await mem.readTotalMemMb();
+
+    // ≤6.5 GB class (POCO F1 6 GB, etc.): never onboard Gemma 4.
+    // Fresh reboot can show plenty of free RAM and still OOM on load.
+    if (total != null && total < 6656) {
+      return NovaModel.smollm;
+    }
+
+    if (avail == null) return NovaModel.gemma3_1b;
+    if (avail < 900) return NovaModel.smollm;
+    if (avail < 1800) return NovaModel.gemma3_1b;
+
+    return NovaModel.gemma4E2b;
   }
 
   /// Pure gate check: returns an error message when [availMemMb] is too low.

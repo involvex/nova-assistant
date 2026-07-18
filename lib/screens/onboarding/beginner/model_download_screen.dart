@@ -4,7 +4,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
+import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/services/platform_adaptation_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 
@@ -18,27 +21,66 @@ class ModelDownloadScreen extends StatefulWidget {
 }
 
 class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
-  static const _targetModel = NovaModel.gemma4E2b;
+  NovaModel _targetModel = NovaModel.smollm;
+  bool _resolvedTarget = false;
 
   double _progress = 0;
-  String _status = 'Preparing...';
+  String _status = 'Checking device memory...';
   bool _isComplete = false;
   bool _hasError = false;
   String _errorMessage = '';
   bool _isBusy = false;
 
+  String get _capabilitiesLabel {
+    final parts = <String>[];
+    if (_targetModel.hasVision) parts.add('Vision');
+    if (_targetModel.hasThinking) parts.add('Thinking');
+    parts.add('Chat');
+    return parts.join(' + ');
+  }
+
   @override
   void initState() {
     super.initState();
-    _checkExisting();
+    _resolveTargetAndCheck();
   }
 
   Future<void> _finishReady() async {
     await UserPreferencesService.instance.setMode(UserMode.beginner);
+    ModelOrchestrator.instance.preferredModelType = _targetModel;
+    ModelOrchestrator.instance.selector.primaryHeavy = _targetModel;
+    ModelOrchestrator.instance.selector.fastModel = NovaModel.smollm;
     await Future<void>.delayed(const Duration(milliseconds: 800));
     if (mounted) {
       widget.onDownloadComplete();
     }
+  }
+
+  Future<void> _resolveTargetAndCheck() async {
+    final recommended = await PlatformAdaptationService.instance
+        .recommendModelForDevice();
+    // #region agent log
+    await AgentDebugLog.log(
+      hypothesisId: 'E',
+      location: 'model_download_screen.dart:_resolveTargetAndCheck',
+      message: 'Onboarding model recommendation',
+      data: {
+        'recommended': recommended.displayName,
+        'sizeMB': recommended.sizeMB,
+        'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
+        'totalMemMb': MemoryDiagnosticsService.instance.lastTotalMemMb,
+      },
+      runId: 'post-fix',
+    );
+    // #endregion
+
+    if (!mounted) return;
+    setState(() {
+      _targetModel = recommended;
+      _resolvedTarget = true;
+      _status = 'Choose how to install ${recommended.displayName}';
+    });
+    await _checkExisting();
   }
 
   Future<void> _checkExisting() async {
@@ -69,7 +111,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
 
     if (mounted) {
       setState(() {
-        _status = 'Choose how to install Gemma 4 E2B';
+        _status = 'Choose how to install ${_targetModel.displayName}';
         _progress = 0;
       });
     }
@@ -80,7 +122,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
       _isBusy = true;
       _progress = 0;
       _hasError = false;
-      _status = 'Downloading Gemma 4 E2B...';
+      _status = 'Downloading ${_targetModel.displayName}...';
     });
 
     try {
@@ -157,7 +199,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
         if (mounted) {
           setState(() {
             _isBusy = false;
-            _status = 'Choose how to install Gemma 4 E2B';
+            _status = 'Choose how to install ${_targetModel.displayName}';
           });
         }
         return;
@@ -188,8 +230,8 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
           _isBusy = false;
           _hasError = true;
           _errorMessage =
-              'Import failed. Select a .litertlm file '
-              '(e.g. gemma-4-E2B-it.litertlm).';
+              'Import failed. Select a matching model file '
+              '(e.g. ${ModelHuggingFaceURLs.fileNameFor(_targetModel)}).';
         });
       }
     } catch (e) {
@@ -205,6 +247,12 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final sizeLabel = '~${_targetModel.sizeMB} MB';
+    final subtitle = _resolvedTarget
+        ? '${_targetModel.displayName} — download ($sizeLabel) or import a\n'
+              'model file you already have. Chosen for this device\'s free RAM.'
+        : 'Checking free RAM to pick a model that can actually load...';
+
     return Padding(
       padding: const EdgeInsets.all(32),
       child: Column(
@@ -239,8 +287,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Gemma 4 E2B — download (~2.4 GB) or import a\n'
-            '.litertlm file you already have.',
+            subtitle,
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.grey[400],
@@ -249,7 +296,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
             ),
           ),
           const SizedBox(height: 48),
-          _buildModelInfo(),
+          _buildModelInfo(sizeLabel),
           const SizedBox(height: 32),
           if (_hasError) ...[
             Container(
@@ -276,7 +323,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: _isBusy ? null : _downloadModel,
+                onPressed: _isBusy || !_resolvedTarget ? null : _downloadModel,
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF6C63FF),
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -291,14 +338,16 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
               ),
             ),
             TextButton(
-              onPressed: _isBusy ? null : _importFromStorage,
+              onPressed: _isBusy || !_resolvedTarget
+                  ? null
+                  : _importFromStorage,
               child: const Text('Import from storage instead'),
             ),
           ] else if (!_isComplete && !_isBusy) ...[
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: _downloadModel,
+                onPressed: !_resolvedTarget ? null : _downloadModel,
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF6C63FF),
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -316,7 +365,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(
-                onPressed: _importFromStorage,
+                onPressed: !_resolvedTarget ? null : _importFromStorage,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
                   side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
@@ -334,13 +383,16 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  _status,
-                  style: TextStyle(
-                    color: _isComplete
-                        ? const Color(0xFF4CAF50)
-                        : Colors.grey[400],
-                    fontSize: 13,
+                Flexible(
+                  child: Text(
+                    _status,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _isComplete
+                          ? const Color(0xFF4CAF50)
+                          : Colors.grey[400],
+                      fontSize: 13,
+                    ),
                   ),
                 ),
                 Text(
@@ -389,7 +441,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
             )
           else if (!_hasError && !_isBusy)
             Text(
-              'Tip: If you already have the .litertlm file, use Import.',
+              'Tip: If you already have the model file, use Import.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey[600], fontSize: 12),
             ),
@@ -399,7 +451,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
     );
   }
 
-  Widget _buildModelInfo() {
+  Widget _buildModelInfo(String sizeLabel) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -409,13 +461,17 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
       ),
       child: Column(
         children: [
-          _buildInfoRow('Model', 'Gemma 4 E2B', Icons.model_training_outlined),
+          _buildInfoRow(
+            'Model',
+            _targetModel.displayName,
+            Icons.model_training_outlined,
+          ),
           const SizedBox(height: 12),
-          _buildInfoRow('Size', '~2400 MB', Icons.storage_outlined),
+          _buildInfoRow('Size', sizeLabel, Icons.storage_outlined),
           const SizedBox(height: 12),
           _buildInfoRow(
             'Capabilities',
-            'Vision + Thinking + Function Calling',
+            _capabilitiesLabel,
             Icons.auto_awesome_outlined,
           ),
         ],

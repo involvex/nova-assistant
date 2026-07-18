@@ -13,11 +13,11 @@ void main() {
 
       final message = service.freeRamGateMessage(
         model: NovaModel.gemma4E2b,
-        availMemMb: 2000,
+        availMemMb: 1000,
       );
       expect(message, isNotNull);
       expect(message!, contains('Gemma 4 E2B'));
-      expect(message, contains('2000 MB'));
+      expect(message, contains('1000 MB'));
     });
 
     test('allows Gemma 4 when enough free RAM', () {
@@ -27,7 +27,7 @@ void main() {
       expect(
         service.freeRamGateMessage(
           model: NovaModel.gemma4E2b,
-          availMemMb: 4000,
+          availMemMb: 2000,
         ),
         isNull,
       );
@@ -54,6 +54,15 @@ void main() {
         service.freeRamGateMessage(model: NovaModel.smollm, availMemMb: 200),
         isNull,
       );
+    });
+
+    test('minFreeRamMbFor matches size tiers', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      expect(service.minFreeRamMbFor(NovaModel.gemma4E2b), 1800);
+      expect(service.minFreeRamMbFor(NovaModel.gemma3_1b), 700);
+      expect(service.minFreeRamMbFor(NovaModel.smollm), isNull);
     });
   });
 }

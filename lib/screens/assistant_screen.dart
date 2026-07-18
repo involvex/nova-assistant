@@ -1943,11 +1943,14 @@ class _AssistantScreenState extends State<AssistantScreen>
             ),
           ),
           const SizedBox(width: 6),
-          Text(
-            _status,
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          Expanded(
+            child: Text(
+              _status,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            ),
           ),
-          const Spacer(),
           if (_thinkingMode)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),

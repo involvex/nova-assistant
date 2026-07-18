@@ -82,6 +82,7 @@ class MainActivity : FlutterActivity() {
                                 "pssKb" to pssKb,
                                 "rssKb" to pssKb,
                                 "availMemMb" to (info.availMem / (1024 * 1024)),
+                                "totalMemMb" to (info.totalMem / (1024 * 1024)),
                             )
                         )
                     }

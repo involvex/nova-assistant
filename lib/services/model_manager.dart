@@ -290,17 +290,27 @@ class ModelManager {
 
         final totalBytes = response.contentLength;
         var receivedBytes = 0;
+        var lastReportedPct = -1;
         final sink = tempFile.openWrite();
 
-        await for (final chunk in response.asBroadcastStream()) {
+        // Single-subscriber stream; do not broadcast. Only notify UI when the
+        // integer percent changes — per-chunk setState thrashing caps large
+        // downloads (~2.5GB) at a few hundred KB/s on mid-range devices.
+        await for (final chunk in response) {
           sink.add(chunk);
           receivedBytes += chunk.length;
           if (onProgress != null && totalBytes > 0) {
-            // Reserve 90–100% for install/registration
-            onProgress((receivedBytes * 90 ~/ totalBytes).clamp(0, 90));
+            final pct = (receivedBytes * 90 ~/ totalBytes).clamp(0, 90);
+            if (pct != lastReportedPct) {
+              lastReportedPct = pct;
+              onProgress(pct);
+            }
           }
         }
         await sink.close();
+        if (onProgress != null && lastReportedPct < 90) {
+          onProgress(90);
+        }
 
         if (totalBytes > 0 && receivedBytes != totalBytes) {
           _statusController.add(

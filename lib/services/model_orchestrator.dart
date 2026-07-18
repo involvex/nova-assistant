@@ -1102,7 +1102,8 @@ class ModelOrchestrator {
                 );
               },
             )
-            .timeout(const Duration(seconds: 300));
+            // Gemma 4 ~2.5GB needs far more than 5 minutes even on fast WiFi.
+            .timeout(const Duration(minutes: 45));
 
         if (installed == null) {
           throw ModelDownloadException(

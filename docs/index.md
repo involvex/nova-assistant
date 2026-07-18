@@ -15,6 +15,7 @@ All inference runs locally — no chat data is sent to external servers.
 | [Getting started](getting-started.md) | Clone, setup, run, and build |
 | [Architecture](architecture.md) | Services, inference pipeline, native bridges |
 | [Models](models.md) | Built-in models, import, HuggingFace downloads |
+| [Remote LAN inference](remote-inference.md) | Stream large/GGUF models from a PC on Wi‑Fi |
 | [Tools & MCP](tools.md) | Device tools and external MCP servers |
 | [Contributing](contributing.md) | Style, tests, CI, commits |
 | [Roadmap](roadmap.md) | Planned features and release phases |

@@ -9,6 +9,7 @@ import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/agent_identity.dart';
 import 'package:nova_assistant/models/assistant_language.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
+import 'package:nova_assistant/models/inference_backend.dart';
 import 'package:nova_assistant/models/prompt_preset.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:nova_assistant/services/export_service.dart';
@@ -16,6 +17,7 @@ import 'package:nova_assistant/services/knowledge_base_service.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/prompt_presets_service.dart';
+import 'package:nova_assistant/services/remote_inference_config.dart';
 import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
 
@@ -64,6 +66,16 @@ class SettingsBackupService {
           'debugMode': prefs.getBool('settings_debug_mode') ?? false,
           'knowledgeBaseEnabled':
               prefs.getBool(KnowledgeBaseService.enabledPrefsKey) ?? true,
+          'inferenceBackend':
+              prefs.getString(RemoteInferenceConfig.backendPrefsKey) ??
+              InferenceBackend.onDevice.prefsValue,
+          'remoteBaseUrl':
+              prefs.getString(RemoteInferenceConfig.baseUrlPrefsKey) ??
+              RemoteInferenceConfig.defaultBaseUrl,
+          'remoteModelId':
+              prefs.getString(RemoteInferenceConfig.modelIdPrefsKey) ??
+              RemoteInferenceConfig.defaultModelId,
+          // Token intentionally omitted from backup — re-enter after import.
         },
         'identity': {'config': identity.toJson(), 'isActive': identityActive},
         'mcp': {
@@ -245,6 +257,21 @@ class SettingsBackupService {
     await prefs.setBool(
       KnowledgeBaseService.enabledPrefsKey,
       assistant['knowledgeBaseEnabled'] as bool? ?? true,
+    );
+    await prefs.setString(
+      RemoteInferenceConfig.backendPrefsKey,
+      assistant['inferenceBackend'] as String? ??
+          InferenceBackend.onDevice.prefsValue,
+    );
+    await prefs.setString(
+      RemoteInferenceConfig.baseUrlPrefsKey,
+      assistant['remoteBaseUrl'] as String? ??
+          RemoteInferenceConfig.defaultBaseUrl,
+    );
+    await prefs.setString(
+      RemoteInferenceConfig.modelIdPrefsKey,
+      assistant['remoteModelId'] as String? ??
+          RemoteInferenceConfig.defaultModelId,
     );
   }
 

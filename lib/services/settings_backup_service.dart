@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/agent_identity.dart';
 import 'package:nova_assistant/models/assistant_language.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
@@ -54,6 +55,12 @@ class SettingsBackupService {
           'ragMemory': prefs.getBool('settings_rag_memory') ?? false,
           'batteryOptimization':
               prefs.getBool('settings_battery_optimization') ?? true,
+          'keepModelWarm': prefs.getBool('settings_keep_model_warm') ?? true,
+          'highContext':
+              prefs.getBool('settings_high_context') ??
+              (kIsWeb || defaultTargetPlatform != TargetPlatform.android),
+          'autoCompact': prefs.getBool('settings_auto_compact') ?? true,
+          'adultMode': prefs.getBool(AdultModePolicy.prefsKey) ?? false,
           'debugMode': prefs.getBool('settings_debug_mode') ?? false,
           'knowledgeBaseEnabled':
               prefs.getBool(KnowledgeBaseService.enabledPrefsKey) ?? true,
@@ -213,6 +220,23 @@ class SettingsBackupService {
     await prefs.setBool(
       'settings_battery_optimization',
       assistant['batteryOptimization'] as bool? ?? true,
+    );
+    await prefs.setBool(
+      'settings_keep_model_warm',
+      assistant['keepModelWarm'] as bool? ?? true,
+    );
+    await prefs.setBool(
+      'settings_high_context',
+      assistant['highContext'] as bool? ??
+          (kIsWeb || defaultTargetPlatform != TargetPlatform.android),
+    );
+    await prefs.setBool(
+      'settings_auto_compact',
+      assistant['autoCompact'] as bool? ?? true,
+    );
+    await prefs.setBool(
+      AdultModePolicy.prefsKey,
+      assistant['adultMode'] as bool? ?? false,
     );
     await prefs.setBool(
       'settings_debug_mode',

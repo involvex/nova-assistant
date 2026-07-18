@@ -63,6 +63,7 @@ On first launch, use onboarding or **Settings → AI Models** to download or imp
 - **Import** — `.litertlm` or `.task` from storage (GGUF is blocked)
 
 Optional: set a HuggingFace token in Settings for authenticated downloads.
+Optional: enable **Adult mode** in Settings if you want less prudish answers on legal adult topics (on-device only; still refuses illegal content).
 
 ## Agent-assisted setup
 

@@ -37,6 +37,18 @@ Canonical filenames matter: downloads must register as e.g. `gemma-4-E2B-it.lite
 - Model Browser searches HF and downloads into app documents
 - Prefer authenticated downloads if you hit 401/403
 
+## Context window (Gemma 4)
+
+On **Android**, Gemma 4 E2B uses a **2048-token KV cache** by default to limit RAM use. That caps how long a single message can be once chat history and system overhead are counted.
+
+Enable **High context window** in **Settings** to raise the KV limit to **4096** and allow substantially longer messages (at the cost of more RAM — avoid on ≤6 GB phones).
+
+When a thread gets long, **Compact context** (manual button in chat) or **Auto-compact context** (Settings, on by default) summarizes older turns so new messages still fit without starting a new chat. The full message list stays visible; only the inference session is replayed from the summary plus recent turns.
+
+## Adult mode
+
+**Adult mode** (Settings, default off) is a local-only preference that appends a short system-prompt suffix so Nova answers legal adult topics more directly. It does not unlock illegal content and cannot fully override the base model’s own refusals.
+
 ## RAM guidance
 
 | Device RAM | Recommendation |

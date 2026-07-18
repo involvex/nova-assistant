@@ -9,12 +9,15 @@ class MessageLimits {
   const MessageLimits._();
 
   static const contextBudgetRatio = 0.6;
+  static const highContextBudgetRatio = 0.7;
 
   /// Fixed token overhead baked into Gemma 4 sessions (jinja FC template, etc.).
-  static const gemma4JinjaOverheadTokens = 500;
+  static const gemma4JinjaOverheadTokens = 350;
 
   /// Typical system prompt + role + identity overhead.
-  static const systemPromptOverheadTokens = 300;
+  static const systemPromptOverheadTokens = 220;
+
+  static const exhaustedBudgetFloorChars = 400;
 
   static MessageLimitTier tierFor({
     NovaModel? model,
@@ -55,7 +58,7 @@ class MessageLimits {
     return MessageLimitTier.fast;
   }
 
-  static int kvTokenLimitFor(NovaModel model) {
+  static int kvTokenLimitFor(NovaModel model, {bool highContext = false}) {
     switch (model) {
       case NovaModel.smollm:
         return 512;
@@ -64,6 +67,7 @@ class MessageLimits {
       case NovaModel.gemma3_1b:
         return 2048;
       case NovaModel.gemma4E2b:
+        if (highContext) return 4096;
         if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
           return 2048;
         }
@@ -104,9 +108,11 @@ class MessageLimits {
     int historyTokenEstimate = 0,
     int ragTokenEstimate = 0,
     bool hasAttachments = false,
+    bool highContext = false,
   }) {
-    final kvLimit = kvTokenLimitFor(effectiveModel);
-    final usableBudget = (kvLimit * contextBudgetRatio).round();
+    final kvLimit = kvTokenLimitFor(effectiveModel, highContext: highContext);
+    final ratio = highContext ? highContextBudgetRatio : contextBudgetRatio;
+    final usableBudget = (kvLimit * ratio).round();
 
     var reserved = systemPromptOverheadTokens + historyTokenEstimate;
     if (effectiveModel == NovaModel.gemma4E2b) {
@@ -116,13 +122,13 @@ class MessageLimits {
     if (hasAttachments) reserved += 200;
 
     final remainingTokens = usableBudget - reserved;
-    if (remainingTokens <= 0) return 200;
+    if (remainingTokens <= 0) return exhaustedBudgetFloorChars;
 
     final charCap = charsFromTokens(remainingTokens);
-    final tierCap = hardLimit(
-      tierFor(model: effectiveModel),
-      hasAttachments: hasAttachments,
-    );
+    final tier = highContext && effectiveModel == NovaModel.gemma4E2b
+        ? MessageLimitTier.large
+        : tierFor(model: effectiveModel);
+    final tierCap = hardLimit(tier, hasAttachments: hasAttachments);
 
     return charCap < tierCap ? charCap : tierCap;
   }
@@ -132,12 +138,14 @@ class MessageLimits {
     int historyTokenEstimate = 0,
     int ragTokenEstimate = 0,
     bool hasAttachments = false,
+    bool highContext = false,
   }) {
     final hard = maxUserCharsForInference(
       effectiveModel: effectiveModel,
       historyTokenEstimate: historyTokenEstimate,
       ragTokenEstimate: ragTokenEstimate,
       hasAttachments: hasAttachments,
+      highContext: highContext,
     );
 
     return (hard * 0.65).round();
@@ -174,16 +182,18 @@ class MessageLimits {
     int historyTokenEstimate = 0,
     int ragTokenEstimate = 0,
     bool hasAttachments = false,
+    bool highContext = false,
   }) {
     final maxChars = maxUserCharsForInference(
       effectiveModel: effectiveModel,
       historyTokenEstimate: historyTokenEstimate,
       ragTokenEstimate: ragTokenEstimate,
       hasAttachments: hasAttachments,
+      highContext: highContext,
     );
     if (text.length <= maxChars) return null;
 
-    final kvLimit = kvTokenLimitFor(effectiveModel);
+    final kvLimit = kvTokenLimitFor(effectiveModel, highContext: highContext);
     final queryTokens = estimateTokens(text);
 
     return 'Prompt too large (~$queryTokens tokens, KV limit $kvLimit). '
@@ -200,6 +210,7 @@ class MessageLimits {
     NovaModel? effectiveModel,
     int historyTokenEstimate = 0,
     int ragTokenEstimate = 0,
+    bool highContext = false,
   }) {
     final resolved = effectiveModel ?? model;
     if (resolved != null) {
@@ -208,6 +219,7 @@ class MessageLimits {
         historyTokenEstimate: historyTokenEstimate,
         ragTokenEstimate: ragTokenEstimate,
         hasAttachments: hasAttachments,
+        highContext: highContext,
       );
 
       return text.length > soft;

@@ -3,6 +3,14 @@ import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 
+/// Result of an explicit context compact: extractive summary plus replay list.
+class CompactResult {
+  const CompactResult({required this.summary, required this.retainedMessages});
+
+  final String summary;
+  final List<ChatMessage> retainedMessages;
+}
+
 /// Builds and stores rolling conversation summaries for RAG.
 ///
 /// Uses extractive summarization (recent turns + key user intents) so we do
@@ -15,10 +23,48 @@ class ConversationSummaryService {
   ConversationSummaryService._();
 
   static const _minMessagesForSummary = 6;
-  static const _maxSummaryChars = 1200;
+  static const _maxSummaryChars = 2000;
 
   /// Summary for the conversation currently open in the UI.
   String? activeSummary;
+
+  /// Compact older turns into an extractive summary for inference replay.
+  ///
+  /// UI history is preserved — only [Conversation.summary] is persisted.
+  /// [retainedMessages] is `[summary message] + last [keepRecent] usable turns`.
+  Future<CompactResult> compactNow(
+    Conversation conversation, {
+    int keepRecent = 6,
+  }) async {
+    final summary = _buildExtractiveSummary(conversation.messages);
+    final usable = conversation.messages
+        .where((m) => !m.isStreaming && !m.isError && m.text.trim().isNotEmpty)
+        .toList();
+    final recent = usable.length > keepRecent
+        ? usable.sublist(usable.length - keepRecent)
+        : usable;
+
+    final summaryMessage = ChatMessage(
+      id: 'compact-${DateTime.now().millisecondsSinceEpoch}',
+      text: '[Conversation summary]\n$summary',
+      isUser: false,
+      timestamp: DateTime.now(),
+      modelName: 'compact',
+    );
+
+    final retained = [summaryMessage, ...recent];
+
+    try {
+      await ChatHistoryService.updateConversation(
+        conversation.copyWith(summary: summary),
+      );
+      activeSummary = summary;
+    } catch (e) {
+      debugPrint('ConversationSummaryService.compactNow update error: $e');
+    }
+
+    return CompactResult(summary: summary, retainedMessages: retained);
+  }
 
   /// Update summary when a conversation grows long enough.
   Future<String?> maybeUpdateSummary(Conversation conversation) async {

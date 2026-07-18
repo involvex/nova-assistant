@@ -8,11 +8,13 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/chat_message.dart';
+import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/services/model_release_policy.dart';
 import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
@@ -127,24 +129,36 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _saveMessages() async {
+    final persistable = _messages.where(_isPersistableMessage).toList();
     if (widget.conversationId != null) {
       final conversation = await ChatHistoryService.getConversation(
         widget.conversationId!,
       );
       if (conversation != null) {
-        final updated = conversation.copyWith(messages: List.from(_messages));
+        final updated = conversation.copyWith(messages: List.from(persistable));
         await ChatHistoryService.updateConversation(updated);
         await ConversationSummaryService.instance.maybeUpdateSummary(updated);
       }
     } else {
-      await ChatHistoryService.save(_messages);
+      await ChatHistoryService.save(persistable);
       final conversations = await ChatHistoryService.loadConversations();
       if (conversations.isNotEmpty) {
         await ConversationSummaryService.instance.maybeUpdateSummary(
-          conversations.first.copyWith(messages: List.from(_messages)),
+          conversations.first.copyWith(messages: List.from(persistable)),
         );
       }
     }
+  }
+
+  /// Keeps completed turns with text, images, or tool calls; drops streaming
+  /// placeholders and empty shells.
+  bool _isPersistableMessage(ChatMessage m) {
+    if (m.isStreaming || m.isError) return false;
+    if (m.text.trim().isNotEmpty) return true;
+    if (m.imageData != null && m.imageData!.isNotEmpty) return true;
+    if (m.toolCalls != null && m.toolCalls!.trim().isNotEmpty) return true;
+
+    return false;
   }
 
   Future<void> _loadThinkingMode() async {
@@ -229,6 +243,15 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool get _hasAttachments =>
       _currentScreenshot != null || _attachmentManager.attachments.isNotEmpty;
 
+  int get _historyTokenEstimate {
+    final text = _messages
+        .where((m) => !m.isStreaming && !m.isError)
+        .map((m) => m.text)
+        .join(' ');
+
+    return MessageLimits.estimateTokens(text);
+  }
+
   int get _messageHardLimit {
     if (_selectedCustomModel != null) {
       return MessageLimits.hardLimit(
@@ -239,7 +262,9 @@ class _AssistantScreenState extends State<AssistantScreen>
 
     return MessageLimits.maxUserCharsForInference(
       effectiveModel: _effectiveModel,
+      historyTokenEstimate: _historyTokenEstimate,
       hasAttachments: _hasAttachments,
+      highContext: ModelOrchestrator.instance.highContextEnabled,
     );
   }
 
@@ -253,11 +278,76 @@ class _AssistantScreenState extends State<AssistantScreen>
 
     return MessageLimits.softUserCharsForInference(
       effectiveModel: _effectiveModel,
+      historyTokenEstimate: _historyTokenEstimate,
       hasAttachments: _hasAttachments,
+      highContext: ModelOrchestrator.instance.highContextEnabled,
     );
   }
 
   bool _isOverHardLimitFor(String text) => text.length > _messageHardLimit;
+
+  Future<void> _maybeAutoCompact() async {
+    if (!ModelOrchestrator.instance.autoCompactEnabled) return;
+    final maxChars = MessageLimits.maxUserCharsForInference(
+      effectiveModel: _effectiveModel,
+      historyTokenEstimate: _historyTokenEstimate,
+      hasAttachments: _hasAttachments,
+      highContext: ModelOrchestrator.instance.highContextEnabled,
+    );
+    if (maxChars >= 800) return;
+
+    Conversation? conversation;
+    if (widget.conversationId != null) {
+      conversation = await ChatHistoryService.getConversation(
+        widget.conversationId!,
+      );
+    }
+    conversation ??= Conversation(
+      id: widget.conversationId,
+      messages: List.from(_messages),
+    );
+    conversation = conversation.copyWith(messages: List.from(_messages));
+
+    final result = await ConversationSummaryService.instance.compactNow(
+      conversation,
+    );
+    await ModelOrchestrator.instance.applyCompactedReplay(
+      result.retainedMessages,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Context compacted to free space')),
+      );
+    }
+  }
+
+  Future<void> _manualCompact() async {
+    if (_isGenerating) return;
+
+    Conversation? conversation;
+    if (widget.conversationId != null) {
+      conversation = await ChatHistoryService.getConversation(
+        widget.conversationId!,
+      );
+    }
+    conversation ??= Conversation(
+      id: widget.conversationId,
+      messages: List.from(_messages),
+    );
+    conversation = conversation.copyWith(messages: List.from(_messages));
+
+    final result = await ConversationSummaryService.instance.compactNow(
+      conversation,
+    );
+    await ModelOrchestrator.instance.applyCompactedReplay(
+      result.retainedMessages,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Context compacted to free space')),
+      );
+    }
+  }
 
   bool _canSendFor(String text) =>
       text.trim().isNotEmpty &&
@@ -467,9 +557,12 @@ class _AssistantScreenState extends State<AssistantScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      // Never unload while LiteRT is generating — causes SIGABRT.
-      if (!ModelOrchestrator.instance.isStreaming) {
-        ModelOrchestrator.instance.releaseIdleResources();
+      final shouldRelease = ModelReleasePolicy.shouldReleaseOnPause(
+        keepModelWarm: ModelOrchestrator.instance.keepModelWarm,
+        isStreaming: ModelOrchestrator.instance.isStreaming,
+      );
+      if (shouldRelease) {
+        ModelOrchestrator.instance.releaseIdleResources(force: true);
       }
     } else if (state == AppLifecycleState.resumed) {
       _checkModelAvailability();
@@ -685,7 +778,9 @@ class _AssistantScreenState extends State<AssistantScreen>
           : MessageLimits.validateTokenBudget(
               text: text,
               effectiveModel: _effectiveModel,
+              historyTokenEstimate: _historyTokenEstimate,
               hasAttachments: _hasAttachments,
+              highContext: ModelOrchestrator.instance.highContextEnabled,
             );
       ScaffoldMessenger.of(
         context,
@@ -693,6 +788,8 @@ class _AssistantScreenState extends State<AssistantScreen>
 
       return;
     }
+
+    await _maybeAutoCompact();
 
     // Wait for initial screenshot to load if still loading (from assistant mode)
     // This ensures screenshot is captured before model selection happens
@@ -703,6 +800,10 @@ class _AssistantScreenState extends State<AssistantScreen>
       }
       debugPrint('Screenshot loaded: ${_currentScreenshot != null}');
     }
+
+    ModelOrchestrator.instance.setPendingReplayMessages(
+      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+    );
 
     _inputController.clear();
     _clearFollowUpSuggestions();
@@ -818,6 +919,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         }
         _shouldPreserveScreenshot = false;
       });
+      await _saveMessages();
       _attachmentManager.clear();
     }
   }
@@ -1469,6 +1571,13 @@ class _AssistantScreenState extends State<AssistantScreen>
                       message: 'Export conversation',
                       child: Icon(Icons.download_outlined, color: Colors.grey),
                     ),
+                  ),
+
+                  // Compact context
+                  IconButton(
+                    onPressed: _isGenerating ? null : _manualCompact,
+                    icon: const Icon(Icons.compress, color: Colors.grey),
+                    tooltip: 'Compact context',
                   ),
 
                   // Chat history

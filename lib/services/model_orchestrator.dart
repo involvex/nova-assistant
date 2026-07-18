@@ -8,10 +8,12 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/models/agent_identity.dart';
 import 'package:nova_assistant/models/assistant_language.dart';
+import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/external_tool.dart';
 import 'package:nova_assistant/models/model_info.dart';
@@ -29,6 +31,7 @@ import 'package:nova_assistant/utils/alarm_time_parser.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
+import 'package:nova_assistant/services/session_history_reinjection.dart';
 
 enum DownloadConsent { download, pickFile, cancel }
 
@@ -142,6 +145,11 @@ class ModelOrchestrator {
   bool _modelOverrideDirty = false;
   bool _isInitialized = false;
   bool _batteryOptimizationEnabled = true;
+  bool _keepModelWarm = true;
+  bool _highContextEnabled = false;
+  bool _autoCompactEnabled = true;
+  bool _adultModeEnabled = false;
+  List<ChatMessage> _pendingReplay = const [];
   bool _debugMode = false;
   bool _isReleasing = false; // Guard against concurrent release operations
   Completer<void>? _releaseCompleter; // Signals when release is complete
@@ -183,6 +191,63 @@ class ModelOrchestrator {
   Stream<void> get historyClearedStream => _historyClearedController.stream;
 
   bool get isInitialized => _isInitialized;
+
+  bool get keepModelWarm => _keepModelWarm;
+
+  bool get highContextEnabled => _highContextEnabled;
+
+  bool get autoCompactEnabled => _autoCompactEnabled;
+
+  bool get adultModeEnabled => _adultModeEnabled;
+
+  void setKeepModelWarm(bool enabled) {
+    _keepModelWarm = enabled;
+  }
+
+  void setHighContextEnabled(bool enabled) {
+    _highContextEnabled = enabled;
+  }
+
+  void setAutoCompactEnabled(bool enabled) {
+    _autoCompactEnabled = enabled;
+  }
+
+  /// Updates adult mode and clears the live chat so the next send uses the
+  /// new system prompt (model stays loaded when keep-warm is on).
+  void setAdultModeEnabled(bool enabled) {
+    if (_adultModeEnabled == enabled) return;
+    _adultModeEnabled = enabled;
+    _activeChat = null;
+  }
+
+  void setPendingReplayMessages(List<ChatMessage> messages) {
+    _pendingReplay = List<ChatMessage>.from(messages);
+  }
+
+  Future<void> applyCompactedReplay(List<ChatMessage> retained) async {
+    if (_activeChat == null) {
+      setPendingReplayMessages(retained);
+      return;
+    }
+    final model = _activeModelType ?? NovaModel.gemma4E2b;
+    final ratio = _highContextEnabled
+        ? MessageLimits.highContextBudgetRatio
+        : MessageLimits.contextBudgetRatio;
+    final replay = SessionHistoryReinjection.buildReplayMessages(
+      retained,
+      maxTokens: (_tokenLimitFor(model) * ratio).round(),
+    );
+    if (replay.isEmpty) return;
+    try {
+      await _activeChat!.clearHistory(replayHistory: replay);
+    } on Exception catch (e) {
+      // Do not fall back to addQuery — that would append onto the old history
+      // and duplicate turns / blow the KV budget. Defer to next createChat.
+      debugPrint('applyCompactedReplay failed: $e');
+      setPendingReplayMessages(retained);
+      _activeChat = null;
+    }
+  }
 
   void setBatteryOptimization(bool enabled) {
     _batteryOptimizationEnabled = enabled;
@@ -281,6 +346,29 @@ class ModelOrchestrator {
       } catch (_) {
         _preferredModelOverride = null;
       }
+    }
+  }
+
+  /// Loads keep-warm / high-context / auto-compact / adult-mode from prefs.
+  ///
+  /// When [invalidateChatOnAdultChange] is true and adult mode flipped, the
+  /// live [InferenceChat] is cleared so the next send rebuilds the system
+  /// prompt (model stays loaded if keep-warm is on).
+  Future<void> _loadRuntimeSettings({
+    bool invalidateChatOnAdultChange = false,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
+    _highContextEnabled =
+        prefs.getBool('settings_high_context') ??
+        (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
+    _autoCompactEnabled = prefs.getBool('settings_auto_compact') ?? true;
+    final adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
+    if (invalidateChatOnAdultChange && _adultModeEnabled != adultMode) {
+      _adultModeEnabled = adultMode;
+      _activeChat = null;
+    } else {
+      _adultModeEnabled = adultMode;
     }
   }
 
@@ -412,7 +500,10 @@ class ModelOrchestrator {
     }
   }
 
-  Future<void> releaseIdleResources() => _releaseIdleResources();
+  Future<void> releaseIdleResources({bool force = false}) async {
+    if (!force && _keepModelWarm) return;
+    await _releaseIdleResources();
+  }
 
   /// Predicts which [NovaModel] will run without loading the engine.
   NovaModel predictEffectiveModel({
@@ -1287,21 +1378,10 @@ class ModelOrchestrator {
   String? get downloadConsentUrl => _downloadConsentUrl;
 
   int _tokenLimitFor(NovaModel model) {
-    switch (model) {
-      case NovaModel.smollm:
-        return 512;
-      case NovaModel.fastvlm:
-        return 1024;
-      case NovaModel.gemma3_1b:
-        return 2048;
-      case NovaModel.gemma4E2b:
-        // Smaller KV on Android reduces RAM pressure (Poco F1 / mid-range).
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-          return 2048;
-        }
-
-        return 4096;
-    }
+    return MessageLimits.kvTokenLimitFor(
+      model,
+      highContext: _highContextEnabled,
+    );
   }
 
   static const _contextBudgetRatio = 0.6;
@@ -1338,6 +1418,7 @@ class ModelOrchestrator {
       historyTokenEstimate: historyTokenEstimate,
       ragTokenEstimate: ragTokenEstimate,
       hasAttachments: hasAttachments,
+      highContext: _highContextEnabled,
     );
   }
 
@@ -1621,7 +1702,8 @@ class ModelOrchestrator {
       }
 
       final chatTools = _toolsForCreateChat(model, tools);
-      if (_activeChat == null) {
+      final wasNull = _activeChat == null;
+      if (wasNull) {
         _isLoadingModel = true;
         _statusController.add('Preparing chat session...');
       }
@@ -1635,6 +1717,24 @@ class ModelOrchestrator {
           tools: chatTools,
           supportImage: model.hasVision && _activeModelSupportsImage,
         );
+        if (wasNull && _pendingReplay.isNotEmpty) {
+          final budget = (_tokenLimitFor(model) * _contextBudgetRatio).round();
+          final replay = SessionHistoryReinjection.buildReplayMessages(
+            _pendingReplay,
+            maxTokens: budget,
+          );
+          _pendingReplay = const [];
+          if (replay.isNotEmpty) {
+            try {
+              await _activeChat!.clearHistory(replayHistory: replay);
+            } on Exception catch (e) {
+              debugPrint('History reinjection failed: $e');
+              for (final msg in replay) {
+                await _activeChat!.addQuery(msg);
+              }
+            }
+          }
+        }
       } finally {
         if (_isLoadingModel) {
           _isLoadingModel = false;
@@ -2212,6 +2312,10 @@ class ModelOrchestrator {
       buffer.write('\n\n${await _languageInstruction()}');
     }
 
+    if (_adultModeEnabled) {
+      buffer.write(AdultModePolicy.systemPromptSuffix(compact: compact));
+    }
+
     if (ragContext != null && ragContext.isNotEmpty) {
       buffer.write('\n\n${_capContextInjection(ragContext)}');
     }
@@ -2318,6 +2422,7 @@ class ModelOrchestrator {
   Future<void> initializeDefaultModel() async {
     await _loadAssistantRole();
     await _loadPreferredModel();
+    await _loadRuntimeSettings();
     await _loadIdentity();
     // NOTE: We deliberately do NOT load a model here.
     // Loading a 2.4GB model at startup causes memory/CPU exhaustion
@@ -2335,5 +2440,6 @@ class ModelOrchestrator {
     final roleName = prefs.getString('settings_assistant_role');
     _cachedRole = AssistantRole.fromString(roleName);
     _cachedIdentity = await IdentityService.getIdentity();
+    await instance._loadRuntimeSettings(invalidateChatOnAdultChange: true);
   }
 }

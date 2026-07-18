@@ -1,54 +1,54 @@
-# Task 2: Add Onboarding Screen - Report
+# Task 2 Report: Orchestrator Reinjection + Keep-Warm Flag
 
-## What I Implemented
+## Status
 
-Created a 3-page onboarding flow for first-time users:
+**DONE**
 
-1. **Welcome Page**: Introduction to Nova with psychology icon and privacy message
-2. **Model Selection Page**: Choice between Fast Mode (SmolLM) and Accurate Mode (Gemma 4) with visual selection
-3. **Privacy Page**: Explains local-only inference and lists required permissions (mic, photos, screen capture)
+## Commit
 
-Key features:
-- PageView with smooth page transitions and page indicators
-- Tappable mode selection cards with check_circle highlight for selected option
-- Back/Next navigation with Get Started on final page
-- On completion, sets `onboarding_completed` SharedPreferences flag
-- If Accurate Mode selected, sets `preferred_model_override` to `gemma4E2b`
-- Uses `pushReplacement` to navigate to AssistantScreen
+| Hash | Message |
+|------|---------|
+| `61a058b` | feat: keep-warm policy and chat history reinjection |
 
-## Files Changed
+## What Was Implemented
 
-| File | Change |
-|------|--------|
-| `lib/screens/onboarding_screen.dart` | Created - 3-page onboarding UI |
-| `lib/main.dart` | Added OnboardingRouter class and updated home to use it |
+### `lib/services/model_release_policy.dart` (new)
 
-## Test Results
+Pure policy helpers per plan:
 
+- `shouldReleaseOnPause` — blocks release when streaming or `keepModelWarm` is true
+- `shouldReleaseOnIdle` — requires battery optimization; blocks when streaming or loading
+
+### `lib/services/model_orchestrator.dart` (modified)
+
+- `_keepModelWarm` field (default `true`), `keepModelWarm` getter, `setKeepModelWarm(bool)`
+- `_loadKeepModelWarm()` loads `settings_keep_model_warm` from SharedPreferences (default `true`) in `initializeDefaultModel()`
+- `_pendingReplay` + `setPendingReplayMessages(List<ChatMessage>)`
+- `releaseIdleResources({bool force = false})` — early return when `!force && _keepModelWarm`; idle timer still calls `_releaseIdleResources` directly
+- After fresh `createChat` (`wasNull` captured before assignment), replays `_pendingReplay` via `SessionHistoryReinjection.buildReplayMessages` with budget `(_tokenLimitFor(model) * _contextBudgetRatio).round()`, then `clearHistory(replayHistory:)` with `addQuery` fallback
+- Imports: `chat_message.dart`, `session_history_reinjection.dart`
+
+### `test/services/model_orchestrator_keep_warm_test.dart` (new)
+
+Three unit tests for `ModelReleasePolicy` per plan.
+
+## Test Commands Run
+
+```bash
+flutter test test/services/model_orchestrator_keep_warm_test.dart test/services/session_history_reinjection_test.dart
+flutter analyze lib/services/model_orchestrator.dart lib/services/model_release_policy.dart
+dart format .
 ```
-Analyzing nova_assistant...
-No issues found! (ran in 61.2s)
-```
 
-### Flutter Analyze Output
-- No errors
-- No warnings
-- All Dart analysis passed
+**Results:**
 
-## Implementation Details
+- Tests: **5/5 passed** (3 keep-warm policy + 2 reinjection)
+- Analyze: **No issues found**
+- Format: 0 files changed
 
-### OnboardingRouter (added to main.dart)
-- Checks `onboarding_completed` SharedPreferences flag on init
-- Shows loading indicator while checking
-- Routes to OnboardingScreen if not completed, AssistantScreen otherwise
+## Self-Review Notes
 
-### OnboardingScreen
-- StatefulWidget managing 3 pages via PageController
-- `_useFastModel` boolean tracks mode selection (default true = SmolLM)
-- `_completeOnboarding()` saves preferences and navigates via pushReplacement
-
-### Page Design
-- Follows Material Design 3 patterns
-- Uses dark theme colors from existing ThemeData
-- Tappable cards with border highlight and check_circle icon
-- Permission items with matching icons
+1. Task 2 scope only — `assistant_screen.dart` lifecycle and settings toggle deferred to Tasks 3–4.
+2. `releaseIdleResources()` without `force: true` is now a no-op when keep-warm is on (default); existing pause handler still calls without `force` until Task 3 wires `ModelReleasePolicy`.
+3. Reinjection runs only when chat was null before `createChat` and pending replay is non-empty.
+4. Ready for Task 3: lifecycle gating + `setPendingReplayMessages` before send.

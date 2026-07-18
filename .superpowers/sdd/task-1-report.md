@@ -1,53 +1,71 @@
-# Task 1 Report: Fix LiteRtLm CancelProcess Crash in ModelOrchestrator
+# Task 1 Report: Session History Reinjection Helper
+
+## Status
+
+**DONE**
+
+## Commits
+
+| Hash | Message |
+|------|---------|
+| `c6c9f96` | feat: add session history reinjection helper |
 
 ## What Was Implemented
 
-Fixed the crash that occurred when `close()` was called on a LiteRtLm model while `generateChatResponseAsync()` stream was actively iterating. The fix adds state tracking to ensure `close()` waits for active streams to finish before proceeding.
+Pure helper `SessionHistoryReinjection` that converts persisted UI `ChatMessage` turns into `flutter_gemma` `Message` objects for inference replay:
 
-## Files Changed
+- `buildReplayMessages(List<ChatMessage> uiMessages, {required int maxTokens})` — filters streaming/error/empty messages, selects newest turns within token budget, returns oldest→newest for replay
+- `estimateTokens(Message)` and `estimateChatMessageTokens(ChatMessage)` — text ≈ `length/4`, images = 500 tokens
+- `_toMessage` — uses `Message.withImage` when `imageData` present, otherwise `Message(text:, isUser:)`
 
-### `lib/services/model_orchestrator.dart`
+## Files Created
 
-**Change 1 - Streaming state fields (after line 134):**
-```dart
-  bool _isStreaming = false;
-  Completer<void>? _streamingCompleter;
+- `lib/services/session_history_reinjection.dart`
+- `test/services/session_history_reinjection_test.dart`
+
+## Test Commands Run
+
+### Step 2 — Failing test (before implementation)
+
+```bash
+flutter test test/services/session_history_reinjection_test.dart
 ```
 
-**Change 2 - preferredModelType setter (line ~168):**
-Added signal to abort active stream before clearing `_activeChat`:
-```dart
-if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
-  _streamingCompleter!.complete();
-}
+**Result:** FAIL (expected)
+
+- Compilation error: `lib/services/session_history_reinjection.dart` not found
+- Undefined name `SessionHistoryReinjection`
+
+### Step 4 — Passing test (after implementation)
+
+```bash
+flutter test test/services/session_history_reinjection_test.dart
 ```
 
-**Change 3 - _releaseIdleResources() (lines ~223-275):**
-Replaced the 100ms delay with a proper wait loop that:
-- Signals any active stream via `_streamingCompleter`
-- Waits up to 3 seconds for `_isStreaming` to become false
-- Only then calls `close()` on the model
-
-**Change 4 - processMessage() stream handling (lines ~838-954):**
-- Added `_isStreaming = true` and `_streamingCompleter = Completer<void>()` before the while loop
-- Wrapped the while loop in try/finally
-- Added abort check at start of await for loop body
-- In finally block: sets `_isStreaming = false`, completes the completer if not done, clears `_streamingCompleter`
-
-**Change 5 - clearHistory() (line ~1196):**
-Added stream abort signal before `_activeChat = null`
-
-## Test Results
+**Result:** PASS
 
 ```
-flutter analyze lib/services/model_orchestrator.dart
-No issues found!
+00:00 +0: SessionHistoryReinjection skips errors streaming and empty
+00:00 +1: SessionHistoryReinjection keeps newest turns within token budget
+00:00 +2: All tests passed!
 ```
 
-## Concerns
+### Format + analyze
 
-None - the implementation follows the task brief exactly and compiles without errors.
+```bash
+dart format lib/services/session_history_reinjection.dart test/services/session_history_reinjection_test.dart
+flutter analyze lib/services/session_history_reinjection.dart test/services/session_history_reinjection_test.dart
+```
 
-## Commit
+**Result:**
 
-`423e654` - fix: prevent CancelProcess crash in ModelOrchestrator
+- `dart format` reformatted `session_history_reinjection.dart` (trailing comma on `.where()` closure per project style)
+- `flutter analyze`: 1 warning — unused import `package:flutter_gemma/flutter_gemma.dart` in test file (present in plan's exact test code; left unchanged per spec)
+
+## Self-Review Notes
+
+1. Implementation matches plan Task 1 Step 3 exactly; TDD flow followed (fail → implement → pass).
+2. Token budget logic always includes at least the newest message even if it exceeds budget (`selected.isNotEmpty` guard on break).
+3. Image messages use fixed 500-token estimate; no dedicated image test in Task 1 scope (covered by implementation, not exercised by current tests).
+4. Minor analyze warning on unused test import is acceptable — test file copied verbatim from plan.
+5. Ready for Task 2 wiring into `ModelOrchestrator`.

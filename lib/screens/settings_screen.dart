@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/assistant_language.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
@@ -46,6 +48,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _ttsEnabled = true;
   bool _ragMemory = false;
   bool _batteryOptimization = true;
+  bool _keepModelWarm = true;
+  bool _highContext = false;
+  bool _autoCompact = true;
+  bool _adultMode = false;
   bool _isAssistantRoleHeld = false;
   bool _debugMode = false;
   String _debugMemoryLabel = 'Tap to refresh';
@@ -97,6 +103,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _ragMemory = prefs.getBool('settings_rag_memory') ?? false;
         _batteryOptimization =
             prefs.getBool('settings_battery_optimization') ?? true;
+        _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
+        _highContext =
+            prefs.getBool('settings_high_context') ??
+            (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
+        _autoCompact = prefs.getBool('settings_auto_compact') ?? true;
+        _adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
         _debugMode = prefs.getBool('settings_debug_mode') ?? false;
         _assistantRole = AssistantRole.fromString(
           prefs.getString('settings_assistant_role'),
@@ -435,6 +447,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() => _batteryOptimization = v);
               _saveSetting('settings_battery_optimization', v);
               ModelOrchestrator.instance.setBatteryOptimization(v);
+            },
+          ),
+          _toggleTile(
+            icon: Icons.memory,
+            title: 'Keep model warm',
+            subtitle: 'Stay loaded when you switch apps. Uses more RAM; turn off on low-memory phones.',
+            value: _keepModelWarm,
+            onChanged: (v) async {
+              setState(() => _keepModelWarm = v);
+              await _saveSetting('settings_keep_model_warm', v);
+              ModelOrchestrator.instance.setKeepModelWarm(v);
+            },
+          ),
+          _toggleTile(
+            icon: Icons.fit_screen,
+            title: 'High context window',
+            subtitle: 'Larger KV (4096) for longer messages. Uses more RAM — avoid on ≤6 GB phones.',
+            value: _highContext,
+            onChanged: (v) async {
+              setState(() => _highContext = v);
+              await _saveSetting('settings_high_context', v);
+              await ModelOrchestrator.refreshSettings();
+            },
+          ),
+          _toggleTile(
+            icon: Icons.compress,
+            title: 'Auto-compact context',
+            subtitle: 'When the chat gets long, summarize older turns so new messages still fit.',
+            value: _autoCompact,
+            onChanged: (v) async {
+              setState(() => _autoCompact = v);
+              await _saveSetting('settings_auto_compact', v);
+              await ModelOrchestrator.refreshSettings();
+            },
+          ),
+          _toggleTile(
+            icon: Icons.visibility_outlined,
+            title: 'Adult mode',
+            subtitle: 'Allow direct answers on legal adult topics. On-device only; still refuses illegal content.',
+            value: _adultMode,
+            onChanged: (v) async {
+              if (v) {
+                final ok =
+                    await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Enable adult mode?'),
+                        content: const Text(
+                          'Nova will answer legal adult sexual topics more directly. '
+                          'Illegal content remains disallowed. This setting stays on your device.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('Enable'),
+                          ),
+                        ],
+                      ),
+                    ) ??
+                    false;
+                if (!ok) return;
+              }
+              setState(() => _adultMode = v);
+              await _saveSetting(AdultModePolicy.prefsKey, v);
+              ModelOrchestrator.instance.setAdultModeEnabled(v);
+              await ModelOrchestrator.refreshSettings();
             },
           ),
           _toggleTile(

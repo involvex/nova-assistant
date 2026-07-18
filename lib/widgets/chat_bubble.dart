@@ -121,29 +121,42 @@ class ChatBubble extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (message.isStreaming) _buildStreamingIndicator(),
-                    MarkdownBody(
-                      data: message.text,
-                      selectable: true,
-                      styleSheet: MarkdownStyleSheet(
-                        p: TextStyle(
+                    // Empty markdown can trip layout asserts ("widget can't be
+                    // empty") after a failed/empty model turn.
+                    if (message.text.trim().isEmpty && !message.isStreaming)
+                      Text(
+                        message.isError ? '⚠️ Error' : '…',
+                        style: TextStyle(
                           color: isUser
                               ? Colors.white
-                              : Colors.white.withValues(alpha: 0.92),
+                              : Colors.white.withValues(alpha: 0.5),
                           fontSize: 15,
-                          height: 1.5,
                         ),
-                        code: TextStyle(
-                          backgroundColor: Colors.black26,
-                          color: Colors.cyan[100],
-                          fontFamily: 'monospace',
-                          fontSize: 13,
-                        ),
-                        codeblockDecoration: BoxDecoration(
-                          color: Colors.black38,
-                          borderRadius: BorderRadius.circular(8),
+                      )
+                    else if (message.text.trim().isNotEmpty)
+                      MarkdownBody(
+                        data: message.text,
+                        selectable: true,
+                        styleSheet: MarkdownStyleSheet(
+                          p: TextStyle(
+                            color: isUser
+                                ? Colors.white
+                                : Colors.white.withValues(alpha: 0.92),
+                            fontSize: 15,
+                            height: 1.5,
+                          ),
+                          code: TextStyle(
+                            backgroundColor: Colors.black26,
+                            color: Colors.cyan[100],
+                            fontFamily: 'monospace',
+                            fontSize: 13,
+                          ),
+                          codeblockDecoration: BoxDecoration(
+                            color: Colors.black38,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),

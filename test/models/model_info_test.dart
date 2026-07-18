@@ -31,6 +31,11 @@ void main() {
       expect(NovaModel.gemma4E2b.hasThinking, true);
     });
 
+    test('SmolLM does not advertise function calling', () {
+      expect(NovaModel.smollm.supportsFunctionCalling, false);
+      expect(NovaModel.gemma3_1b.supportsFunctionCalling, true);
+    });
+
     test('enum has exactly 4 values', () {
       expect(NovaModel.values.length, 4);
     });

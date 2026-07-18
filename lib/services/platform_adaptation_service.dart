@@ -263,12 +263,20 @@ class PlatformAdaptationService {
     return 'gpu'; // Prefer GPU on native too
   }
 
-  /// Prefer GPU; large models still use GPU but emit a memory warning via
-  /// [getMemoryWarning]. (CPU is available as a future low-RAM fallback.)
+  /// Prefer GPU for capable phones; force CPU for SmolLM on ≤6.5 GB Android.
+  ///
+  /// POCO F1 OpenCL path for SmolLM repeatedly hits `allocate 0 bytes` /
+  /// INT64 GPU delegate gaps after prefill — CPU is slower but stable.
   PreferredBackend preferredBackendFor(NovaModel model) {
     if (kIsWeb) return PreferredBackend.gpu;
-    // Keep GPU for quality/latency; RAM is controlled by idle unload +
-    // clearActiveInferenceIdentity rather than forcing CPU here.
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        model == NovaModel.smollm) {
+      final total = MemoryDiagnosticsService.instance.lastTotalMemMb;
+      if (total != null && total < 6656) {
+        return PreferredBackend.cpu;
+      }
+    }
+
     return PreferredBackend.gpu;
   }
 

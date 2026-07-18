@@ -168,6 +168,10 @@ class ModelOrchestrator {
   Completer<void>? _streamingCompleter;
   Completer<void>? _inferenceLock;
 
+  /// Bumped on each load attempt / timeout so late [getActiveModel] completions
+  /// after [.timeout] cannot be assigned or silently reused.
+  int _loadEpoch = 0;
+
   /// Set when idle/lifecycle release is requested while a stream is live.
   /// Never close the native model until the stream ends (SIGABRT otherwise).
   bool _pendingIdleRelease = false;
@@ -237,6 +241,35 @@ class ModelOrchestrator {
     _pendingReplay = List<ChatMessage>.from(messages);
   }
 
+  /// Drop the live InferenceChat and replay [messages] on the next send.
+  ///
+  /// Required after edit / regenerate / retry: those truncate the UI list but
+  /// leave a live MediaPipe/LiteRT session that still holds the discarded
+  /// tail. Reusing it causes empty prefill (GPU `allocate 0 bytes`) and
+  /// "Please create a new Session" crashes.
+  void invalidateSessionForReplay(List<ChatMessage> messages) {
+    _pendingReplay = List<ChatMessage>.from(messages);
+    _activeChat = null;
+    // #region agent log
+    unawaited(
+      AgentDebugLog.log(
+        hypothesisId: 'A',
+        location: 'model_orchestrator.dart:invalidateSessionForReplay',
+        message: 'Invalidated chat session for UI history mutation',
+        data: {
+          'replayCount': _pendingReplay.length,
+          'replayChars': _pendingReplay.fold<int>(
+            0,
+            (n, m) => n + m.text.length,
+          ),
+          'model': _activeModelType?.name,
+        },
+        runId: 'post-fix',
+      ),
+    );
+    // #endregion
+  }
+
   Future<void> applyCompactedReplay(List<ChatMessage> retained) async {
     if (_activeChat == null) {
       setPendingReplayMessages(retained);
@@ -294,7 +327,7 @@ class ModelOrchestrator {
       _persistPreferredModel(model);
       return;
     }
-    _teardownActiveModel(keepIfSameType: model);
+    unawaited(_teardownActiveModel(keepIfSameType: model));
     _persistPreferredModel(model);
   }
 
@@ -313,22 +346,28 @@ class ModelOrchestrator {
       _pendingModelTeardown = true;
       return;
     }
-    _teardownActiveModel();
+    unawaited(_teardownActiveModel());
   }
 
-  void _teardownActiveModel({NovaModel? keepIfSameType}) {
+  Future<void> _teardownActiveModel({NovaModel? keepIfSameType}) async {
     _activeChat = null;
-    if (_activeModel == null) return;
+    if (_activeModel == null) {
+      await _clearActiveInferenceIdentity();
+
+      return;
+    }
     final shouldClose =
         keepIfSameType == null ||
         _activeModelType == null ||
         keepIfSameType != _activeModelType;
     if (!shouldClose) return;
-    _activeModel!.close().catchError((_) {});
+    try {
+      await _activeModel!.close();
+    } catch (_) {}
     _activeModel = null;
     _activeModelType = null;
     _activeModelSupportsImage = false;
-    _clearActiveInferenceIdentity();
+    await _clearActiveInferenceIdentity();
   }
 
   Future<void> _tryStopGeneration() async {
@@ -553,16 +592,20 @@ class ModelOrchestrator {
   }
 
   Duration _loadTimeoutFor(NovaModel model) {
-    if (model == NovaModel.gemma4E2b &&
-        !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android) {
-      return _gemma4AndroidLoadTimeout;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // First OpenCL compile on mid-range phones often exceeds 30s (SmolLM
+      // subgraphs + Gemma). Timing out leaves a half-built engine that then
+      // fails with allocate-0 / prefill errors on reuse.
+      if (model == NovaModel.gemma4E2b) return _gemma4AndroidLoadTimeout;
+
+      return const Duration(seconds: 120);
     }
 
     return _defaultLoadTimeout;
   }
 
   Future<void> _teardownPartialLoad() async {
+    _loadEpoch++;
     try {
       await _activeModel?.close();
     } catch (e) {
@@ -574,6 +617,62 @@ class ModelOrchestrator {
     _activeChat = null;
     _isInitialized = false;
     await _clearActiveInferenceIdentity();
+  }
+
+  /// Loads the active engine with a timeout, discarding late completions.
+  ///
+  /// [Future.timeout] does not cancel native GPU compile. Without this, a
+  /// timed-out load can finish later and [getActiveModel] then "reuses" a
+  /// broken OpenCL session (allocate-0 / prefill failures).
+  Future<InferenceModel> _loadActiveModelWithTimeout({
+    NovaModel? modelToLoad,
+    int? maxTokens,
+    Duration? timeout,
+    required bool supportImage,
+    required PreferredBackend preferredBackend,
+  }) async {
+    final epoch = ++_loadEpoch;
+    final tokenLimit =
+        maxTokens ?? _tokenLimitFor(modelToLoad ?? NovaModel.gemma3_1b);
+    final loadTimeout =
+        timeout ??
+        (modelToLoad != null
+            ? _loadTimeoutFor(modelToLoad)
+            : const Duration(seconds: 120));
+    final future = FlutterGemma.getActiveModel(
+      maxTokens: tokenLimit,
+      preferredBackend: preferredBackend,
+      supportImage: supportImage,
+      maxNumImages: supportImage ? 1 : null,
+    );
+    try {
+      final model = await future.timeout(loadTimeout);
+      if (epoch != _loadEpoch) {
+        try {
+          await model.close();
+        } catch (_) {}
+        await _clearActiveInferenceIdentity();
+        throw TimeoutException(
+          'Stale ${modelToLoad?.displayName ?? 'custom'} load discarded '
+          'after timeout',
+        );
+      }
+
+      return model;
+    } on TimeoutException {
+      _loadEpoch++;
+      unawaited(
+        future
+            .then((lateModel) async {
+              try {
+                await lateModel.close();
+              } catch (_) {}
+              await _clearActiveInferenceIdentity();
+            })
+            .catchError((_) {}),
+      );
+      rethrow;
+    }
   }
 
   Future<void> _acquireInferenceLock() async {
@@ -599,6 +698,9 @@ class ModelOrchestrator {
         .supportsFunctionCalling) {
       return false;
     }
+    // MediaPipe SmolLM .task ignores tools but still formats prompts as tool
+    // responses — that path correlates with GPU allocate-0 / prefill failures.
+    if (model == NovaModel.smollm) return false;
     // LiteRT Gemma 4 on Android logs FC unsupported; skip tools to shrink prompt.
     if (!kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android &&
@@ -651,7 +753,7 @@ class ModelOrchestrator {
   void _onStreamEnded() {
     if (_pendingModelTeardown) {
       _pendingModelTeardown = false;
-      _teardownActiveModel(keepIfSameType: _preferredModelOverride);
+      unawaited(_teardownActiveModel(keepIfSameType: _preferredModelOverride));
     }
     if (_pendingIdleRelease) {
       _pendingIdleRelease = false;
@@ -907,13 +1009,27 @@ class ModelOrchestrator {
                 MemoryDiagnosticsService.instance.readProcessMemoryMb(),
               );
             }
-            _activeModel = await FlutterGemma.getActiveModel(
-              maxTokens: _tokenLimitFor(modelToLoad),
-              preferredBackend: PlatformAdaptationService.instance
-                  .preferredBackendFor(modelToLoad),
+            await MemoryDiagnosticsService.instance.readTotalMemMb();
+            final backend = PlatformAdaptationService.instance
+                .preferredBackendFor(modelToLoad);
+            // #region agent log
+            await AgentDebugLog.log(
+              hypothesisId: 'F',
+              location: 'model_orchestrator.dart:_getOrCreateModel:backend',
+              message: 'Preferred backend for load',
+              data: {
+                'model': modelToLoad.name,
+                'backend': backend.name,
+                'totalMemMb': MemoryDiagnosticsService.instance.lastTotalMemMb,
+              },
+              runId: 'post-fix',
+            );
+            // #endregion
+            _activeModel = await _loadActiveModelWithTimeout(
+              modelToLoad: modelToLoad,
               supportImage: supportImage,
-              maxNumImages: supportImage ? 1 : null,
-            ).timeout(_loadTimeoutFor(modelToLoad));
+              preferredBackend: backend,
+            );
             _activeModelType = modelToLoad;
             _activeModelSupportsImage = supportImage;
             _isInitialized = true;
@@ -928,7 +1044,7 @@ class ModelOrchestrator {
             '${modelToLoad.displayName} is still loading.',
             model: modelToLoad,
             suggestion:
-                'First boot GPU compile can take 1–2 minutes. Wait and try again, '
+                'First boot compile can take 1–2 minutes. Wait and try again, '
                 'or use Settings → Debug → Reset inference engine.',
             underlyingError: e,
           );
@@ -998,13 +1114,15 @@ class ModelOrchestrator {
 
         // Now get the model after install
         _statusController.add('Loading ${modelToLoad.displayName}...');
-        _activeModel = await FlutterGemma.getActiveModel(
-          maxTokens: _tokenLimitFor(modelToLoad),
-          preferredBackend: PlatformAdaptationService.instance
-              .preferredBackendFor(modelToLoad),
+        await MemoryDiagnosticsService.instance.readTotalMemMb();
+        final backend = PlatformAdaptationService.instance.preferredBackendFor(
+          modelToLoad,
+        );
+        _activeModel = await _loadActiveModelWithTimeout(
+          modelToLoad: modelToLoad,
           supportImage: supportImage,
-          maxNumImages: supportImage ? 1 : null,
-        ).timeout(_loadTimeoutFor(modelToLoad));
+          preferredBackend: backend,
+        );
         _activeModelType = modelToLoad;
         _activeModelSupportsImage = supportImage;
         _isInitialized = true;
@@ -1019,7 +1137,7 @@ class ModelOrchestrator {
           '${modelToLoad.displayName} is still loading.',
           model: modelToLoad,
           suggestion:
-              'First boot GPU compile can take 1–2 minutes. Wait and try again, '
+              'First boot compile can take 1–2 minutes. Wait and try again, '
               'or use Settings → Debug → Reset inference engine.',
           underlyingError: e,
         );
@@ -1194,8 +1312,16 @@ class ModelOrchestrator {
     InferenceModel inferenceModel;
     try {
       final fileSize = await File(modelPath).length();
+      final needsImageSupport = customModel.hasVision;
 
-      // Ensure model is registered with flutter_gemma
+      // Clear BEFORE register — clearing after install() leaves no active model.
+      await _teardownActiveModel();
+      if (FlutterGemma.hasActiveModel()) {
+        try {
+          await FlutterGemma.clearActiveInferenceIdentity();
+        } catch (_) {}
+      }
+
       await ModelManager.instance.registerDiskModel(
         filePath: modelPath,
         fileName: customModel.fileName,
@@ -1204,20 +1330,32 @@ class ModelOrchestrator {
         fileSizeBytes: fileSize,
       );
 
-      // Load the model — vision customs always enable image support
-      final needsImageSupport = customModel.hasVision;
       _statusController.add('Loading ${customModel.displayName}...');
-      if (FlutterGemma.hasActiveModel()) {
-        try {
-          await FlutterGemma.clearActiveInferenceIdentity();
-        } catch (_) {}
-      }
-      inferenceModel = await FlutterGemma.getActiveModel(
-        maxTokens: 4096,
-        preferredBackend: PreferredBackend.gpu,
+      await MemoryDiagnosticsService.instance.readTotalMemMb();
+      final total = MemoryDiagnosticsService.instance.lastTotalMemMb;
+      final backend = (total != null && total < 6656)
+          ? PreferredBackend.cpu
+          : PreferredBackend.gpu;
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'F',
+        location: 'model_orchestrator.dart:_processWithCustomModel:load',
+        message: 'Loading custom model after register',
+        data: {
+          'fileName': customModel.fileName,
+          'backend': backend.name,
+          'totalMemMb': total,
+          'hasActive': FlutterGemma.hasActiveModel(),
+        },
+        runId: 'post-fix',
+      );
+      // #endregion
+      inferenceModel = await _loadActiveModelWithTimeout(
+        maxTokens: 2048,
+        timeout: const Duration(seconds: 120),
         supportImage: needsImageSupport,
-        maxNumImages: needsImageSupport ? 1 : null,
-      ).timeout(const Duration(seconds: 60));
+        preferredBackend: backend,
+      );
 
       // Track so idle release / model switch can unload it
       _activeModel = inferenceModel;
@@ -1228,6 +1366,7 @@ class ModelOrchestrator {
 
       _statusController.add('${customModel.displayName} ready');
     } on TimeoutException {
+      await _teardownPartialLoad();
       yield InferenceResult(
         text:
             'Timed out loading ${customModel.displayName}. '
@@ -1629,9 +1768,23 @@ class ModelOrchestrator {
     if (hasVisionContext && !selected.hasVision) {
       if (selector.primaryHeavy.hasVision) return selector.primaryHeavy;
       if (selector.fastModel.hasVision) return selector.fastModel;
+      // Prefer FastVLM when Auto's primary/fast are both text-only (e.g. SmolLM).
+      return NovaModel.fastvlm;
     }
 
     return selected;
+  }
+
+  /// First installed vision-capable catalog model, or null.
+  Future<NovaModel?> _installedVisionModel() async {
+    for (final candidate in const [NovaModel.fastvlm, NovaModel.gemma4E2b]) {
+      final fileName = ModelHuggingFaceURLs.fileNameFor(candidate);
+      if (await ModelManager.instance.isInstalledOnDisk(fileName)) {
+        return candidate;
+      }
+    }
+
+    return null;
   }
 
   static const _maxToolRounds = 5;
@@ -1797,7 +1950,10 @@ class ModelOrchestrator {
           hasExtraContext: hasExtraContext,
         );
         return;
-      } else if (_modelOverrideDirty && _preferredModelOverride != null) {
+      } else if (_preferredModelOverride != null) {
+        // Must match predictEffectiveModel: honor explicit selection even after
+        // the first send clears _modelOverrideDirty. Otherwise Auto's
+        // primaryHeavy (often SmolLM on ≤6GB) silently overrides Gemma 3.
         model = _preferredModelOverride!;
         if ((screenshot != null || hasImageAttachments) && !model.hasVision) {
           model = selector.primaryHeavy.hasVision
@@ -1815,6 +1971,47 @@ class ModelOrchestrator {
           thinkingMode: thinkingMode,
         );
       }
+
+      var visionForced = false;
+      final needsVision = screenshot != null || hasImageAttachments;
+      if (needsVision && !model.hasVision) {
+        final vision = await _installedVisionModel();
+        if (vision != null) {
+          model = vision;
+          visionForced = true;
+          _statusController.add(
+            'Auto-switched to ${model.displayName} for image input',
+          );
+        } else {
+          yield InferenceResult(
+            text:
+                '⚠️ This question needs a vision model (FastVLM or Gemma 4), '
+                'but none is installed. Attach a screenshot and install a '
+                'vision model in Settings, or ask a text-only question.',
+            model: model,
+            isStreaming: false,
+          );
+
+          return;
+        }
+      }
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'E',
+        location: 'model_orchestrator.dart:processMessage:modelResolved',
+        message: 'Resolved inference model for turn',
+        data: {
+          'model': model.name,
+          'forcePrimary': forcePrimaryModel,
+          'preferred': _preferredModelOverride?.name,
+          'dirty': _modelOverrideDirty,
+          'primaryHeavy': selector.primaryHeavy.name,
+          'visionForced': visionForced,
+          'needsVision': needsVision,
+        },
+        runId: 'post-fix',
+      );
+      // #endregion
 
       if (_debugMode) {
         _statusController.add(
@@ -1854,37 +2051,97 @@ class ModelOrchestrator {
       }
 
       final chatTools = _toolsForCreateChat(model, tools);
-      final textToolPrompt = chatTools.isEmpty && tools.isNotEmpty;
+      // SmolLM has no FC and cannot absorb tool essays in a tiny KV window.
+      final textToolPrompt =
+          model != NovaModel.smollm && chatTools.isEmpty && tools.isNotEmpty;
       final wasNull = _activeChat == null;
+      final pendingCount = _pendingReplay.length;
+      final systemInstruction = await _systemPromptFor(
+        model,
+        ragContext,
+        _capContextInjection(attachmentContext),
+        textToolPrompt ? tools : null,
+      );
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'A',
+        location: 'model_orchestrator.dart:processMessage:chatPrep',
+        message: 'Chat session prep before create/replay',
+        data: {
+          'wasNull': wasNull,
+          'pendingReplay': pendingCount,
+          'model': model.name,
+          'queryLen': query.length,
+          'tools': tools.length,
+          'chatTools': chatTools.length,
+          'kvLimit': _tokenLimitFor(model),
+          'systemPromptLen': systemInstruction.length,
+          'textToolPrompt': textToolPrompt,
+        },
+        runId: 'post-fix',
+      );
+      // #endregion
       if (wasNull) {
         _isLoadingModel = true;
         _statusController.add('Preparing chat session...');
       }
       try {
         _activeChat ??= await inferenceModel.createChat(
-          systemInstruction: await _systemPromptFor(
-            model,
-            ragContext,
-            _capContextInjection(attachmentContext),
-            textToolPrompt ? tools : null,
-          ),
+          systemInstruction: systemInstruction,
           tools: chatTools,
           supportImage: model.hasVision && _activeModelSupportsImage,
         );
         if (wasNull && _pendingReplay.isNotEmpty) {
-          final budget = (_tokenLimitFor(model) * _contextBudgetRatio).round();
+          final rawBudget = (_tokenLimitFor(model) * _contextBudgetRatio)
+              .round();
+          final budget = (rawBudget - MessageLimits.systemPromptOverheadTokens)
+              .clamp(64, rawBudget)
+              .toInt();
           final replay = SessionHistoryReinjection.buildReplayMessages(
             _pendingReplay,
             maxTokens: budget,
           );
           _pendingReplay = const [];
+          // #region agent log
+          await AgentDebugLog.log(
+            hypothesisId: 'A',
+            location: 'model_orchestrator.dart:processMessage:reinject',
+            message: 'Reinjecting history into new chat session',
+            data: {
+              'replayMessages': replay.length,
+              'budget': budget,
+              'rawBudget': rawBudget,
+              'emptyTexts': replay.where((m) => m.text.trim().isEmpty).length,
+            },
+            runId: 'post-fix',
+          );
+          // #endregion
           if (replay.isNotEmpty) {
             try {
               await _activeChat!.clearHistory(replayHistory: replay);
             } on Exception catch (e) {
               debugPrint('History reinjection failed: $e');
-              for (final msg in replay) {
-                await _activeChat!.addQuery(msg);
+              // Do not addQuery onto a half-broken session — recreate empty.
+              _activeChat = null;
+              _activeChat = await inferenceModel.createChat(
+                systemInstruction: systemInstruction,
+                tools: chatTools,
+                supportImage: model.hasVision && _activeModelSupportsImage,
+              );
+              try {
+                await _activeChat!.clearHistory(replayHistory: replay);
+              } on Exception catch (e2) {
+                debugPrint('History reinjection retry failed: $e2');
+                _activeChat = null;
+                yield InferenceResult(
+                  text:
+                      '⚠️ Could not restore chat history after edit. '
+                      'Start a new conversation or try again.\n\n$e2',
+                  model: model,
+                  isStreaming: false,
+                );
+
+                return;
               }
             }
           }
@@ -1958,6 +2215,7 @@ class ModelOrchestrator {
           );
       var screenshotToolCallsThisTurn = 0;
 
+      Object? streamError;
       try {
         while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
           hasPendingToolCalls = false;
@@ -2116,6 +2374,10 @@ class ModelOrchestrator {
             }
           }
         }
+      } on PlatformException catch (e) {
+        streamError = e;
+      } on Exception catch (e) {
+        streamError = e;
       } finally {
         _isStreaming = false;
         if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
@@ -2123,6 +2385,42 @@ class ModelOrchestrator {
         }
         _streamingCompleter = null;
         _onStreamEnded();
+      }
+
+      if (streamError != null) {
+        // #region agent log
+        await AgentDebugLog.log(
+          hypothesisId: 'B',
+          location: 'model_orchestrator.dart:processMessage:streamError',
+          message: 'Inference stream failed — dropping dead session',
+          data: {
+            'error': streamError.toString(),
+            'model': model.name,
+            'partialLen': fullResponse.length,
+          },
+          runId: 'post-fix',
+        );
+        // #endregion
+        // Native graph said "create a new Session" — drop the dead chat.
+        _activeChat = null;
+        inferenceStopwatch.stop();
+        final hint =
+            streamError.toString().contains('prefill') ||
+                streamError.toString().contains('Session')
+            ? 'The model session broke (often after edit/regenerate). '
+                  'Retry the message — a fresh session will be created.'
+            : 'Try again. If it keeps failing: Settings → Reset inference.';
+        yield InferenceResult(
+          text: fullResponse.trim().isEmpty
+              ? '⚠️ Inference failed.\n\n$hint\n\n$streamError'
+              : '$fullResponse\n\n⚠️ Inference interrupted.\n$hint',
+          model: model,
+          isStreaming: false,
+          thinking: thinkingMode ? currentThinking : null,
+          inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+        );
+
+        return;
       }
 
       if (toolRounds >= _maxToolRounds && hasPendingToolCalls) {
@@ -2139,15 +2437,33 @@ class ModelOrchestrator {
       }
 
       inferenceStopwatch.stop();
+      final reply = fullResponse.trim().isEmpty
+          ? '⚠️ Model returned an empty response. '
+                'Edit/regenerate may have left a stale session — try once more, '
+                'or Settings → Reset inference.'
+          : fullResponse;
+      // #region agent log
+      if (fullResponse.trim().isEmpty) {
+        await AgentDebugLog.log(
+          hypothesisId: 'C',
+          location: 'model_orchestrator.dart:processMessage:emptyReply',
+          message: 'Model finished with empty text',
+          data: {'model': model.name, 'toolRounds': toolRounds},
+          runId: 'post-fix',
+        );
+      }
+      // #endregion
       yield InferenceResult(
-        text: fullResponse,
+        text: reply,
         model: model,
         isStreaming: false,
         thinking: thinkingMode ? currentThinking : null,
         inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
       );
 
-      await MemoryService.storeConversation(query, fullResponse);
+      if (fullResponse.trim().isNotEmpty) {
+        await MemoryService.storeConversation(query, fullResponse);
+      }
     } finally {
       _releaseInferenceLock();
     }
@@ -2440,9 +2756,10 @@ class ModelOrchestrator {
     List<Tool>? textTools,
   ]) async {
     final compact =
-        !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        model == NovaModel.gemma4E2b;
+        model == NovaModel.smollm ||
+        (!kIsWeb &&
+            defaultTargetPlatform == TargetPlatform.android &&
+            model == NovaModel.gemma4E2b);
 
     final identity = _getCachedIdentity();
 
@@ -2470,9 +2787,12 @@ class ModelOrchestrator {
     // Compact Android prompts drop the role's tool list — restore capability
     // so the model does not claim it cannot open apps / set alarms.
     // Gate to Android only: web FC-off must not get "Android device" wording.
+    // SmolLM must never get the tool sermon (no FC + tiny KV).
     final isAndroid =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    if (isAndroid && (compact || (textTools != null && textTools.isNotEmpty))) {
+    if (isAndroid &&
+        model != NovaModel.smollm &&
+        (compact || (textTools != null && textTools.isNotEmpty))) {
       buffer.write(_deviceToolsCapabilitySuffix(textTools));
     }
 

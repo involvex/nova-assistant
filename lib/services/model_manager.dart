@@ -228,6 +228,24 @@ class ModelManager {
       }
 
       _statusController.add('Downloading $fileName...');
+      if (ModelHuggingFaceURLs.urlRequiresHuggingFaceAuth(url) &&
+          !await hasHuggingFaceToken()) {
+        _statusController.add(
+          'Download blocked: HuggingFace token required for gated models. '
+          'Add your HF token in Settings.',
+        );
+        // #region agent log
+        await AgentDebugLog.log(
+          hypothesisId: 'F',
+          location: 'model_manager.dart:installFromNetwork:noToken',
+          message: 'Blocked gated download without HF token',
+          data: {'fileName': fileName, 'url': url},
+          runId: 'post-fix',
+        );
+        // #endregion
+
+        return null;
+      }
       final tempDir = await getTemporaryDirectory();
       final tempFile = File(
         '${tempDir.path}/nova_download_${DateTime.now().millisecondsSinceEpoch}_$fileName',

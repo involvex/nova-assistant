@@ -72,6 +72,10 @@ void main() {
       expect(MessageLimits.estimateTokens('a' * 400), 100);
     });
 
+    test('kvTokenLimitFor SmolLM is 1024', () {
+      expect(MessageLimits.kvTokenLimitFor(NovaModel.smollm), 1024);
+    });
+
     test('kvTokenLimitFor Gemma 4 returns 2048 on all platforms in tests', () {
       expect(
         MessageLimits.kvTokenLimitFor(NovaModel.gemma4E2b, highContext: false),

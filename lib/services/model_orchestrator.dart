@@ -17,6 +17,7 @@ import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/external_tool.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/models/inference_backend.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/memory_service.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
@@ -27,9 +28,12 @@ import 'package:nova_assistant/services/note_service.dart';
 import 'package:nova_assistant/platform/tool_executor_service.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
+import 'package:nova_assistant/services/remote_inference_client.dart';
+import 'package:nova_assistant/services/remote_inference_config.dart';
 import 'package:nova_assistant/utils/alarm_time_parser.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
+import 'package:nova_assistant/utils/open_app_intent_parser.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/session_history_reinjection.dart';
 
@@ -149,6 +153,11 @@ class ModelOrchestrator {
   bool _highContextEnabled = false;
   bool _autoCompactEnabled = true;
   bool _adultModeEnabled = false;
+  InferenceBackend _inferenceBackend = InferenceBackend.onDevice;
+  RemoteInferenceConfig _remoteConfig = const RemoteInferenceConfig(
+    baseUrl: RemoteInferenceConfig.defaultBaseUrl,
+    modelId: RemoteInferenceConfig.defaultModelId,
+  );
   List<ChatMessage> _pendingReplay = const [];
   bool _debugMode = false;
   bool _isReleasing = false; // Guard against concurrent release operations
@@ -199,6 +208,10 @@ class ModelOrchestrator {
   bool get autoCompactEnabled => _autoCompactEnabled;
 
   bool get adultModeEnabled => _adultModeEnabled;
+
+  InferenceBackend get inferenceBackend => _inferenceBackend;
+
+  RemoteInferenceConfig get remoteInferenceConfig => _remoteConfig;
 
   void setKeepModelWarm(bool enabled) {
     _keepModelWarm = enabled;
@@ -370,6 +383,8 @@ class ModelOrchestrator {
     } else {
       _adultModeEnabled = adultMode;
     }
+    _inferenceBackend = RemoteInferenceConfig.backendFromPrefs(prefs);
+    _remoteConfig = RemoteInferenceConfig.fromPrefs(prefs);
   }
 
   void clearModelOverride() {
@@ -756,6 +771,19 @@ class ModelOrchestrator {
         _activeModelType == model &&
         _activeModelSupportsImage == needsImageSupport) {
       return _activeModel!;
+    }
+
+    // Free-RAM hard gate before a cold load of heavy models (Android).
+    final ramBlock = await PlatformAdaptationService.instance.checkCanLoadModel(
+      model,
+    );
+    if (ramBlock != null) {
+      throw ModelException(
+        ramBlock,
+        model: model,
+        suggestion:
+            'Free RAM by closing apps, or use a smaller model in Settings.',
+      );
     }
 
     // --- Switching / Loading new model ---
@@ -1578,6 +1606,29 @@ class ModelOrchestrator {
         return;
       }
 
+      // Deterministic open-app shortcut (YouTube, Settings, etc.).
+      final openPackage = OpenAppIntentParser.tryParsePackage(query);
+      if (openPackage != null) {
+        _statusController.add('Opening app...');
+        final result = await ToolExecutorService.instance.openApp(openPackage);
+        final ok = result['success'] == true;
+        yield InferenceResult(
+          text: ok
+              ? 'Opened $openPackage.'
+              : 'Could not open the app: ${result['error'] ?? 'unknown error'}',
+          model: selector.primaryHeavy,
+          isStreaming: false,
+          toolCalls: [
+            {
+              'name': 'open_app',
+              'args': {'package': openPackage},
+              'result': result,
+            },
+          ],
+        );
+        return;
+      }
+
       // Check if there are image attachments that need vision processing
       final hasImageAttachments = attachments.any((att) {
         if (att.type != AttachedDataType.file) return false;
@@ -1607,6 +1658,17 @@ class ModelOrchestrator {
             ) ??
             '',
       );
+
+      if (_inferenceBackend == InferenceBackend.remote) {
+        yield* _processRemoteMessage(
+          query: query,
+          ragContext: ragContext,
+          attachmentContext: _capContextInjection(attachmentContext),
+          tools: tools,
+        );
+
+        return;
+      }
 
       final hasExtraContext =
           attachments.isNotEmpty ||
@@ -1702,6 +1764,7 @@ class ModelOrchestrator {
       }
 
       final chatTools = _toolsForCreateChat(model, tools);
+      final textToolPrompt = chatTools.isEmpty && tools.isNotEmpty;
       final wasNull = _activeChat == null;
       if (wasNull) {
         _isLoadingModel = true;
@@ -1713,6 +1776,7 @@ class ModelOrchestrator {
             model,
             ragContext,
             _capContextInjection(attachmentContext),
+            textToolPrompt ? tools : null,
           ),
           tools: chatTools,
           supportImage: model.hasVision && _activeModelSupportsImage,
@@ -2283,6 +2347,7 @@ class ModelOrchestrator {
     NovaModel model, [
     String? ragContext,
     String? attachmentContext,
+    List<Tool>? textTools,
   ]) async {
     final compact =
         !kIsWeb &&
@@ -2310,6 +2375,15 @@ class ModelOrchestrator {
     final buffer = StringBuffer('$base$thinkingSuffix');
     if (!compact) {
       buffer.write('\n\n${await _languageInstruction()}');
+    }
+
+    // Compact Android prompts drop the role's tool list — restore capability
+    // so the model does not claim it cannot open apps / set alarms.
+    // Gate to Android only: web FC-off must not get "Android device" wording.
+    final isAndroid =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    if (isAndroid && (compact || (textTools != null && textTools.isNotEmpty))) {
+      buffer.write(_deviceToolsCapabilitySuffix(textTools));
     }
 
     if (_adultModeEnabled) {
@@ -2340,6 +2414,113 @@ class ModelOrchestrator {
     }
 
     return buffer.toString();
+  }
+
+  /// Short capability block for on-device tools (and text-JSON FC when native FC
+  /// is unavailable on Android Gemma 4).
+  String _deviceToolsCapabilitySuffix(List<Tool>? textTools) {
+    final names = (textTools ?? const <Tool>[])
+        .map((t) => t.name)
+        .where((n) => n.isNotEmpty)
+        .toList();
+    final listed = names.isEmpty
+        ? 'get_time, set_alarm, cancel_alarm, open_app, open_settings, search_web'
+        : names.join(', ');
+
+    return ' You control this Android device via tools: $listed. '
+        'When the user asks to open an app, set/cancel an alarm, open settings, '
+        'or search the web, call the tool immediately — do not say you lack '
+        'device access. '
+        'open_app packages: com.google.android.youtube, com.android.settings, '
+        'com.android.chrome. '
+        'If native function calling is unavailable, reply with only JSON like '
+        '{"name":"open_app","arguments":{"package":"com.google.android.youtube"}}.';
+  }
+
+  Stream<InferenceResult> _processRemoteMessage({
+    required String query,
+    required String ragContext,
+    required String attachmentContext,
+    required List<Tool> tools,
+  }) async* {
+    if (kIsWeb) {
+      yield InferenceResult(
+        text:
+            'Remote LAN inference is not available on web. '
+            'Switch to On-device in Settings → Remote LAN inference.',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+      );
+
+      return;
+    }
+
+    if (tools.isNotEmpty) {
+      _statusController.add(
+        'Tools unavailable on remote backend (local shortcuts still work)',
+      );
+    }
+
+    _statusController.add('Connecting to LAN model...');
+    _isStreaming = true;
+    final client = RemoteInferenceClient();
+    final buffer = StringBuffer();
+    final sw = Stopwatch()..start();
+
+    try {
+      final systemPrompt = await _systemPromptFor(
+        selector.primaryHeavy,
+        ragContext.isEmpty ? null : ragContext,
+        attachmentContext.isEmpty ? null : attachmentContext,
+      );
+
+      final messages = <Map<String, String>>[
+        {'role': 'system', 'content': systemPrompt},
+        ..._pendingReplay
+            .where((m) => m.text.trim().isNotEmpty)
+            .map(
+              (m) => {
+                'role': m.isUser ? 'user' : 'assistant',
+                'content': m.text,
+              },
+            ),
+        {'role': 'user', 'content': query},
+      ];
+
+      await for (final delta in client.streamChat(
+        config: _remoteConfig,
+        messages: messages,
+      )) {
+        buffer.write(delta);
+        yield InferenceResult(
+          text: buffer.toString(),
+          model: selector.primaryHeavy,
+          isStreaming: true,
+        );
+      }
+
+      sw.stop();
+      yield InferenceResult(
+        text: buffer.toString().isEmpty
+            ? '⚠️ Empty response from remote host.'
+            : buffer.toString(),
+        model: selector.primaryHeavy,
+        isStreaming: false,
+        inferenceTimeMs: sw.elapsedMilliseconds,
+      );
+    } on Exception catch (e) {
+      yield InferenceResult(
+        text:
+            '⚠️ Remote inference failed: $e\n\n'
+            'Check Settings → Remote LAN inference (base URL, model id, Wi‑Fi).',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+      );
+    } finally {
+      _isStreaming = false;
+      client.close();
+      _statusController.add('Ready');
+    }
   }
 
   static AgentIdentity? _cachedIdentity;

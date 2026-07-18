@@ -47,7 +47,7 @@
 2. Conversation branching from a message  
 3. Share message / chat sheet  
 4. Continuous dictation / audio attach  
-5. Free-RAM hard gate before Gemma 4 load  
+5. ~~Free-RAM hard gate before Gemma 4 load~~  
 
 ### P2 — Platform
 

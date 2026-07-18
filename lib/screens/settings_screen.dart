@@ -15,6 +15,7 @@ import 'package:nova_assistant/platform/assistant_role_service.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/identity_config_screen.dart';
 import 'package:nova_assistant/screens/mcp_settings_screen.dart';
+import 'package:nova_assistant/screens/remote_inference_settings_screen.dart';
 import 'package:nova_assistant/screens/knowledge_base_screen.dart';
 import 'package:nova_assistant/screens/memory_management_screen.dart';
 import 'package:nova_assistant/screens/user_memory_overview_screen.dart';
@@ -324,6 +325,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (context.mounted) {
                 setState(() {});
               }
+            },
+          ),
+
+          _actionTile(
+            icon: Icons.lan_outlined,
+            title: 'Remote LAN inference',
+            subtitle: 'Stream from llama-server / Ollama on your Wi‑Fi',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const RemoteInferenceSettingsScreen(),
+                ),
+              );
+              if (context.mounted) setState(() {});
             },
           ),
 

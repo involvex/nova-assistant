@@ -1,11 +1,18 @@
 /// Parses natural-language alarm times from user queries.
 ///
-/// Examples: "set an alarm for 7 AM", "alarm at 7pm", "wake me at 19:30".
+/// Examples: "set an alarm for 7 AM", "alarm at 7pm", "wake me at 19:30",
+/// "stell einen Wecker um 19:00", "Wecker auf 7 Uhr".
 class AlarmTimeParser {
   AlarmTimeParser._();
 
   static final RegExp _alarmIntent = RegExp(
-    r'\b(set\s+(an?\s+)?alarm|alarm\s+(for|at)|wake\s+me)\b',
+    r'\b('
+    r'set\s+(an?\s+)?alarm|alarm\s+(for|at)|wake\s+me|'
+    r'wecker|alarm\s+stellen|'
+    r'stell(e|en)?\s+(einen?\s+)?(wecker|alarm)|'
+    r'weck\s+mich|'
+    r'(wecker|alarm)\s+(auf|um|für|fuer)'
+    r')\b',
     caseSensitive: false,
   );
 
@@ -15,6 +22,11 @@ class AlarmTimeParser {
   );
 
   static final RegExp _time24h = RegExp(r'\b([01]?\d|2[0-3]):([0-5]\d)\b');
+
+  static final RegExp _timeGermanUhr = RegExp(
+    r'\b(?:um\s+|auf\s+|für\s+|fuer\s+)?(\d{1,2})(?:[:.](\d{2}))?\s*uhr\b',
+    caseSensitive: false,
+  );
 
   /// Returns `(hour, minute)` in 24-hour format, or null if not an alarm request
   /// with a parseable time.
@@ -47,8 +59,15 @@ class AlarmTimeParser {
       return (hour: hour, minute: minute);
     }
 
-    // Bare hour with AM/PM already handled; try "at 7" / "for 7" without period
-    // only when clearly morning/evening context is absent — skip ambiguous cases.
+    final matchUhr = _timeGermanUhr.firstMatch(query);
+    if (matchUhr != null) {
+      final hour = int.parse(matchUhr.group(1)!);
+      final minute = int.parse(matchUhr.group(2) ?? '0');
+      if (hour > 23 || minute > 59) return null;
+
+      return (hour: hour, minute: minute);
+    }
+
     return null;
   }
 }

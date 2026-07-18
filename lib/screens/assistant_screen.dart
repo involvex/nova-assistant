@@ -13,6 +13,7 @@ import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
+import 'package:nova_assistant/services/export_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_release_policy.dart';
 import 'package:nova_assistant/services/tts_service.dart';
@@ -1544,15 +1545,27 @@ class _AssistantScreenState extends State<AssistantScreen>
                   PopupMenuButton<String>(
                     tooltip: 'Export conversation',
                     onSelected: (format) async {
-                      String? path;
-                      path = format == 'text'
+                      final content = format == 'text'
                           ? await ChatHistoryService.exportAsText()
                           : await ChatHistoryService.exportAsJson();
-                      if (path != null && mounted) {
+                      if (!mounted) return;
+                      if (content == null) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Exported to:\n$path'),
-                            duration: const Duration(seconds: 4),
+                          const SnackBar(content: Text('Nothing to export')),
+                        );
+
+                        return;
+                      }
+
+                      final fileName = format == 'text'
+                          ? 'nova_export.txt'
+                          : 'nova_export.json';
+                      await ExportService.instance.shareText(content, fileName);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Share sheet opened'),
+                            duration: Duration(seconds: 2),
                           ),
                         );
                       }
@@ -2109,11 +2122,20 @@ class _AssistantScreenState extends State<AssistantScreen>
                   ),
                   const SizedBox(width: 8),
                   VoiceInputButton(
+                    onPartial: (partial) {
+                      _inputController.text = partial;
+                      _inputController.selection = TextSelection.collapsed(
+                        offset: partial.length,
+                      );
+                    },
                     onTranscription: (transcript) {
-                      if (transcript.isNotEmpty) {
-                        _inputController.text = transcript;
-                        _sendMessage();
+                      if (transcript.isEmpty) return;
+                      _inputController.text = transcript;
+                      if (_isGenerating || ModelOrchestrator.instance.isBusy) {
+                        // Leave full text in the field for the user to send.
+                        return;
                       }
+                      _sendMessage();
                     },
                   ),
                   const SizedBox(width: 8),

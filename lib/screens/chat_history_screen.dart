@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
+import 'package:nova_assistant/services/export_service.dart';
 
 class ChatHistoryScreen extends StatefulWidget {
   const ChatHistoryScreen({super.key});
@@ -196,17 +197,24 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
   }
 
   Future<void> _exportConversation(Conversation conversation) async {
-    final path = await ChatHistoryService.exportConversationAsText(
+    final content = await ChatHistoryService.exportConversationAsText(
       conversation.id,
     );
+    if (!mounted) return;
+    if (content == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Export failed')));
+
+      return;
+    }
+
+    await ExportService.instance.shareText(
+      content,
+      'nova_chat_${conversation.id}.txt',
+    );
     if (mounted) {
-      if (path != null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Exported to:\n$path')));
-      } else {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Export failed')));
-      }
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Share sheet opened')));
     }
   }
 

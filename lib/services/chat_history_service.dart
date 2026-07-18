@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/conversation.dart';
@@ -187,6 +185,7 @@ class ChatHistoryService {
     await p.remove(_key);
   }
 
+  /// Builds a plain-text export of all conversations (no file write).
   static Future<String?> exportAsText() async {
     try {
       final conversations = await loadConversations();
@@ -206,35 +205,18 @@ class ChatHistoryService {
         buffer.writeln('-' * 30);
 
         for (final msg in convo.messages) {
-          final time = msg.timestamp.toLocal();
-          final timeStr =
-              '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-          final sender = msg.isUser ? 'User' : 'Assistant';
-          buffer.writeln('[$timeStr] $sender:');
-          buffer.writeln(msg.text);
-          if (msg.imageData != null) buffer.writeln('[Image attached]');
-          if (msg.toolCalls != null && msg.toolCalls!.isNotEmpty) {
-            buffer.writeln('[Tool calls: ${msg.toolCalls}]');
-          }
-          if (msg.thinking != null && msg.thinking!.isNotEmpty) {
-            buffer.writeln('[Thinking: ${msg.thinking}]');
-          }
-          buffer.writeln();
+          _appendMessage(buffer, msg);
         }
         buffer.writeln('=' * 50);
       }
 
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File(
-        '${dir.path}/nova_export_${DateTime.now().millisecondsSinceEpoch}.txt',
-      );
-      await file.writeAsString(buffer.toString());
-      return file.path;
+      return buffer.toString();
     } on Exception {
       return null;
     }
   }
 
+  /// Builds a plain-text export of one conversation (no file write).
   static Future<String?> exportConversationAsText(String conversationId) async {
     try {
       final convo = await getConversation(conversationId);
@@ -248,33 +230,16 @@ class ChatHistoryService {
       buffer.writeln('---');
 
       for (final msg in convo.messages) {
-        final time = msg.timestamp.toLocal();
-        final timeStr =
-            '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-        final sender = msg.isUser ? 'User' : 'Assistant';
-        buffer.writeln('[$timeStr] $sender:');
-        buffer.writeln(msg.text);
-        if (msg.imageData != null) buffer.writeln('[Image attached]');
-        if (msg.toolCalls != null && msg.toolCalls!.isNotEmpty) {
-          buffer.writeln('[Tool calls: ${msg.toolCalls}]');
-        }
-        if (msg.thinking != null && msg.thinking!.isNotEmpty) {
-          buffer.writeln('[Thinking: ${msg.thinking}]');
-        }
-        buffer.writeln();
+        _appendMessage(buffer, msg);
       }
 
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File(
-        '${dir.path}/nova_export_${DateTime.now().millisecondsSinceEpoch}.txt',
-      );
-      await file.writeAsString(buffer.toString());
-      return file.path;
+      return buffer.toString();
     } on Exception {
       return null;
     }
   }
 
+  /// Builds a JSON export of all conversations (no file write).
   static Future<String?> exportAsJson() async {
     try {
       final conversations = await loadConversations();
@@ -286,14 +251,27 @@ class ChatHistoryService {
         'conversations': conversations.map((c) => c.toJson()).toList(),
       };
 
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File(
-        '${dir.path}/nova_export_${DateTime.now().millisecondsSinceEpoch}.json',
-      );
-      await file.writeAsString(jsonEncode(export));
-      return file.path;
+      return const JsonEncoder.withIndent('  ').convert(export);
     } on Exception {
       return null;
     }
+  }
+
+  static void _appendMessage(StringBuffer buffer, ChatMessage msg) {
+    final time = msg.timestamp.toLocal();
+    final timeStr =
+        '${time.hour.toString().padLeft(2, '0')}:'
+        '${time.minute.toString().padLeft(2, '0')}';
+    final sender = msg.isUser ? 'User' : 'Assistant';
+    buffer.writeln('[$timeStr] $sender:');
+    buffer.writeln(msg.text);
+    if (msg.imageData != null) buffer.writeln('[Image attached]');
+    if (msg.toolCalls != null && msg.toolCalls!.isNotEmpty) {
+      buffer.writeln('[Tool calls: ${msg.toolCalls}]');
+    }
+    if (msg.thinking != null && msg.thinking!.isNotEmpty) {
+      buffer.writeln('[Thinking: ${msg.thinking}]');
+    }
+    buffer.writeln();
   }
 }

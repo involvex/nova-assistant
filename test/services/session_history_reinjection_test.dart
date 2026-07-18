@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/services/session_history_reinjection.dart';
@@ -65,11 +67,49 @@ void main() {
 
       final replay = SessionHistoryReinjection.buildReplayMessages(
         input,
-        maxTokens: 350, // ~3.5 messages
+        maxTokens: 350, // hard cap → at most 3 × ~100
       );
 
-      expect(replay.length, lessThanOrEqualTo(4));
+      expect(replay.length, lessThanOrEqualTo(3));
       expect(replay.last.text, input.last.text);
+    });
+
+    test('omits single message that alone exceeds maxTokens', () {
+      final input = [
+        ChatMessage(
+          id: '1',
+          text: 'x' * 400, // ~100 tokens
+          isUser: true,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+      ];
+
+      final replay = SessionHistoryReinjection.buildReplayMessages(
+        input,
+        maxTokens: 50,
+      );
+
+      expect(replay, isEmpty);
+    });
+
+    test('keeps image-only messages for replay', () {
+      final input = [
+        ChatMessage(
+          id: '1',
+          text: '',
+          isUser: true,
+          timestamp: DateTime(2026, 1, 1),
+          imageData: Uint8List.fromList([1, 2, 3]),
+        ),
+      ];
+
+      final replay = SessionHistoryReinjection.buildReplayMessages(
+        input,
+        maxTokens: 10_000,
+      );
+
+      expect(replay.length, 1);
+      expect(replay.first.hasImage, isTrue);
     });
   });
 }

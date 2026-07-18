@@ -241,10 +241,11 @@ class ModelOrchestrator {
     try {
       await _activeChat!.clearHistory(replayHistory: replay);
     } on Exception catch (e) {
+      // Do not fall back to addQuery — that would append onto the old history
+      // and duplicate turns / blow the KV budget. Defer to next createChat.
       debugPrint('applyCompactedReplay failed: $e');
-      for (final msg in replay) {
-        await _activeChat!.addQuery(msg);
-      }
+      setPendingReplayMessages(retained);
+      _activeChat = null;
     }
   }
 
@@ -348,22 +349,27 @@ class ModelOrchestrator {
     }
   }
 
-  Future<void> _loadKeepModelWarm() async {
+  /// Loads keep-warm / high-context / auto-compact / adult-mode from prefs.
+  ///
+  /// When [invalidateChatOnAdultChange] is true and adult mode flipped, the
+  /// live [InferenceChat] is cleared so the next send rebuilds the system
+  /// prompt (model stays loaded if keep-warm is on).
+  Future<void> _loadRuntimeSettings({
+    bool invalidateChatOnAdultChange = false,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
-  }
-
-  Future<void> _loadContextBudgetSettings() async {
-    final prefs = await SharedPreferences.getInstance();
     _highContextEnabled =
         prefs.getBool('settings_high_context') ??
         (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
     _autoCompactEnabled = prefs.getBool('settings_auto_compact') ?? true;
-  }
-
-  Future<void> _loadAdultMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    _adultModeEnabled = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
+    final adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
+    if (invalidateChatOnAdultChange && _adultModeEnabled != adultMode) {
+      _adultModeEnabled = adultMode;
+      _activeChat = null;
+    } else {
+      _adultModeEnabled = adultMode;
+    }
   }
 
   void clearModelOverride() {
@@ -2416,9 +2422,7 @@ class ModelOrchestrator {
   Future<void> initializeDefaultModel() async {
     await _loadAssistantRole();
     await _loadPreferredModel();
-    await _loadKeepModelWarm();
-    await _loadContextBudgetSettings();
-    await _loadAdultMode();
+    await _loadRuntimeSettings();
     await _loadIdentity();
     // NOTE: We deliberately do NOT load a model here.
     // Loading a 2.4GB model at startup causes memory/CPU exhaustion
@@ -2436,16 +2440,6 @@ class ModelOrchestrator {
     final roleName = prefs.getString('settings_assistant_role');
     _cachedRole = AssistantRole.fromString(roleName);
     _cachedIdentity = await IdentityService.getIdentity();
-    final orchestrator = instance;
-    orchestrator._highContextEnabled =
-        prefs.getBool('settings_high_context') ??
-        (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
-    orchestrator._autoCompactEnabled =
-        prefs.getBool('settings_auto_compact') ?? true;
-    final adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
-    if (orchestrator._adultModeEnabled != adultMode) {
-      orchestrator._adultModeEnabled = adultMode;
-      orchestrator._activeChat = null;
-    }
+    await instance._loadRuntimeSettings(invalidateChatOnAdultChange: true);
   }
 }

@@ -21,26 +21,36 @@ class SessionHistoryReinjection {
     return (message.text.length / 4).round();
   }
 
-  /// Newest-first fit into [maxTokens], returned oldest→newest for replay.
+  /// Newest-first fit into [maxTokens] (hard cap), returned oldest→newest.
+  ///
+  /// Messages that would push the running total over [maxTokens] are skipped.
+  /// A single oversized newest message is omitted rather than exceeding the
+  /// budget (callers that need it can raise [maxTokens] or compact first).
   static List<Message> buildReplayMessages(
     List<ChatMessage> uiMessages, {
     required int maxTokens,
   }) {
-    final usable = uiMessages
-        .where((m) => !m.isStreaming && !m.isError && m.text.trim().isNotEmpty)
-        .toList();
+    final usable = uiMessages.where(_isReplayable).toList();
 
     final selected = <ChatMessage>[];
     var tokens = 0;
     for (var i = usable.length - 1; i >= 0; i--) {
       final msg = usable[i];
       final cost = estimateChatMessageTokens(msg);
-      if (selected.isNotEmpty && tokens + cost > maxTokens) break;
+      if (tokens + cost > maxTokens) break;
       selected.add(msg);
       tokens += cost;
     }
 
     return selected.reversed.map(_toMessage).toList();
+  }
+
+  static bool _isReplayable(ChatMessage m) {
+    if (m.isStreaming || m.isError) return false;
+    if (m.text.trim().isNotEmpty) return true;
+    if (m.imageData != null && m.imageData!.isNotEmpty) return true;
+
+    return false;
   }
 
   static Message _toMessage(ChatMessage m) {

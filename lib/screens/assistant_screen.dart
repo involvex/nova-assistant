@@ -129,9 +129,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _saveMessages() async {
-    final persistable = _messages
-        .where((m) => !m.isStreaming && !(m.text.isEmpty && !m.isUser))
-        .toList();
+    final persistable = _messages.where(_isPersistableMessage).toList();
     if (widget.conversationId != null) {
       final conversation = await ChatHistoryService.getConversation(
         widget.conversationId!,
@@ -150,6 +148,17 @@ class _AssistantScreenState extends State<AssistantScreen>
         );
       }
     }
+  }
+
+  /// Keeps completed turns with text, images, or tool calls; drops streaming
+  /// placeholders and empty shells.
+  bool _isPersistableMessage(ChatMessage m) {
+    if (m.isStreaming || m.isError) return false;
+    if (m.text.trim().isNotEmpty) return true;
+    if (m.imageData != null && m.imageData!.isNotEmpty) return true;
+    if (m.toolCalls != null && m.toolCalls!.trim().isNotEmpty) return true;
+
+    return false;
   }
 
   Future<void> _loadThinkingMode() async {

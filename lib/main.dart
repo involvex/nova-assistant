@@ -27,13 +27,28 @@ import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/widget_service.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
+import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
+    // #region agent log
+    await AgentDebugLog.log(
+      hypothesisId: 'A',
+      location: 'main.dart:beforePrefs',
+      message: 'About to call SharedPreferences.getInstance',
+    );
+    // #endregion
     await SharedPreferences.getInstance();
+    // #region agent log
+    await AgentDebugLog.log(
+      hypothesisId: 'A',
+      location: 'main.dart:afterPrefs',
+      message: 'SharedPreferences.getInstance succeeded',
+    );
+    // #endregion
 
     await FlutterGemma.initialize(
       inferenceEngines: const [LiteRtLmEngine(), MediaPipeEngine()],
@@ -55,6 +70,7 @@ void main() async {
     await TtsService.instance.initialize();
     await PromptPresetsService.instance.initialize();
 
+    await ModelOrchestrator.instance.applyRamAwareModelDefaults();
     _prefetchModels();
   } catch (e) {
     debugPrint('Initialization error: $e');

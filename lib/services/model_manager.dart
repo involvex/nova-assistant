@@ -53,6 +53,7 @@ class ModelManager {
   ModelManager._();
 
   static const _prefsKey = 'installed_models';
+  Future<void>? _installLock;
   static const _customModelsPrefsKey = 'custom_models';
   static const _hfTokenKey = 'hf_token';
   final List<InstalledModel> _installedModels = [];
@@ -115,6 +116,34 @@ class ModelManager {
     required ModelFileType fileType,
     void Function(int progress)? onProgress,
   }) async {
+    // Serialize installs — concurrent Gemma 4 onboarding + Gemma 3 fallback
+    // races corrupt flutter_gemma's active identity (POCO F1).
+    while (_installLock != null) {
+      await _installLock;
+    }
+    final gate = Completer<void>();
+    _installLock = gate.future;
+    try {
+      return await _installFromNetworkUnlocked(
+        url: url,
+        modelType: modelType,
+        fileType: fileType,
+        onProgress: onProgress,
+      );
+    } finally {
+      gate.complete();
+      if (identical(_installLock, gate.future)) {
+        _installLock = null;
+      }
+    }
+  }
+
+  Future<InstalledModel?> _installFromNetworkUnlocked({
+    required String url,
+    required ModelType modelType,
+    required ModelFileType fileType,
+    void Function(int progress)? onProgress,
+  }) async {
     try {
       final uri = Uri.parse(url);
       final fileName = p.basename(uri.path);
@@ -125,6 +154,7 @@ class ModelManager {
         location: 'model_manager.dart:installFromNetwork:start',
         message: 'installFromNetwork started',
         data: {'url': url, 'fileName': fileName, 'modelType': modelType.name},
+        runId: 'post-fix',
       );
       // #endregion
 
@@ -161,6 +191,7 @@ class ModelManager {
             'canonicalName': canonicalName,
             'fileOnDiskExists': await fileOnDisk.exists(),
           },
+          runId: 'post-fix',
         );
         // #endregion
 
@@ -211,6 +242,21 @@ class ModelManager {
         }
         final response = await request.close();
 
+        // #region agent log
+        await AgentDebugLog.log(
+          hypothesisId: 'F',
+          location: 'model_manager.dart:installFromNetwork:http',
+          message: 'Download HTTP response',
+          data: {
+            'fileName': fileName,
+            'statusCode': response.statusCode,
+            'contentLength': response.contentLength,
+            'hasToken': hfToken != null && hfToken.isNotEmpty,
+          },
+          runId: 'post-fix',
+        );
+        // #endregion
+
         if (response.statusCode == 401 || response.statusCode == 403) {
           _statusController.add(
             'Download failed: HuggingFace auth required. '
@@ -242,6 +288,19 @@ class ModelManager {
           _statusController.add(
             'Download incomplete: expected $totalBytes bytes, got $receivedBytes',
           );
+          // #region agent log
+          await AgentDebugLog.log(
+            hypothesisId: 'F',
+            location: 'model_manager.dart:installFromNetwork:incomplete',
+            message: 'Download incomplete',
+            data: {
+              'fileName': fileName,
+              'expected': totalBytes,
+              'received': receivedBytes,
+            },
+            runId: 'post-fix',
+          );
+          // #endregion
           try {
             await tempFile.delete();
           } catch (e) {
@@ -285,6 +344,7 @@ class ModelManager {
           'prefsCount': _installedModels.length,
           'prefsNames': _installedModels.map((m) => m.fileName).toList(),
         },
+        runId: 'post-fix',
       );
       // #endregion
 
@@ -303,6 +363,15 @@ class ModelManager {
     } catch (e) {
       _statusController.add('Install failed: $e');
       debugPrint('ModelManager: installFromNetwork failed: $e');
+      // #region agent log
+      await AgentDebugLog.log(
+        hypothesisId: 'F',
+        location: 'model_manager.dart:installFromNetwork:error',
+        message: 'installFromNetwork exception',
+        data: {'error': e.toString()},
+        runId: 'post-fix',
+      );
+      // #endregion
       return null;
     }
   }

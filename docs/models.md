@@ -57,4 +57,24 @@ When a thread gets long, **Compact context** (manual button in chat) or **Auto-c
 | 8 GB+ | Gemma 4 E2B OK; close heavy apps first |
 | Debug all day | Enable battery/idle unload; avoid continuous screen capture |
 
+Onboarding uses **total device RAM** (not only free RAM): phones under ~6.5 GB
+default to **SmolLM** so a wiped POCO F1 does not start a 2.4 GB Gemma 4 download
+it cannot load for chat.
+
 Android idle unload is shorter (~2 minutes) to reduce LMK pressure.
+
+## On-device image generation (not in this build)
+
+Repos such as
+[FLUX.2-klein-4B-LiteRT](https://huggingface.co/litert-community/FLUX.2-klein-4B-LiteRT)
+and
+[Z-Image-Turbo-LiteRT](https://huggingface.co/litert-community/Z-Image-Turbo-LiteRT)
+are **LiteRT `CompiledModel` multi-graph diffusion pipelines** (many `.tflite`
+chunks + host tokenizer/scheduler), not `flutter_gemma` / LiteRT-LM chat
+(`.litertlm` / `.task`) models.
+
+Nova’s stack only runs LLM/VLM chat via `flutter_gemma`. Shipping those image
+models would mean a separate native LiteRT GPU pipeline, multi‑GB downloads, and
+phones in the Pixel 8a / 8 GB+ class for usable demos — out of scope for the
+current APK (and unsuitable for POCO F1). Prefer **remote LAN** or a PC host
+for image generation for now.

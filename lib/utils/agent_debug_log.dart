@@ -3,12 +3,12 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-/// Debug-mode NDJSON logger for session 36a30e.
+/// Debug-mode NDJSON logger for session 7abc09.
 /// Posts to the local ingest server (use `adb reverse tcp:7704 tcp:7704`).
 class AgentDebugLog {
   static const _endpoint =
       'http://127.0.0.1:7704/ingest/b12c34e9-d2e1-4829-bc46-cbd81f2bb686';
-  static const _sessionId = '36a30e';
+  static const _sessionId = '7abc09';
 
   static Future<void> log({
     required String hypothesisId,

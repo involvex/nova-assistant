@@ -1,40 +1,133 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/conversation.dart';
 
+/// Persists conversations as a JSON file — never in SharedPreferences.
+///
+/// Storing chat (especially base64 screenshots) in prefs OOMs Android when
+/// Flutter decodes the prefs map across the platform channel (~256 MB Java
+/// heap). Native [NovaApplication] migrates/drops the old prefs key on boot.
 class ChatHistoryService {
   static const _oldKey = 'chat_history';
   static const _key = 'conversations';
-  static const _migratedKey = 'conversations_migrated';
+  static const _fileName = 'conversations.json';
+  static const _maxConversations = 40;
+  static const _maxMessagesPerConversation = 200;
+
+  /// Soft cap for the on-disk blob; oversized files are trimmed on load.
+  static const _maxFileBytes = 4 * 1024 * 1024;
+
   static SharedPreferences? _prefs;
   static List<Conversation>? _cachedConversations;
+  static File? _file;
 
   static Future<SharedPreferences> get _p async =>
       _prefs ??= await SharedPreferences.getInstance();
 
-  static Future<void> ensureMigrated() async {
-    final p = await _p;
-    final alreadyMigrated = p.getBool(_migratedKey) ?? false;
-    if (alreadyMigrated) return;
+  static Future<File> _conversationsFile() async {
+    if (_file != null) return _file!;
+    final dir = await getApplicationDocumentsDirectory();
+    _file = File('${dir.path}/$_fileName');
 
-    final oldJson = p.getString(_oldKey);
-    if (oldJson != null && oldJson.isNotEmpty) {
-      try {
-        final list = jsonDecode(oldJson) as List<dynamic>;
-        if (list.isNotEmpty) {
-          final messages = list
-              .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-              .toList();
-          final conversation = Conversation(messages: messages);
-          await _saveConversationsInternal([conversation]);
-          await p.remove(_oldKey);
-        }
-      } catch (_) {}
+    return _file!;
+  }
+
+  /// Strips screenshot bytes — they bloated prefs to 100MB+ and crash startup.
+  static Map<String, dynamic> _messageToPersistJson(ChatMessage message) {
+    final json = message.toJson();
+    json['imageData'] = null;
+
+    return json;
+  }
+
+  static Conversation _sanitizeConversation(Conversation conversation) {
+    final messages = conversation.messages.map((m) {
+      if (m.imageData == null || m.imageData!.isEmpty) return m;
+      final text = m.text.trim().isEmpty ? '[Screenshot]' : m.text;
+
+      return ChatMessage(
+        id: m.id,
+        text: text,
+        isUser: m.isUser,
+        timestamp: m.timestamp,
+        modelName: m.modelName,
+        isStreaming: m.isStreaming,
+        isError: m.isError,
+        thinking: m.thinking,
+        toolCalls: m.toolCalls,
+        inferenceTimeMs: m.inferenceTimeMs,
+        reactions: m.reactions,
+      );
+    }).toList();
+    final trimmed = messages.length > _maxMessagesPerConversation
+        ? messages.sublist(messages.length - _maxMessagesPerConversation)
+        : messages;
+
+    return conversation.copyWith(messages: trimmed);
+  }
+
+  static List<Conversation> _capConversations(List<Conversation> list) {
+    final sorted = List<Conversation>.from(list)
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    if (sorted.length <= _maxConversations) {
+      return sorted.map(_sanitizeConversation).toList();
     }
-    await p.setBool(_migratedKey, true);
+
+    return sorted.take(_maxConversations).map(_sanitizeConversation).toList();
+  }
+
+  static Future<void> ensureMigrated() async {
+    final file = await _conversationsFile();
+    if (await file.exists() && await file.length() > 0) {
+      // Drop leftover prefs keys if native migrate already wrote the file.
+      try {
+        final p = await _p;
+        await p.remove(_key);
+        await p.remove(_oldKey);
+      } on Exception catch (e) {
+        debugPrint('ChatHistoryService: prefs cleanup after file migrate: $e');
+      }
+
+      return;
+    }
+
+    // Legacy path: small prefs payloads only (native drops oversized ones).
+    try {
+      final p = await _p;
+      final json = p.getString(_key);
+      if (json != null && json.isNotEmpty) {
+        await file.writeAsString(json);
+        await p.remove(_key);
+        debugPrint(
+          'ChatHistoryService: migrated conversations prefs → file '
+          '(${json.length} chars)',
+        );
+      }
+
+      final oldJson = p.getString(_oldKey);
+      if (oldJson != null && oldJson.isNotEmpty) {
+        try {
+          final list = jsonDecode(oldJson) as List<dynamic>;
+          if (list.isNotEmpty) {
+            final messages = list
+                .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+                .toList();
+            final conversation = Conversation(messages: messages);
+            await _saveConversationsInternal([conversation]);
+          }
+        } on Exception catch (e) {
+          debugPrint('ChatHistoryService: old chat_history migrate failed: $e');
+        }
+        await p.remove(_oldKey);
+      }
+    } on Exception catch (e) {
+      debugPrint('ChatHistoryService.ensureMigrated prefs read failed: $e');
+    }
   }
 
   static Future<List<Conversation>> loadConversations() async {
@@ -43,20 +136,49 @@ class ChatHistoryService {
     }
     await ensureMigrated();
     try {
-      final p = await _p;
-      final json = p.getString(_key);
-      if (json == null || json.isEmpty) {
+      final file = await _conversationsFile();
+      if (!await file.exists()) {
         _cachedConversations = [];
+
         return [];
       }
+
+      final length = await file.length();
+      if (length == 0) {
+        _cachedConversations = [];
+
+        return [];
+      }
+
+      if (length > _maxFileBytes * 4) {
+        debugPrint(
+          'ChatHistoryService: conversations file too large '
+          '($length bytes) — resetting to avoid OOM',
+        );
+        await file.delete();
+        _cachedConversations = [];
+
+        return [];
+      }
+
+      final json = await file.readAsString();
       final list = jsonDecode(json) as List<dynamic>;
-      _cachedConversations = list
+      var conversations = list
           .map((e) => Conversation.fromJson(e as Map<String, dynamic>))
           .toList();
-      _cachedConversations!.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      conversations = _capConversations(conversations);
+      _cachedConversations = conversations;
+
+      // Rewrite stripped/capped form so the blob shrinks on disk.
+      if (length > _maxFileBytes) {
+        await _saveConversationsInternal(conversations);
+      }
+
       return List.unmodifiable(_cachedConversations!);
-    } catch (_) {
+    } on Exception catch (e) {
+      debugPrint('ChatHistoryService.loadConversations error: $e');
       _cachedConversations = [];
+
       return [];
     }
   }
@@ -65,11 +187,31 @@ class ChatHistoryService {
     List<Conversation> conversations,
   ) async {
     try {
-      final p = await _p;
-      final json = jsonEncode(conversations.map((c) => c.toJson()).toList());
-      await p.setString(_key, json);
-      _cachedConversations = conversations;
-    } catch (e) {
+      final capped = _capConversations(conversations);
+      final encoded = jsonEncode(
+        capped
+            .map(
+              (c) => {
+                'id': c.id,
+                'title': c.title,
+                'messages': c.messages.map(_messageToPersistJson).toList(),
+                'createdAt': c.createdAt.toIso8601String(),
+                'updatedAt': c.updatedAt.toIso8601String(),
+                'summary': c.summary,
+              },
+            )
+            .toList(),
+      );
+      final file = await _conversationsFile();
+      await file.writeAsString(encoded);
+      _cachedConversations = capped;
+
+      // Ensure prefs never holds the blob again.
+      try {
+        final p = await _p;
+        if (p.containsKey(_key)) await p.remove(_key);
+      } on Exception catch (_) {}
+    } on Exception catch (e) {
       debugPrint('ChatHistoryService._saveConversationsInternal error: $e');
     }
   }
@@ -85,6 +227,7 @@ class ChatHistoryService {
     final conversation = Conversation(title: title);
     final updated = <Conversation>[conversation, ...conversations];
     await _saveConversationsInternal(updated);
+
     return conversation;
   }
 
@@ -106,6 +249,7 @@ class ChatHistoryService {
 
   static Future<Conversation?> getConversation(String id) async {
     final conversations = await loadConversations();
+
     return conversations.where((c) => c.id == id).firstOrNull;
   }
 
@@ -127,32 +271,11 @@ class ChatHistoryService {
     }
   }
 
-  static Future<void> updateMessage(
-    String conversationId,
-    ChatMessage message,
-  ) async {
-    final conversations = await loadConversations();
-    final convoIndex = conversations.indexWhere((c) => c.id == conversationId);
-    if (convoIndex != -1) {
-      final conversation = conversations[convoIndex];
-      final messages = List<ChatMessage>.from(conversation.messages);
-      final msgIndex = messages.indexWhere((m) => m.id == message.id);
-      if (msgIndex != -1) {
-        messages[msgIndex] = message;
-        final updated = List<Conversation>.from(conversations);
-        updated[convoIndex] = conversation.copyWith(
-          messages: messages,
-          updatedAt: DateTime.now(),
-        );
-        await _saveConversationsInternal(updated);
-      }
-    }
-  }
-
   static Future<List<ChatMessage>> load() async {
     final conversations = await loadConversations();
     if (conversations.isEmpty) return [];
     final first = conversations.first;
+
     return first.messages;
   }
 
@@ -181,8 +304,21 @@ class ChatHistoryService {
 
   static Future<void> clear() async {
     _cachedConversations = [];
-    final p = await _p;
-    await p.remove(_key);
+    try {
+      final file = await _conversationsFile();
+      if (await file.exists()) await file.delete();
+    } on Exception catch (e) {
+      debugPrint('ChatHistoryService.clear file error: $e');
+    } finally {
+      _file = null;
+    }
+    try {
+      final p = await _p;
+      await p.remove(_key);
+      await p.remove(_oldKey);
+    } on Exception catch (e) {
+      debugPrint('ChatHistoryService.clear prefs error: $e');
+    }
   }
 
   /// Builds a plain-text export of all conversations (no file write).

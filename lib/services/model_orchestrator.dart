@@ -759,6 +759,19 @@ class ModelOrchestrator {
       return _activeModel!;
     }
 
+    // Free-RAM hard gate before a cold load of heavy models (Android).
+    final ramBlock = await PlatformAdaptationService.instance.checkCanLoadModel(
+      model,
+    );
+    if (ramBlock != null) {
+      throw ModelException(
+        ramBlock,
+        model: model,
+        suggestion:
+            'Free RAM by closing apps, or use a smaller model in Settings.',
+      );
+    }
+
     // --- Switching / Loading new model ---
     // Close any previous model and clear flutter_gemma's active identity.
     // Always clear when vision flag or model type changes — singleton reuse

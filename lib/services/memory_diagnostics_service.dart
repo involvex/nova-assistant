@@ -14,11 +14,43 @@ class MemoryDiagnosticsService {
 
   int? _lastPssKb;
   int? _lastRssKb;
+  int? _lastAvailMemMb;
 
   int? get lastPssMb =>
       _lastPssKb != null ? (_lastPssKb! / 1024).round() : null;
   int? get lastRssMb =>
       _lastRssKb != null ? (_lastRssKb! / 1024).round() : null;
+  int? get lastAvailMemMb => _lastAvailMemMb;
+
+  /// Best-effort free system RAM in MB (Android ActivityManager).
+  Future<int?> readAvailableMemMb() async {
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+          'getProcessMemory',
+        );
+        if (result != null) {
+          _lastPssKb = result['pssKb'] as int?;
+          _lastRssKb = result['rssKb'] as int?;
+          final avail = result['availMemMb'];
+          if (avail is int) {
+            _lastAvailMemMb = avail;
+
+            return avail;
+          }
+          if (avail is num) {
+            _lastAvailMemMb = avail.round();
+
+            return _lastAvailMemMb;
+          }
+        }
+      } on PlatformException catch (e) {
+        debugPrint('MemoryDiagnosticsService availMem: $e');
+      }
+    }
+
+    return _lastAvailMemMb;
+  }
 
   /// Best-effort process memory in MB (PSS preferred on Android).
   Future<int?> readProcessMemoryMb() async {
@@ -30,6 +62,12 @@ class MemoryDiagnosticsService {
         if (result != null) {
           _lastPssKb = result['pssKb'] as int?;
           _lastRssKb = result['rssKb'] as int?;
+          final avail = result['availMemMb'];
+          if (avail is int) {
+            _lastAvailMemMb = avail;
+          } else if (avail is num) {
+            _lastAvailMemMb = avail.round();
+          }
           final pss = _lastPssKb;
           if (pss != null) return (pss / 1024).round();
         }

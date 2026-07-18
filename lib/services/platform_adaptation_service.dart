@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 
 /// Platform-specific feature capabilities
 class PlatformCapabilities {
@@ -288,6 +289,42 @@ class PlatformAdaptationService {
     }
 
     return null;
+  }
+
+  /// Minimum free system RAM (MB) required before a cold load of [model].
+  /// Returns null when no hard gate applies (small models / non-Android).
+  int? minFreeRamMbFor(NovaModel model) {
+    if (kIsWeb) return null;
+    if (defaultTargetPlatform != TargetPlatform.android) return null;
+
+    if (model.sizeMB >= 2000) return 3500;
+    if (model.sizeMB >= 400) return 1200;
+
+    return null;
+  }
+
+  /// Pure gate check: returns an error message when [availMemMb] is too low.
+  String? freeRamGateMessage({
+    required NovaModel model,
+    required int? availMemMb,
+  }) {
+    final minFree = minFreeRamMbFor(model);
+    if (minFree == null || availMemMb == null) return null;
+    if (availMemMb >= minFree) return null;
+
+    return 'Not enough free RAM to load ${model.displayName} '
+        '($availMemMb MB free, need ~$minFree MB). '
+        'Close background apps or switch to SmolLM / Gemma 3 1B.';
+  }
+
+  /// Async hard gate using [MemoryDiagnosticsService] free-RAM reading.
+  Future<String?> checkCanLoadModel(NovaModel model) async {
+    final minFree = minFreeRamMbFor(model);
+    if (minFree == null) return null;
+
+    final avail = await MemoryDiagnosticsService.instance.readAvailableMemMb();
+
+    return freeRamGateMessage(model: model, availMemMb: avail);
   }
 
   /// Max parallel chat sessions for the current platform.

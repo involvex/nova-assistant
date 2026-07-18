@@ -489,11 +489,17 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
           ),
           const SizedBox(width: 12),
           VoiceInputButton(
+            onPartial: (partial) {
+              _inputController.text = partial;
+              _inputController.selection = TextSelection.collapsed(
+                offset: partial.length,
+              );
+            },
             onTranscription: (text) {
-              if (text.isNotEmpty) {
-                _inputController.text = text;
-                _sendMessage();
-              }
+              if (text.isEmpty) return;
+              _inputController.text = text;
+              if (_isGenerating) return;
+              _sendMessage();
             },
           ),
           const SizedBox(width: 8),

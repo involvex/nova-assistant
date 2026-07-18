@@ -1,10 +1,20 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 class VoiceInputButton extends StatefulWidget {
+  /// Called once when listening ends with the full transcript.
   final void Function(String transcription) onTranscription;
 
-  const VoiceInputButton({super.key, required this.onTranscription});
+  /// Optional live preview while the user is still speaking.
+  final void Function(String partial)? onPartial;
+
+  const VoiceInputButton({
+    super.key,
+    required this.onTranscription,
+    this.onPartial,
+  });
 
   @override
   State<VoiceInputButton> createState() => _VoiceInputButtonState();
@@ -19,6 +29,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
   bool _isInitializing = true;
   String _lastWords = '';
   bool _isPressed = false;
+  bool _flushing = false;
 
   @override
   void initState() {
@@ -36,6 +47,11 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
       _speechAvailable = await _speech.initialize(
         onStatus: (status) {
           debugPrint('Speech status: $status');
+          // Engine may auto-stop after pauseFor — flush full transcript once.
+          final ended = status == 'done' || status == 'notListening';
+          if (ended && _isListening) {
+            unawaited(_finishListening());
+          }
         },
         onError: (error) {
           debugPrint('Speech error: ${error.errorMsg}');
@@ -71,18 +87,30 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
           duration: Duration(seconds: 1),
         ),
       );
+
       return;
     }
 
     if (_isListening) {
-      await _speech.stop();
-      if (mounted) setState(() => _isListening = false);
-      if (_lastWords.isNotEmpty) {
-        widget.onTranscription(_lastWords);
-        _lastWords = '';
-      }
+      await _finishListening();
     } else {
       await _startListening();
+    }
+  }
+
+  Future<void> _finishListening() async {
+    if (_flushing) return;
+    _flushing = true;
+    try {
+      await _speech.stop();
+      if (mounted) setState(() => _isListening = false);
+      final transcript = _lastWords.trim();
+      _lastWords = '';
+      if (transcript.isNotEmpty) {
+        widget.onTranscription(transcript);
+      }
+    } finally {
+      _flushing = false;
     }
   }
 
@@ -96,26 +124,24 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
           duration: Duration(seconds: 2),
         ),
       );
+
       return;
     }
 
+    _lastWords = '';
     setState(() => _isListening = true);
 
-    _speech.listen(
+    await _speech.listen(
       onResult: (result) {
+        // Accumulate partial + final segments; never auto-send mid-listen.
+        // Early finalResult after pauseFor was sending ~20% then leaving the
+        // rest stuck in the input while _isGenerating blocked a second send.
         _lastWords = result.recognizedWords;
-        if (result.finalResult && _lastWords.isNotEmpty) {
-          widget.onTranscription(_lastWords);
-          _lastWords = '';
-          if (mounted) setState(() => _isListening = false);
-        }
-      },
-      onSoundLevelChange: (level) {
-        // Optional: update UI based on sound level
+        widget.onPartial?.call(_lastWords);
       },
       listenOptions: SpeechListenOptions(
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 3),
+        listenFor: const Duration(seconds: 60),
+        pauseFor: const Duration(seconds: 4),
         partialResults: true,
         cancelOnError: false,
         listenMode: ListenMode.dictation,

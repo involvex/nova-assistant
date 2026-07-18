@@ -38,5 +38,19 @@ void main() {
     test('returns null for alarm without time', () {
       expect(AlarmTimeParser.tryParse('Set an alarm'), isNull);
     });
+
+    test('parses German Wecker um 19:00', () {
+      final result = AlarmTimeParser.tryParse('stell einen Wecker um 19:00');
+      expect(result, isNotNull);
+      expect(result!.hour, 19);
+      expect(result.minute, 0);
+    });
+
+    test('parses German Wecker auf 7 Uhr', () {
+      final result = AlarmTimeParser.tryParse('Wecker auf 7 Uhr');
+      expect(result, isNotNull);
+      expect(result!.hour, 7);
+      expect(result.minute, 0);
+    });
   });
 }

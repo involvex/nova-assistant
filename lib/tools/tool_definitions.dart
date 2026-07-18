@@ -88,14 +88,18 @@ class NovaTools {
     name: 'open_app',
     description:
         'Open an application on the device. '
-        'Use this ONLY when the user explicitly asks to open '
-        'or launch a specific application.',
+        'Use when the user asks to open/launch an app (English or German: '
+        'open, launch, öffne, starte). '
+        'Common packages: YouTube=com.google.android.youtube, '
+        'Settings=com.android.settings, Chrome=com.android.chrome, '
+        'Spotify=com.spotify.music, Maps=com.google.android.apps.maps.',
     parameters: {
       'type': 'object',
       'properties': {
         'package': {
           'type': 'string',
-          'description': 'App package name (e.g. com.twitter.android)',
+          'description':
+              'Android package name, e.g. com.google.android.youtube',
         },
       },
       'required': ['package'],

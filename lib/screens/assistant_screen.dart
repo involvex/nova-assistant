@@ -2109,11 +2109,20 @@ class _AssistantScreenState extends State<AssistantScreen>
                   ),
                   const SizedBox(width: 8),
                   VoiceInputButton(
+                    onPartial: (partial) {
+                      _inputController.text = partial;
+                      _inputController.selection = TextSelection.collapsed(
+                        offset: partial.length,
+                      );
+                    },
                     onTranscription: (transcript) {
-                      if (transcript.isNotEmpty) {
-                        _inputController.text = transcript;
-                        _sendMessage();
+                      if (transcript.isEmpty) return;
+                      _inputController.text = transcript;
+                      if (_isGenerating || ModelOrchestrator.instance.isBusy) {
+                        // Leave full text in the field for the user to send.
+                        return;
                       }
+                      _sendMessage();
                     },
                   ),
                   const SizedBox(width: 8),

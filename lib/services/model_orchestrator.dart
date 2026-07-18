@@ -30,6 +30,7 @@ import 'package:nova_assistant/services/platform_adaptation_service.dart';
 import 'package:nova_assistant/utils/alarm_time_parser.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
+import 'package:nova_assistant/utils/open_app_intent_parser.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/session_history_reinjection.dart';
 
@@ -1578,6 +1579,29 @@ class ModelOrchestrator {
         return;
       }
 
+      // Deterministic open-app shortcut (YouTube, Settings, etc.).
+      final openPackage = OpenAppIntentParser.tryParsePackage(query);
+      if (openPackage != null) {
+        _statusController.add('Opening app...');
+        final result = await ToolExecutorService.instance.openApp(openPackage);
+        final ok = result['success'] == true;
+        yield InferenceResult(
+          text: ok
+              ? 'Opened $openPackage.'
+              : 'Could not open the app: ${result['error'] ?? 'unknown error'}',
+          model: selector.primaryHeavy,
+          isStreaming: false,
+          toolCalls: [
+            {
+              'name': 'open_app',
+              'args': {'package': openPackage},
+              'result': result,
+            },
+          ],
+        );
+        return;
+      }
+
       // Check if there are image attachments that need vision processing
       final hasImageAttachments = attachments.any((att) {
         if (att.type != AttachedDataType.file) return false;
@@ -1702,6 +1726,7 @@ class ModelOrchestrator {
       }
 
       final chatTools = _toolsForCreateChat(model, tools);
+      final textToolPrompt = chatTools.isEmpty && tools.isNotEmpty;
       final wasNull = _activeChat == null;
       if (wasNull) {
         _isLoadingModel = true;
@@ -1713,6 +1738,7 @@ class ModelOrchestrator {
             model,
             ragContext,
             _capContextInjection(attachmentContext),
+            textToolPrompt ? tools : null,
           ),
           tools: chatTools,
           supportImage: model.hasVision && _activeModelSupportsImage,
@@ -2283,6 +2309,7 @@ class ModelOrchestrator {
     NovaModel model, [
     String? ragContext,
     String? attachmentContext,
+    List<Tool>? textTools,
   ]) async {
     final compact =
         !kIsWeb &&
@@ -2310,6 +2337,12 @@ class ModelOrchestrator {
     final buffer = StringBuffer('$base$thinkingSuffix');
     if (!compact) {
       buffer.write('\n\n${await _languageInstruction()}');
+    }
+
+    // Compact Android prompts drop the role's tool list — restore capability
+    // so the model does not claim it cannot open apps / set alarms.
+    if (compact || (textTools != null && textTools.isNotEmpty)) {
+      buffer.write(_deviceToolsCapabilitySuffix(textTools));
     }
 
     if (_adultModeEnabled) {
@@ -2340,6 +2373,27 @@ class ModelOrchestrator {
     }
 
     return buffer.toString();
+  }
+
+  /// Short capability block for on-device tools (and text-JSON FC when native FC
+  /// is unavailable on Android Gemma 4).
+  String _deviceToolsCapabilitySuffix(List<Tool>? textTools) {
+    final names = (textTools ?? const <Tool>[])
+        .map((t) => t.name)
+        .where((n) => n.isNotEmpty)
+        .toList();
+    final listed = names.isEmpty
+        ? 'get_time, set_alarm, cancel_alarm, open_app, open_settings, search_web'
+        : names.join(', ');
+
+    return ' You control this Android device via tools: $listed. '
+        'When the user asks to open an app, set/cancel an alarm, open settings, '
+        'or search the web, call the tool immediately — do not say you lack '
+        'device access. '
+        'open_app packages: com.google.android.youtube, com.android.settings, '
+        'com.android.chrome. '
+        'If native function calling is unavailable, reply with only JSON like '
+        '{"name":"open_app","arguments":{"package":"com.google.android.youtube"}}.';
   }
 
   static AgentIdentity? _cachedIdentity;

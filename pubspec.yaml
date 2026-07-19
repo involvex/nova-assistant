@@ -1,7 +1,7 @@
 name: nova_assistant
 description: "Nova — an on-device AI assistant powered by Gemma, with assistant button integration and screen awareness."
 publish_to: 'none'
-version: 0.4.0
+version: 0.4.1
 
 environment:
   sdk: '3.13.0-282.1.beta'

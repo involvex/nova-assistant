@@ -151,6 +151,23 @@ flutter build web --release
 flutter build windows --release
 ```
 
+#### Versioned release (Windows)
+
+```powershell
+# Default: patch bump, changelog, analyze, test, arm64 release APK, commit, tag, push
+./scripts/release.ps1
+
+# Preview without changing anything
+./scripts/release.ps1 -DryRun
+
+# Minor/major, custom changelog bullet, local-only
+./scripts/release.ps1 -Bump minor -Message "Settings hubs" -NoPush
+./scripts/release.ps1 -SkipTests -AppBundle
+```
+
+Requires a clean git working tree and `CHANGELOG.md` with an `## [Unreleased]` section.
+`pubspec.yaml` may use `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH+BUILD`; releases always write `+BUILD`.
+
 ### Testing
 
 ```bash

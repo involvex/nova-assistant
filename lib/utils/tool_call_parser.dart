@@ -101,10 +101,7 @@ class ToolCallParser {
       '',
     );
     out = out.replaceAll(
-      RegExp(
-        r'call:\s*[a-zA-Z0-9_]+\s*\{[^{}]*(?:\}|$)',
-        caseSensitive: false,
-      ),
+      RegExp(r'call:\s*[a-zA-Z0-9_]+\s*\{[^{}]*(?:\}|$)', caseSensitive: false),
       '',
     );
     out = out.replaceAll(RegExp(r'<\|?"?\|>'), '');

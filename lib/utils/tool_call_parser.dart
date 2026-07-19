@@ -5,26 +5,27 @@ class ToolCallParser {
   const ToolCallParser._();
 
   /// Common hallucinated names → Nova built-in tool names.
+  ///
+  /// Keep aliases specific — short names like `search` / `time` cause false
+  /// positives when the model narrates tool use in prose.
   static const aliases = <String, String>{
     'google_search': 'search_web',
     'web_search': 'search_web',
-    'search': 'search_web',
     'bing_search': 'search_web',
-    'duckduckgo': 'search_web',
+    'duckduckgo_search': 'search_web',
     'open_browser': 'search_web',
     'browser_search': 'search_web',
     'get_current_time': 'get_time',
     'current_time': 'get_time',
-    'time': 'get_time',
     'set_an_alarm': 'set_alarm',
     'create_alarm': 'set_alarm',
     'launch_app': 'open_app',
     'start_app': 'open_app',
     'open_application': 'open_app',
-    'screenshot': 'take_screenshot',
     'capture_screen': 'take_screenshot',
-    'weather': 'get_weather',
+    'take_a_screenshot': 'take_screenshot',
     'check_weather': 'get_weather',
+    'get_current_weather': 'get_weather',
   };
 
   /// Returns normalized tool calls, or null if none found.
@@ -100,10 +101,6 @@ class ToolCallParser {
       ),
       '',
     );
-    out = out.replaceAll(
-      RegExp(r'call:\s*[a-zA-Z0-9_]+\s*\{[^{}]*(?:\}|$)', caseSensitive: false),
-      '',
-    );
     out = out.replaceAll(RegExp(r'<\|?"?\|>'), '');
     out = out.replaceAll(RegExp(r'[ \t]+\n'), '\n');
     out = out.replaceAll(RegExp(r'\n{3,}'), '\n\n');
@@ -145,10 +142,13 @@ class ToolCallParser {
 
   /// Handles forms like:
   /// `<|tool_call>call:google_search{queries:[<|"|>Missypwns twitch<|"|>]}`
+  ///
+  /// Requires a tool-call delimiter so explanatory prose such as
+  /// `call:open_app{package:...}` is not executed as a real tool.
   static List<Map<String, dynamic>> _parseMarkupCalls(String text) {
     final results = <Map<String, dynamic>>[];
     final pattern = RegExp(
-      r'(?:<\|?tool_call\|?>)?\s*call:\s*([a-zA-Z0-9_]+)\s*(\{[\s\S]*?\})\s*'
+      r'<\|?tool_call\|?>\s*call:\s*([a-zA-Z0-9_]+)\s*(\{[\s\S]*?\})\s*'
       r'(?:</?\|?tool_call\|?>|<tool_call\|>)?',
       caseSensitive: false,
     );

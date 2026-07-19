@@ -1511,6 +1511,8 @@ class ModelOrchestrator {
     bool hasPendingToolCalls = true;
     int toolRounds = 0;
     final List<Map<String, dynamic>> allToolCalls = [];
+    var safetyStopped = false;
+    final maxOutputChars = GenerationSafety.maxOutputCharsForCustom();
 
     _isStreaming = true;
     _streamingCompleter = Completer<void>();
@@ -1528,6 +1530,25 @@ class ModelOrchestrator {
             final token = event.token;
             fullResponse += token;
             textBuffer.write(token);
+
+            final safetyMsg = GenerationSafety.safetyStopMessage(
+              fullResponse,
+              maxOutputChars,
+            );
+            if (safetyMsg != null) {
+              safetyStopped = true;
+              fullResponse = '$fullResponse$safetyMsg';
+              yield InferenceResult(
+                text: _sanitizeAssistantText(fullResponse),
+                model: selector.primaryHeavy,
+                isStreaming: true,
+                thinking: currentThinking,
+                toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+                inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+              );
+              unawaited(stopGeneration());
+              break;
+            }
 
             final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
             if (parsedCalls != null && parsedCalls.isNotEmpty) {
@@ -1587,7 +1608,7 @@ class ModelOrchestrator {
           } else if (event is ThinkingResponse) {
             currentThinking = event.content;
             yield InferenceResult(
-              text: fullResponse,
+              text: _sanitizeAssistantText(fullResponse),
               model: selector.primaryHeavy,
               isStreaming: true,
               thinking: currentThinking,
@@ -1595,6 +1616,10 @@ class ModelOrchestrator {
               inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
             );
           }
+        }
+
+        if (safetyStopped || (_streamingCompleter?.isCompleted ?? false)) {
+          break;
         }
 
         if (hasPendingToolCalls) {
@@ -1623,6 +1648,7 @@ class ModelOrchestrator {
     }
 
     inferenceStopwatch.stop();
+    fullResponse = _sanitizeAssistantText(fullResponse);
 
     yield InferenceResult(
       text: fullResponse,

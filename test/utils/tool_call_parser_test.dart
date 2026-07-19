@@ -41,5 +41,28 @@ void main() {
     test('returns null for ordinary prose', () {
       expect(ToolCallParser.parse('Hello, how can I help?'), isNull);
     });
+
+    test('ignores bare call: markup without tool_call delimiter', () {
+      const prose =
+          'I would call:open_app{package:com.android.chrome} if tools worked.';
+      expect(ToolCallParser.parse(prose), isNull);
+    });
+
+    test('does not alias short words like search or time', () {
+      expect(
+        ToolCallParser.normalizeCall({
+          'name': 'search',
+          'args': {'query': 'x'},
+        })['name'],
+        'search',
+      );
+      expect(
+        ToolCallParser.normalizeCall({
+          'name': 'time',
+          'args': <String, dynamic>{},
+        })['name'],
+        'time',
+      );
+    });
   });
 }

@@ -134,9 +134,17 @@ class ChatBubble extends StatelessWidget {
                         ),
                       )
                     else if (message.text.trim().isNotEmpty)
+                      // selectable:true during token streaming causes
+                      // RangeError (selection past length) and
+                      // `_dependents.isEmpty` InheritedWidget teardown crashes.
                       MarkdownBody(
+                        key: ValueKey(
+                          message.isStreaming
+                              ? 'md-stream-${message.id}'
+                              : 'md-${message.id}',
+                        ),
                         data: message.text,
-                        selectable: true,
+                        selectable: !message.isStreaming,
                         styleSheet: MarkdownStyleSheet(
                           p: TextStyle(
                             color: isUser

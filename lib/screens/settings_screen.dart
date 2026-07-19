@@ -536,6 +536,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await _saveSetting(AdultModePolicy.prefsKey, v);
               ModelOrchestrator.instance.setAdultModeEnabled(v);
               await ModelOrchestrator.refreshSettings();
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    v
+                        ? 'Adult mode on — send a new message so it applies '
+                              '(chat session is rebuilt).'
+                        : 'Adult mode off — send a new message so it applies.',
+                  ),
+                  duration: const Duration(seconds: 3),
+                ),
+              );
             },
           ),
           _toggleTile(

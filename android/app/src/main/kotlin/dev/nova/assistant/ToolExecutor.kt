@@ -143,8 +143,13 @@ object ToolExecutor {
     }
 
     private fun searchWeb(context: Context, args: Map<*, *>): Map<String, Any> {
-        val query = args["query"] as? String
-            ?: throw IllegalArgumentException("query required")
+        val query = when (val raw = args["query"] ?: args["q"] ?: args["queries"]) {
+            is String -> raw
+            is List<*> -> raw.mapNotNull { it?.toString()?.trim() }
+                .filter { it.isNotEmpty() }
+                .joinToString(" ")
+            else -> null
+        } ?: throw IllegalArgumentException("query required")
 
         sendProgress("search_web", "executing", 0.3, "Opening browser for: $query")
         val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {

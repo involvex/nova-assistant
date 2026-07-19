@@ -32,6 +32,7 @@ import 'package:nova_assistant/services/remote_inference_client.dart';
 import 'package:nova_assistant/services/remote_inference_config.dart';
 import 'package:nova_assistant/utils/alarm_time_parser.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
+import 'package:nova_assistant/utils/generation_safety.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/utils/open_app_intent_parser.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
@@ -134,6 +135,7 @@ class ModelOrchestrator {
   ModelOrchestrator._();
 
   static const _prefsKey = 'preferred_model_override';
+  static const _customPrefsKey = 'preferred_custom_model_id';
 
   final ModelSelector selector = ModelSelector(
     primaryHeavy: NovaModel.gemma4E2b,
@@ -219,6 +221,7 @@ class ModelOrchestrator {
 
   void setKeepModelWarm(bool enabled) {
     _keepModelWarm = enabled;
+    _resetIdleTimer();
   }
 
   void setHighContextEnabled(bool enabled) {
@@ -329,6 +332,7 @@ class ModelOrchestrator {
     }
     unawaited(_teardownActiveModel(keepIfSameType: model));
     _persistPreferredModel(model);
+    unawaited(_persistPreferredCustomModel(null));
   }
 
   CustomModel? get preferredCustomModel => _preferredCustomModelOverride;
@@ -344,9 +348,13 @@ class ModelOrchestrator {
     _tryStopGeneration();
     if (_isStreaming) {
       _pendingModelTeardown = true;
+      unawaited(_persistPreferredCustomModel(model));
+      unawaited(_persistPreferredModel(null));
       return;
     }
     unawaited(_teardownActiveModel());
+    unawaited(_persistPreferredCustomModel(model));
+    unawaited(_persistPreferredModel(null));
   }
 
   Future<void> _teardownActiveModel({NovaModel? keepIfSameType}) async {
@@ -378,17 +386,46 @@ class ModelOrchestrator {
     }
   }
 
+  /// User-facing cancel: abort the token stream and ask the native session to stop.
+  Future<void> stopGeneration() async {
+    if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+      _streamingCompleter!.complete();
+    }
+    await _tryStopGeneration();
+  }
+
   Future<void> _persistPreferredModel(NovaModel? model) async {
     final prefs = await SharedPreferences.getInstance();
     if (model == null) {
       await prefs.remove(_prefsKey);
     } else {
       await prefs.setString(_prefsKey, model.name);
+      await prefs.remove(_customPrefsKey);
+    }
+  }
+
+  Future<void> _persistPreferredCustomModel(CustomModel? model) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (model == null) {
+      await prefs.remove(_customPrefsKey);
+    } else {
+      await prefs.setString(_customPrefsKey, model.id);
     }
   }
 
   Future<void> _loadPreferredModel() async {
     final prefs = await SharedPreferences.getInstance();
+    final customId = prefs.getString(_customPrefsKey);
+    if (customId != null && customId.isNotEmpty) {
+      final custom = ModelManager.instance.getCustomModelById(customId);
+      if (custom != null) {
+        _preferredCustomModelOverride = custom;
+        _preferredModelOverride = null;
+
+        return;
+      }
+      await prefs.remove(_customPrefsKey);
+    }
     final name = prefs.getString(_prefsKey);
     if (name != null) {
       try {
@@ -430,10 +467,13 @@ class ModelOrchestrator {
     _preferredModelOverride = null;
     _preferredCustomModelOverride = null;
     _modelOverrideDirty = false;
+    unawaited(_persistPreferredModel(null));
+    unawaited(_persistPreferredCustomModel(null));
   }
 
   void refreshModelOverride() {
-    if (_preferredModelOverride != null) {
+    if (_preferredModelOverride != null ||
+        _preferredCustomModelOverride != null) {
       _modelOverrideDirty = true;
     }
   }
@@ -449,7 +489,11 @@ class ModelOrchestrator {
   void _resetIdleTimer() {
     if (!_batteryOptimizationEnabled) return;
     _idleTimer?.cancel();
-    _idleTimer = Timer(_idleTimeout, _releaseIdleResources);
+    // Keep-warm: do not schedule unload; cold reload on F1 often forces SmolLM.
+    if (_keepModelWarm) return;
+    _idleTimer = Timer(_idleTimeout, () {
+      unawaited(_releaseIdleResources());
+    });
   }
 
   Future<void> _releaseIdleResources() async {
@@ -896,6 +940,19 @@ class ModelOrchestrator {
     );
     // #endregion
     if (ramBlock != null) {
+      final pinned =
+          _preferredModelOverride != null ||
+          _preferredCustomModelOverride != null;
+      if (pinned) {
+        throw ModelException(
+          ramBlock,
+          model: modelToLoad,
+          suggestion:
+              'Your selected model is pinned for this session. Free RAM, '
+              'use Settings → Reset inference, or pick a smaller model — '
+              'Nova will not silently switch to SmolLM.',
+        );
+      }
       final fallback = await _pickRamFallback(modelToLoad);
       if (fallback != null) {
         // #region agent log
@@ -2047,6 +2104,12 @@ class ModelOrchestrator {
         return;
       }
 
+      // Auto RAM fallback may have loaded a different catalog model.
+      if (_activeModelType != null && _activeModelType != model) {
+        model = _activeModelType!;
+        _statusController.add('Using ${model.displayName}');
+      }
+
       if (_modelOverrideDirty) {
         _modelOverrideDirty = false;
       }
@@ -2217,6 +2280,8 @@ class ModelOrchestrator {
       var screenshotToolCallsThisTurn = 0;
 
       Object? streamError;
+      var safetyStopped = false;
+      final maxOutputChars = GenerationSafety.maxOutputCharsFor(model);
       try {
         while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
           hasPendingToolCalls = false;
@@ -2224,13 +2289,31 @@ class ModelOrchestrator {
 
           await for (final event in _activeChat!.generateChatResponseAsync()) {
             if (_streamingCompleter?.isCompleted ?? false) {
-              debugPrint('Stream aborted by releaseIdleResources');
+              debugPrint('Stream aborted by stopGeneration / release');
               break;
             }
             if (event is TextResponse) {
               final token = event.token;
               fullResponse += token;
               textBuffer.write(token);
+
+              final safetyMsg = GenerationSafety.safetyStopMessage(
+                fullResponse,
+                maxOutputChars,
+              );
+              if (safetyMsg != null) {
+                safetyStopped = true;
+                fullResponse = '$fullResponse$safetyMsg';
+                yield InferenceResult(
+                  text: fullResponse,
+                  model: model,
+                  isStreaming: true,
+                  thinking: thinkingMode ? currentThinking : null,
+                  toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+                );
+                unawaited(stopGeneration());
+                break;
+              }
 
               // Try to parse function calls from the accumulated buffer.
               final parsedCalls = _tryParseFunctionCalls(textBuffer.toString());
@@ -2373,6 +2456,10 @@ class ModelOrchestrator {
 
               hasPendingToolCalls = true;
             }
+          }
+          if (safetyStopped || (_streamingCompleter?.isCompleted ?? false)) {
+            hasPendingToolCalls = false;
+            break;
           }
         }
       } on PlatformException catch (e) {
@@ -2976,8 +3063,7 @@ class ModelOrchestrator {
     }
     _activeChat = null;
     _activeModelSupportsImage = false;
-    _preferredModelOverride = null;
-    _modelOverrideDirty = false;
+    // Keep preferred / custom model pinned across history wipe.
     await ChatHistoryService.clear();
     _historyClearedController.add(null);
   }

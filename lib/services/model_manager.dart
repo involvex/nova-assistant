@@ -866,6 +866,14 @@ class ModelManager {
     }
   }
 
+  CustomModel? getCustomModelById(String id) {
+    try {
+      return _customModels.firstWhere((m) => m.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Register a model already on disk (no download).
   ///
   /// If [deferInstall] is false (default), registers with flutter_gemma

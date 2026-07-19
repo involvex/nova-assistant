@@ -85,6 +85,10 @@ class _AssistantScreenState extends State<AssistantScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _selectedModel = ModelOrchestrator.instance.preferredModelType;
+    _selectedCustomModel = ModelOrchestrator.instance.preferredCustomModel;
+    if (_selectedCustomModel != null) {
+      _selectedModel = null;
+    }
     _loadThinkingMode();
     _loadDebugMode();
     _loadInitialScreenshot();
@@ -782,6 +786,27 @@ class _AssistantScreenState extends State<AssistantScreen>
     tools.addAll(McpService.instance.enabledTools);
 
     return tools;
+  }
+
+  Future<void> _stopGeneration() async {
+    await ModelOrchestrator.instance.stopGeneration();
+    if (!mounted) return;
+    final idx = _messages.lastIndexWhere((m) => !m.isUser);
+    if (idx != -1) {
+      final current = _messages[idx].text.trimRight();
+      final withNote = current.contains('⏹ Stopped')
+          ? current
+          : (current.isEmpty ? '⏹ Stopped' : '$current\n\n⏹ Stopped');
+      setState(() {
+        _messages[idx] = _messages[idx].copyWith(
+          text: withNote,
+          isStreaming: false,
+        );
+        _isGenerating = false;
+      });
+    } else {
+      setState(() => _isGenerating = false);
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -2210,11 +2235,16 @@ class _AssistantScreenState extends State<AssistantScreen>
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     child: IconButton(
-                      onPressed: canSend ? _sendMessage : null,
+                      onPressed: _isGenerating
+                          ? _stopGeneration
+                          : (canSend ? _sendMessage : null),
                       icon: Icon(
-                        Icons.send_rounded,
-                        color: canSend ? const Color(0xFF6C63FF) : Colors.grey,
+                        _isGenerating ? Icons.stop_circle : Icons.send_rounded,
+                        color: _isGenerating
+                            ? Colors.redAccent
+                            : (canSend ? const Color(0xFF6C63FF) : Colors.grey),
                       ),
+                      tooltip: _isGenerating ? 'Stop' : 'Send',
                     ),
                   ),
                 ],

@@ -130,6 +130,10 @@ class _AssistantScreenState extends State<AssistantScreen>
       if (mounted && history.isNotEmpty) {
         setState(() => _messages.addAll(history));
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      } else if (mounted) {
+        // Empty main chat — drop any leftover summary from a prior session.
+        ConversationSummaryService.instance.activeSummary = null;
+        ModelOrchestrator.instance.setPendingReplayMessages(const []);
       }
     }
   }
@@ -790,17 +794,18 @@ class _AssistantScreenState extends State<AssistantScreen>
 
   Future<void> _stopGeneration() async {
     await ModelOrchestrator.instance.stopGeneration();
+    // Avoid reusing a half-written MediaPipe session after cancel.
+    ModelOrchestrator.instance.invalidateSessionForReplay(
+      List<ChatMessage>.from(_messages),
+    );
     if (!mounted) return;
     final idx = _messages.lastIndexWhere((m) => !m.isUser);
     if (idx != -1) {
-      final current = _messages[idx].text.trimRight();
-      final withNote = current.contains('⏹ Stopped')
-          ? current
-          : (current.isEmpty ? '⏹ Stopped' : '$current\n\n⏹ Stopped');
+      // Keep model-visible text clean; UI shows stop via wasCancelled.
       setState(() {
         _messages[idx] = _messages[idx].copyWith(
-          text: withNote,
           isStreaming: false,
+          wasCancelled: true,
         );
         _isGenerating = false;
       });
@@ -949,20 +954,38 @@ class _AssistantScreenState extends State<AssistantScreen>
 
         final idx = _messages.indexWhere((m) => m.id == assistantId);
         if (idx != -1) {
-          setState(() {
-            _messages[idx] = _messages[idx].copyWith(
-              text: accumulated,
-              modelName: result.model.displayName,
-              isStreaming: result.isStreaming,
-              isError: false,
-              toolCalls: result.toolCalls != null
-                  ? jsonEncode(result.toolCalls)
-                  : null,
-              thinking: result.thinking,
-              inferenceTimeMs:
-                  result.inferenceTimeMs ?? _messages[idx].inferenceTimeMs,
-            );
-          });
+          final prior = _messages[idx];
+          // After Stop, keep wasCancelled and do not replace with empty /
+          // stale-session warnings from a cancelled stream.
+          if (prior.wasCancelled &&
+              !result.isStreaming &&
+              accumulated.trim().isEmpty) {
+            setState(() {
+              _messages[idx] = prior.copyWith(
+                isStreaming: false,
+                wasCancelled: true,
+                modelName: result.model.displayName,
+                inferenceTimeMs:
+                    result.inferenceTimeMs ?? prior.inferenceTimeMs,
+              );
+            });
+          } else {
+            setState(() {
+              _messages[idx] = prior.copyWith(
+                text: accumulated,
+                modelName: result.model.displayName,
+                isStreaming: result.isStreaming,
+                isError: false,
+                wasCancelled: prior.wasCancelled,
+                toolCalls: result.toolCalls != null
+                    ? jsonEncode(result.toolCalls)
+                    : null,
+                thinking: result.thinking,
+                inferenceTimeMs:
+                    result.inferenceTimeMs ?? prior.inferenceTimeMs,
+              );
+            });
+          }
           _scrollToBottom();
         }
       }
@@ -1034,6 +1057,63 @@ class _AssistantScreenState extends State<AssistantScreen>
           backgroundColor: Color(0xFF6C63FF),
         ),
       );
+    }
+  }
+
+  Future<void> _showAttachSheet() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(
+                Icons.screenshot_monitor_outlined,
+                color: Colors.white70,
+              ),
+              title: const Text(
+                'Screenshot',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () => Navigator.pop(ctx, 'screenshot'),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: Colors.white70,
+              ),
+              title: const Text(
+                'Gallery',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () => Navigator.pop(ctx, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.attach_file, color: Colors.white70),
+              title: const Text('File', style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(ctx, 'file'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.link, color: Colors.white70),
+              title: const Text('URL', style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(ctx, 'url'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'screenshot':
+        await _captureAndAttachScreenshot();
+      case 'gallery':
+        await _pickImageFromGallery();
+      case 'file':
+        await _pickFile();
+      case 'url':
+        _showUrlDialog();
     }
   }
 
@@ -1511,7 +1591,7 @@ class _AssistantScreenState extends State<AssistantScreen>
 
   Widget _buildAppBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFF0D0D1A),
         border: Border(
@@ -1548,168 +1628,120 @@ class _AssistantScreenState extends State<AssistantScreen>
               ),
             ),
           const SizedBox(width: 8),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  // Thinking mode toggle
-                  Tooltip(
-                    message: 'Thinking mode (show reasoning)',
-                    child: IconButton(
-                      onPressed: () async {
-                        setState(() => _thinkingMode = !_thinkingMode);
-                        final prefs = await SharedPreferences.getInstance();
-                        await prefs.setBool(
-                          'settings_thinking_mode',
-                          _thinkingMode,
-                        );
-                      },
-                      icon: Icon(
-                        Icons.psychology_outlined,
-                        color: _thinkingMode
-                            ? const Color(0xFF6C63FF)
-                            : Colors.grey,
+          // Model picker
+          Tooltip(
+            message: 'Select model',
+            child: GestureDetector(
+              onTap: () => _showModelSelectorSheet(context),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _selectedModel == null
+                          ? Icons.auto_awesome
+                          : Icons.account_tree,
+                      size: 16,
+                      color: const Color(0xFF6C63FF),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _selectedModel?.displayName ?? 'Auto',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
                       ),
                     ),
-                  ),
-
-                  // Model picker - opens bottom sheet
-                  Tooltip(
-                    message: 'Select model',
-                    child: GestureDetector(
-                      onTap: () => _showModelSelectorSheet(context),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: Colors.grey.withValues(alpha: 0.3),
-                          ),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _selectedModel == null
-                                  ? Icons.auto_awesome
-                                  : Icons.account_tree,
-                              size: 16,
-                              color: const Color(0xFF6C63FF),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              _selectedModel?.displayName ?? 'Auto',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                            const Icon(
-                              Icons.arrow_drop_down,
-                              color: Colors.grey,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // Screenshot capture
-                  Tooltip(
-                    message: 'Capture screen',
-                    child: IconButton(
-                      onPressed: _captureAndAttachScreenshot,
-                      icon: const Icon(
-                        Icons.screenshot_monitor_outlined,
-                        color: Colors.grey,
-                      ),
-                    ),
-                  ),
-
-                  // Conversation export
-                  PopupMenuButton<String>(
-                    tooltip: 'Export conversation',
-                    onSelected: (format) async {
-                      final content = format == 'text'
-                          ? await ChatHistoryService.exportAsText()
-                          : await ChatHistoryService.exportAsJson();
-                      if (!mounted) return;
-                      if (content == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Nothing to export')),
-                        );
-
-                        return;
-                      }
-
-                      final fileName = format == 'text'
-                          ? 'nova_export.txt'
-                          : 'nova_export.json';
-                      await ExportService.instance.shareText(content, fileName);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Share sheet opened'),
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem<String>(
-                        value: 'text',
-                        child: Text('Export as Text'),
-                      ),
-                      const PopupMenuItem<String>(
-                        value: 'json',
-                        child: Text('Export as JSON'),
-                      ),
-                    ],
-                    child: const Tooltip(
-                      message: 'Export conversation',
-                      child: Icon(Icons.download_outlined, color: Colors.grey),
-                    ),
-                  ),
-
-                  // Compact context
-                  IconButton(
-                    onPressed: _isGenerating ? null : _manualCompact,
-                    icon: const Icon(Icons.compress, color: Colors.grey),
-                    tooltip: 'Compact context',
-                  ),
-
-                  // Chat history
-                  IconButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => const ChatHistoryScreen(),
-                      ),
-                    ),
-                    icon: const Icon(Icons.history, color: Colors.grey),
-                    tooltip: 'Chat history',
-                  ),
-
-                  // Settings
-                  IconButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => const SettingsScreen(),
-                      ),
-                    ),
-                    icon: const Icon(
-                      Icons.settings_outlined,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ],
+                    const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                  ],
+                ),
               ),
             ),
+          ),
+          const Spacer(),
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => const ChatHistoryScreen(),
+              ),
+            ),
+            icon: const Icon(Icons.history, color: Colors.grey),
+            tooltip: 'Chat history',
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            onSelected: (value) async {
+              switch (value) {
+                case 'thinking':
+                  setState(() => _thinkingMode = !_thinkingMode);
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('settings_thinking_mode', _thinkingMode);
+                case 'export_text':
+                case 'export_json':
+                  final content = value == 'export_text'
+                      ? await ChatHistoryService.exportAsText()
+                      : await ChatHistoryService.exportAsJson();
+                  if (!mounted) return;
+                  if (content == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Nothing to export')),
+                    );
+
+                    return;
+                  }
+                  await ExportService.instance.shareText(
+                    content,
+                    value == 'export_text'
+                        ? 'nova_export.txt'
+                        : 'nova_export.json',
+                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Share sheet opened'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                case 'compact':
+                  if (!_isGenerating) await _manualCompact();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'thinking',
+                child: Text(
+                  _thinkingMode ? 'Thinking mode: On' : 'Thinking mode: Off',
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'export_text',
+                child: Text('Export as Text'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'export_json',
+                child: Text('Export as JSON'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'compact',
+                child: Text('Compact context'),
+              ),
+            ],
+            child: const Icon(Icons.more_vert, color: Colors.grey),
+          ),
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
+            ),
+            icon: const Icon(Icons.settings_outlined, color: Colors.grey),
+            tooltip: 'Settings',
           ),
         ],
       ),
@@ -2145,30 +2177,9 @@ class _AssistantScreenState extends State<AssistantScreen>
               Row(
                 children: [
                   IconButton(
-                    onPressed: _captureAndAttachScreenshot,
-                    icon: const Icon(
-                      Icons.screenshot_monitor_outlined,
-                      color: Colors.grey,
-                    ),
-                    tooltip: 'Attach screenshot',
-                  ),
-                  IconButton(
-                    onPressed: _pickImageFromGallery,
-                    icon: const Icon(
-                      Icons.photo_library_outlined,
-                      color: Colors.grey,
-                    ),
-                    tooltip: 'Attach from gallery',
-                  ),
-                  IconButton(
-                    onPressed: _pickFile,
+                    onPressed: _showAttachSheet,
                     icon: const Icon(Icons.attach_file, color: Colors.grey),
-                    tooltip: 'Attach file',
-                  ),
-                  IconButton(
-                    onPressed: _showUrlDialog,
-                    icon: const Icon(Icons.link, color: Colors.grey),
-                    tooltip: 'Attach URL',
+                    tooltip: 'Attach',
                   ),
                   const Spacer(),
                   IconButton(

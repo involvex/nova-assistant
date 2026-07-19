@@ -88,10 +88,11 @@ class ToolCallParser {
     return {'name': name, 'args': args};
   }
 
-  /// Removes tool-call markup so it is not shown in the chat UI.
+  /// Removes tool-call markup and chat-template tokens from assistant text.
   ///
   /// Also strips incomplete/in-progress tool markup so streaming tokens do not
-  /// flicker raw `<|tool_call>...` into the bubble.
+  /// flicker raw `<|tool_call>...` into the bubble. Strips ChatML / Gemma turn
+  /// markers that small models often leak into the visible reply.
   static String stripMarkup(String text) {
     var out = text;
     out = out.replaceAll(
@@ -101,6 +102,26 @@ class ToolCallParser {
       ),
       '',
     );
+    // ChatML: <|im_start|>role ... <|im_end|> (role may follow the tag)
+    out = out.replaceAll(
+      RegExp(
+        r'<\|im_start\|>\s*(system|user|assistant)?\s*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    out = out.replaceAll(RegExp(r'<\|im_end\|>', caseSensitive: false), '');
+    // Gemma / MediaPipe turn markers
+    out = out.replaceAll(
+      RegExp(
+        r'<start_of_turn>\s*(system|user|model|assistant)?\s*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    out = out.replaceAll(RegExp(r'<end_of_turn>', caseSensitive: false), '');
+    // Orphan special-token leftovers
+    out = out.replaceAll(RegExp(r'<\|[^|>]{0,32}\|>'), '');
     out = out.replaceAll(RegExp(r'<\|?"?\|>'), '');
     out = out.replaceAll(RegExp(r'[ \t]+\n'), '\n');
     out = out.replaceAll(RegExp(r'\n{3,}'), '\n\n');

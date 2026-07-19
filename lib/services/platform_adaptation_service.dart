@@ -315,9 +315,9 @@ class PlatformAdaptationService {
 
   /// Onboarding / default model for device RAM class.
   ///
-  /// Free RAM alone is unreliable: a wiped POCO F1 (6 GB total) can report
-  /// >1800 MB free at boot and wrongly recommend Gemma 4, which then fails to
-  /// load once the system fills. Prefer **total RAM** for onboarding.
+  /// ≤6.5 GB devices never get Gemma 4 (OOM risk even when free RAM looks
+  /// high at boot). Prefer Gemma 3 1B when free RAM can load it; only fall
+  /// back to SmolLM when free RAM is truly starved.
   Future<NovaModel> recommendModelForDevice() async {
     if (kIsWeb) return NovaModel.smollm;
     if (defaultTargetPlatform != TargetPlatform.android) {
@@ -329,9 +329,10 @@ class PlatformAdaptationService {
     final total = await mem.readTotalMemMb();
 
     // ≤6.5 GB class (POCO F1 6 GB, etc.): never onboard Gemma 4.
-    // Fresh reboot can show plenty of free RAM and still OOM on load.
     if (total != null && total < 6656) {
-      return NovaModel.smollm;
+      if (avail != null && avail < 700) return NovaModel.smollm;
+
+      return NovaModel.gemma3_1b;
     }
 
     if (avail == null) return NovaModel.gemma3_1b;
@@ -345,14 +346,19 @@ class PlatformAdaptationService {
   String? freeRamGateMessage({
     required NovaModel model,
     required int? availMemMb,
+    int? totalMemMb,
   }) {
     final minFree = minFreeRamMbFor(model);
     if (minFree == null || availMemMb == null) return null;
     if (availMemMb >= minFree) return null;
 
+    final totalPart = totalMemMb != null ? ' of ~$totalMemMb MB total' : '';
+    final suggestGemma3 = model.sizeMB >= 2000;
+
     return 'Not enough free RAM to load ${model.displayName} '
-        '($availMemMb MB free, need ~$minFree MB). '
-        'Close background apps or switch to SmolLM / Gemma 3 1B.';
+        '($availMemMb MB free$totalPart, need ~$minFree MB free). '
+        'Close background apps'
+        '${suggestGemma3 ? ', or switch to Gemma 3 1B' : ''}.';
   }
 
   /// Async hard gate using [MemoryDiagnosticsService] free-RAM reading.
@@ -360,9 +366,15 @@ class PlatformAdaptationService {
     final minFree = minFreeRamMbFor(model);
     if (minFree == null) return null;
 
-    final avail = await MemoryDiagnosticsService.instance.readAvailableMemMb();
+    final mem = MemoryDiagnosticsService.instance;
+    final avail = await mem.readAvailableMemMb();
+    final total = await mem.readTotalMemMb();
 
-    return freeRamGateMessage(model: model, availMemMb: avail);
+    return freeRamGateMessage(
+      model: model,
+      availMemMb: avail,
+      totalMemMb: total,
+    );
   }
 
   /// Max parallel chat sessions for the current platform.

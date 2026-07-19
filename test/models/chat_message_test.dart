@@ -27,6 +27,7 @@ void main() {
       expect(message.modelName, isNull);
       expect(message.isStreaming, false);
       expect(message.isError, false);
+      expect(message.wasCancelled, false);
     });
 
     test('constructs with all optional fields', () {
@@ -40,12 +41,26 @@ void main() {
         modelName: 'Gemma 4 E2B',
         isStreaming: true,
         isError: true,
+        wasCancelled: true,
       );
 
       expect(fullMessage.imageData, image);
       expect(fullMessage.modelName, 'Gemma 4 E2B');
       expect(fullMessage.isStreaming, true);
       expect(fullMessage.isError, true);
+      expect(fullMessage.wasCancelled, true);
+    });
+
+    test('round-trips wasCancelled in JSON', () {
+      final original = ChatMessage(
+        id: 'c1',
+        text: 'partial',
+        isUser: false,
+        timestamp: testTime,
+        wasCancelled: true,
+      );
+      final restored = ChatMessage.fromJson(original.toJson());
+      expect(restored.wasCancelled, isTrue);
     });
 
     group('copyWith', () {

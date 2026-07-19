@@ -184,6 +184,26 @@ class MemoryService {
     }
   }
 
+  /// Deletes every custom memory entry.
+  static Future<void> clearAllCustomMemories() async {
+    try {
+      final p = await _p;
+      await p.remove(_customMemoriesKey);
+    } catch (e) {
+      debugPrint('MemoryService.clearAllCustomMemories error: $e');
+    }
+  }
+
+  /// Deletes every RAG conversation memory entry.
+  static Future<void> clearConversationMemory() async {
+    try {
+      final p = await _p;
+      await p.remove(_key);
+    } catch (e) {
+      debugPrint('MemoryService.clearConversationMemory error: $e');
+    }
+  }
+
   static Future<String?> retrieveContext(
     String query, {
     String? conversationSummary,

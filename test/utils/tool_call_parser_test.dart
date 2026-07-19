@@ -38,6 +38,20 @@ void main() {
       expect(cleaned.contains('Done'), isTrue);
     });
 
+    test('stripMarkup removes ChatML and Gemma turn markers', () {
+      const raw =
+          '<|im_start|>assistant When learning a language…<|im_end|>\n'
+          '<start_of_turn>model Hello<end_of_turn>';
+      final cleaned = ToolCallParser.stripMarkup(raw);
+
+      expect(cleaned.contains('im_start'), isFalse);
+      expect(cleaned.contains('im_end'), isFalse);
+      expect(cleaned.contains('start_of_turn'), isFalse);
+      expect(cleaned.contains('end_of_turn'), isFalse);
+      expect(cleaned.contains('When learning'), isTrue);
+      expect(cleaned.contains('Hello'), isTrue);
+    });
+
     test('returns null for ordinary prose', () {
       expect(ToolCallParser.parse('Hello, how can I help?'), isNull);
     });

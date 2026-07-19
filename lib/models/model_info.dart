@@ -203,8 +203,13 @@ extension NovaModelExtensions on NovaModel {
 
   String get sizeLabel => '$sizeMB MB';
 
-  /// Catalog capability. Runtime may still refuse tools (e.g. MediaPipe SmolLM).
-  bool get supportsFunctionCalling => this != NovaModel.smollm;
+  /// Catalog capability for native function calling.
+  ///
+  /// LiteRT Gemma 3 1B ignores tools at runtime ("Model does not support
+  /// function calls") — treat as text-tool only so we do not pass empty
+  /// native tools while also skipping the text tool prompt.
+  bool get supportsFunctionCalling =>
+      this != NovaModel.smollm && this != NovaModel.gemma3_1b;
 
   List<String> get capabilityList {
     final list = <String>['Function Calling'];

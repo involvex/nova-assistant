@@ -58,5 +58,33 @@ void main() {
         'com.google.android.youtube',
       );
     });
+
+    test('prefers explicit package id over youtube substring', () {
+      expect(
+        OpenAppIntentParser.tryParsePackage(
+          'open app.revanced.android.youtube',
+        ),
+        'app.revanced.android.youtube',
+      );
+      expect(
+        OpenAppIntentParser.tryParsePackage('öffne app.morphe.android.youtube'),
+        'app.morphe.android.youtube',
+      );
+    });
+
+    test('parses revanced / morphe aliases', () {
+      expect(
+        OpenAppIntentParser.tryParsePackage('open revanced'),
+        'app.revanced.android.youtube',
+      );
+      expect(
+        OpenAppIntentParser.tryParsePackage('open yt revanced'),
+        'app.revanced.android.youtube',
+      );
+      expect(
+        OpenAppIntentParser.tryParsePackage('open morphe'),
+        'app.morphe.android.youtube',
+      );
+    });
   });
 }

@@ -13,13 +13,32 @@ class OpenAppIntentParser {
     caseSensitive: false,
   );
 
+  /// Explicit Android package id (at least 3 dotted segments).
+  static final RegExp packageIdPattern = RegExp(
+    r'\b([a-zA-Z][\w]*(\.[a-zA-Z][\w]*){2,})\b',
+  );
+
   /// Common app aliases → package names.
+  ///
+  /// `browser` / `chrome` use Chrome when installed; open_app falls back via
+  /// package visibility + launcher query for other apps.
   static const Map<String, String> knownApps = {
+    'yt revanced': 'app.revanced.android.youtube',
+    'youtube revanced': 'app.revanced.android.youtube',
+    'revanced youtube': 'app.revanced.android.youtube',
+    'revanced': 'app.revanced.android.youtube',
+    'morphe youtube': 'app.morphe.android.youtube',
+    'morphe': 'app.morphe.android.youtube',
     'youtube': 'com.google.android.youtube',
     'yt': 'com.google.android.youtube',
     'settings': 'com.android.settings',
     'einstellungen': 'com.android.settings',
+    'chrome canary': 'com.chrome.canary',
+    'chrome beta': 'com.chrome.beta',
+    'chrome dev': 'com.chrome.dev',
     'chrome': 'com.android.chrome',
+    'browser': 'com.android.chrome',
+    'google chrome': 'com.android.chrome',
     'maps': 'com.google.android.apps.maps',
     'google maps': 'com.google.android.apps.maps',
     'kamera': 'com.android.camera',
@@ -53,16 +72,34 @@ class OpenAppIntentParser {
     return false;
   }
 
-  /// Returns a package name when [query] clearly asks to open a known app.
+  /// Returns a package id embedded in [query], if any.
+  static String? extractPackageId(String query) {
+    final match = packageIdPattern.firstMatch(query);
+
+    return match?.group(1);
+  }
+
+  /// Returns a package name when [query] clearly asks to open an app.
+  ///
+  /// Explicit package ids always win over aliases (so
+  /// `open app.revanced.android.youtube` is not rewritten to stock YouTube
+  /// just because the string contains "youtube").
   static String? tryParsePackage(String query) {
     if (!_hasOpenIntent(query)) return null;
 
-    final lower = query.toLowerCase();
-    // Prefer longer aliases first (e.g. "google maps" before "maps").
+    final explicit = extractPackageId(query);
+    if (explicit != null) return explicit;
+
+    final lower = _normalize(query);
+    // Prefer longer aliases first (e.g. "yt revanced" before "yt").
     final aliases = knownApps.keys.toList()
       ..sort((a, b) => b.length.compareTo(a.length));
     for (final alias in aliases) {
-      if (lower.contains(alias)) {
+      final pattern = RegExp(
+        '\\b${RegExp.escape(alias)}\\b',
+        caseSensitive: false,
+      );
+      if (pattern.hasMatch(lower)) {
         return knownApps[alias];
       }
     }

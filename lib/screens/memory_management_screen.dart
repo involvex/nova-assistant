@@ -134,6 +134,38 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen> {
     }
   }
 
+  Future<void> _deleteAllMemories() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text(
+          'Delete all memories?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'This removes every custom memory. Cannot be undone.',
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete all'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await MemoryService.clearAllCustomMemories();
+      await _loadMemories();
+    }
+  }
+
   Future<void> _deleteMemory(String id) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -176,6 +208,12 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen> {
         backgroundColor: const Color(0xFF0D0D1A),
         elevation: 0,
         actions: [
+          if (_memories.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep_outlined),
+              onPressed: _deleteAllMemories,
+              tooltip: 'Delete all',
+            ),
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () => _showAddEditDialog(),
@@ -188,13 +226,6 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen> {
           : _memories.isEmpty
           ? _buildEmptyState()
           : _buildMemoryList(),
-      floatingActionButton: _memories.isNotEmpty
-          ? FloatingActionButton(
-              onPressed: () => _showAddEditDialog(),
-              backgroundColor: const Color(0xFF6C63FF),
-              child: const Icon(Icons.add),
-            )
-          : null,
     );
   }
 
@@ -246,77 +277,98 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen> {
   }
 
   Widget _memoryCard(Map<String, dynamic> memory) {
+    final id = memory['id'] as String? ?? '';
     final createdAtStr = memory['createdAt'] as String? ?? '';
     final createdAt = DateTime.tryParse(createdAtStr);
     final dateStr = createdAt != null
         ? '${createdAt.day}/${createdAt.month}/${createdAt.year}'
         : '';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A2E),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+    return Dismissible(
+      key: Key(id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFF6B6B).withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.delete_outline, color: Color(0xFFFF6B6B)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    memory['title'] as String? ?? '',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+      confirmDismiss: (_) async {
+        await MemoryService.deleteCustomMemory(id);
+        await _loadMemories();
+
+        return false;
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A2E),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      memory['title'] as String? ?? '',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.edit_outlined,
-                    color: Colors.grey[500],
-                    size: 20,
+                  IconButton(
+                    icon: Icon(
+                      Icons.edit_outlined,
+                      color: Colors.grey[500],
+                      size: 20,
+                    ),
+                    onPressed: () => _showAddEditDialog(memory: memory),
+                    tooltip: 'Edit',
                   ),
-                  onPressed: () => _showAddEditDialog(memory: memory),
-                  tooltip: 'Edit',
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.delete_outline,
-                    color: Colors.red[400],
-                    size: 20,
+                  IconButton(
+                    icon: Icon(
+                      Icons.delete_outline,
+                      color: Colors.red[400],
+                      size: 20,
+                    ),
+                    onPressed: () => _deleteMemory(id),
+                    tooltip: 'Delete',
                   ),
-                  onPressed: () => _deleteMemory(memory['id'] as String),
-                  tooltip: 'Delete',
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Text(
-              memory['content'] as String? ?? '',
-              style: TextStyle(
-                color: Colors.grey[400],
-                fontSize: 14,
-                height: 1.4,
+                ],
               ),
             ),
-          ),
-          if (dateStr.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Text(
-                'Added $dateStr',
-                style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                memory['content'] as String? ?? '',
+                style: TextStyle(
+                  color: Colors.grey[400],
+                  fontSize: 14,
+                  height: 1.4,
+                ),
               ),
             ),
-        ],
+            if (dateStr.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text(
+                  'Added $dateStr',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

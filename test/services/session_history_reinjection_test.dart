@@ -111,5 +111,108 @@ void main() {
       expect(replay.length, 1);
       expect(replay.first.hasImage, isTrue);
     });
+
+    test('skips cancelled and stop-only turns', () {
+      final input = [
+        ChatMessage(
+          id: '1',
+          text: 'search the web',
+          isUser: true,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+        ChatMessage(
+          id: '2',
+          text: 'partial…',
+          isUser: false,
+          timestamp: DateTime(2026, 1, 1),
+          wasCancelled: true,
+        ),
+        ChatMessage(
+          id: '3',
+          text: '⏹ Stopped',
+          isUser: false,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+        ChatMessage(
+          id: '4',
+          text: 'did I ask you that',
+          isUser: true,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+        ChatMessage(
+          id: '5',
+          text: 'No, you asked about search.',
+          isUser: false,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+      ];
+
+      final replay = SessionHistoryReinjection.buildReplayMessages(
+        input,
+        maxTokens: 10_000,
+      );
+
+      expect(replay.length, 3);
+      expect(replay[0].text, 'search the web');
+      expect(replay[1].text, 'did I ask you that');
+      expect(replay[2].text, 'No, you asked about search.');
+    });
+
+    test('sanitizes ChatML before reinjection', () {
+      final input = [
+        ChatMessage(
+          id: '1',
+          text: 'hi',
+          isUser: true,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+        ChatMessage(
+          id: '2',
+          text: '<|im_start|>assistant Hello there<|im_end|>',
+          isUser: false,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+      ];
+
+      final replay = SessionHistoryReinjection.buildReplayMessages(
+        input,
+        maxTokens: 10_000,
+      );
+
+      expect(replay.length, 2);
+      expect(replay[1].text.contains('im_start'), isFalse);
+      expect(replay[1].text.contains('Hello there'), isTrue);
+    });
+
+    test('drops leading orphan assistant after budget trim', () {
+      final input = [
+        ChatMessage(
+          id: 'a',
+          text: 'orphan assistant',
+          isUser: false,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+        ChatMessage(
+          id: 'u',
+          text: 'user turn',
+          isUser: true,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+        ChatMessage(
+          id: 'r',
+          text: 'reply',
+          isUser: false,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+      ];
+
+      final replay = SessionHistoryReinjection.buildReplayMessages(
+        input,
+        maxTokens: 10_000,
+      );
+
+      expect(replay.first.isUser, isTrue);
+      expect(replay.first.text, 'user turn');
+    });
   });
 }

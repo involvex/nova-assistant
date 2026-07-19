@@ -111,19 +111,32 @@ void main() {
       expect(service.getWebStorageRecommendation(3000), 'native');
     });
 
-    test('getRecommendedWebModel returns appropriate model', () {
+    test(
+      'freeRamGateMessage mentions free RAM and Gemma 3 for large models',
+      () {
+        final service = PlatformAdaptationService.instance;
+        final msg = service.freeRamGateMessage(
+          model: NovaModel.gemma4E2b,
+          availMemMb: 1200,
+          totalMemMb: 5734,
+        );
+
+        expect(msg, isNotNull);
+        expect(msg!.toLowerCase(), contains('free ram'));
+        expect(msg, contains('1200'));
+        expect(msg, contains('5734'));
+        expect(msg, contains('Gemma 3'));
+      },
+    );
+
+    test('freeRamGateMessage is null when enough free RAM', () {
       final service = PlatformAdaptationService.instance;
-
-      // On native, should return best model for requirements
-      expect(
-        service.getRecommendedWebModel(),
-        anyOf(equals(NovaModel.smollm), equals(NovaModel.gemma4E2b)),
+      final msg = service.freeRamGateMessage(
+        model: NovaModel.gemma3_1b,
+        availMemMb: 900,
       );
 
-      expect(
-        service.getRecommendedWebModel(needsVision: true),
-        anyOf(equals(NovaModel.fastvlm), equals(NovaModel.gemma4E2b)),
-      );
+      expect(msg, isNull);
     });
   });
 }

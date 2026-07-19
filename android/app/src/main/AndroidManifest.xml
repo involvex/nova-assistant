@@ -16,6 +16,13 @@
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <queries>
+        <!-- See all launchable apps for open_app (Android 11+ package visibility).
+             Without this, getLaunchIntentForPackage returns null for most apps
+             (ReVanced, etc.) while browsers still work via VIEW https. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
@@ -23,6 +30,9 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.WEB_SEARCH" />
         </intent>
         <intent>
             <action android:name="android.intent.action.SET_ALARM" />

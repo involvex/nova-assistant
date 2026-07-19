@@ -35,6 +35,7 @@ import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/generation_safety.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/utils/open_app_intent_parser.dart';
+import 'package:nova_assistant/utils/search_web_intent_parser.dart';
 import 'package:nova_assistant/utils/tool_call_parser.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/session_history_reinjection.dart';
@@ -162,6 +163,10 @@ class ModelOrchestrator {
     modelId: RemoteInferenceConfig.defaultModelId,
   );
   List<ChatMessage> _pendingReplay = const [];
+
+  /// Fingerprint of the last createChat (tools / RAG / adult / model).
+  /// When it changes, the warm session is dropped so system+tools refresh.
+  String? _lastChatSessionKey;
   bool _debugMode = false;
   bool _isReleasing = false; // Guard against concurrent release operations
   Completer<void>? _releaseCompleter; // Signals when release is complete
@@ -170,6 +175,9 @@ class ModelOrchestrator {
   bool _isLoadingModel = false;
   Completer<void>? _streamingCompleter;
   Completer<void>? _inferenceLock;
+
+  /// Set when the user taps Stop; cleared at the start of each turn.
+  bool _generationCancelledByUser = false;
 
   /// Bumped on each load attempt / timeout so late [getActiveModel] completions
   /// after [.timeout] cannot be assigned or silently reused.
@@ -254,6 +262,7 @@ class ModelOrchestrator {
   void invalidateSessionForReplay(List<ChatMessage> messages) {
     _pendingReplay = List<ChatMessage>.from(messages);
     _activeChat = null;
+    _lastChatSessionKey = null;
     // #region agent log
     unawaited(
       AgentDebugLog.log(
@@ -389,6 +398,7 @@ class ModelOrchestrator {
 
   /// User-facing cancel: abort the token stream and ask the native session to stop.
   Future<void> stopGeneration() async {
+    _generationCancelledByUser = true;
     if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
       _streamingCompleter!.complete();
     }
@@ -611,10 +621,9 @@ class ModelOrchestrator {
     bool hasImage = false,
     bool forcePrimaryModel = false,
   }) {
-    if (forcePrimaryModel && _preferredCustomModelOverride == null) {
-      return selector.primaryHeavy;
-    }
-    if (_modelOverrideDirty && _preferredModelOverride != null) {
+    // Catalog preferred wins over Auto forcePrimary (same as processMessage).
+    if (_preferredModelOverride != null &&
+        _preferredCustomModelOverride == null) {
       var model = _preferredModelOverride!;
       if (hasImage && !model.hasVision) {
         model = selector.primaryHeavy.hasVision
@@ -624,8 +633,8 @@ class ModelOrchestrator {
 
       return model;
     }
-    if (_preferredModelOverride != null && !_modelOverrideDirty) {
-      return _preferredModelOverride!;
+    if (forcePrimaryModel && _preferredCustomModelOverride == null) {
+      return selector.primaryHeavy;
     }
 
     return _selectModel(
@@ -759,6 +768,42 @@ class ModelOrchestrator {
     return tools;
   }
 
+  /// When Auto lands on SmolLM but the turn has tools and Gemma 3 fits free
+  /// RAM, escalate so function calling actually works.
+  Future<NovaModel> _maybeEscalateForTools({
+    required NovaModel model,
+    required List<Tool> tools,
+  }) async {
+    if (tools.isEmpty) return model;
+    if (model.supportsFunctionCalling && model != NovaModel.smollm) {
+      return model;
+    }
+    // Respect an explicit pin to SmolLM / non-FC model.
+    if (_preferredModelOverride != null) return model;
+
+    final block = await PlatformAdaptationService.instance.checkCanLoadModel(
+      NovaModel.gemma3_1b,
+    );
+    if (block != null) return model;
+
+    _statusController.add('Using Gemma 3 1B for tools');
+
+    return NovaModel.gemma3_1b;
+  }
+
+  String _chatSessionKey({
+    required NovaModel model,
+    required List<Tool> chatTools,
+    required bool hasRag,
+    required bool hasAttachments,
+    required bool textToolPrompt,
+  }) {
+    final toolNames = chatTools.map((t) => t.name).join(',');
+
+    return '${model.name}|$toolNames|rag=$hasRag|att=$hasAttachments|'
+        'adult=$_adultModeEnabled|ttp=$textToolPrompt';
+  }
+
   /// Stops generation, closes the engine, and clears native identity.
   Future<void> resetInferenceSession() async {
     _idleTimer?.cancel();
@@ -770,6 +815,7 @@ class ModelOrchestrator {
       debugPrint('resetInferenceSession: chat close failed: $e');
     }
     _activeChat = null;
+    _lastChatSessionKey = null;
     await _teardownPartialLoad();
     _isStreaming = false;
     _isLoadingModel = false;
@@ -945,10 +991,13 @@ class ModelOrchestrator {
         throw ModelException(
           ramBlock,
           model: modelToLoad,
-          suggestion:
-              'Your selected model is pinned for this session. Free RAM, '
-              'use Settings → Reset inference, or pick a smaller model — '
-              'Nova will not silently switch to SmolLM.',
+          suggestion: modelToLoad.sizeMB >= 2000
+              ? 'Your selected model is pinned. Free RAM, switch to Gemma 3 1B '
+                    'in the model picker, or use Settings → Reset inference. '
+                    'Nova will not silently switch to SmolLM.'
+              : 'Your selected model is pinned for this session. Free RAM, '
+                    'use Settings → Reset inference, or pick a smaller model — '
+                    'Nova will not silently switch to SmolLM.',
         );
       }
       final fallback = await _pickRamFallback(modelToLoad);
@@ -1243,11 +1292,10 @@ class ModelOrchestrator {
 
   /// Pick a smaller model that fits free RAM.
   ///
-  /// Prefers models already on disk (no download), then SmolLM (tiny download)
-  /// before Gemma 3 1B. Avoids falling back to a missing mid-size model while
-  /// the device only has Gemma 4 installed (POCO F1).
+  /// Prefers Gemma 3 1B when it fits (better quality / tools), then SmolLM.
+  /// Prefers models already on disk (no download) within that order.
   Future<NovaModel?> _pickRamFallback(NovaModel blocked) async {
-    const candidates = <NovaModel>[NovaModel.smollm, NovaModel.gemma3_1b];
+    const candidates = <NovaModel>[NovaModel.gemma3_1b, NovaModel.smollm];
     NovaModel? firstDownloadable;
 
     for (final candidate in candidates) {
@@ -1888,6 +1936,7 @@ class ModelOrchestrator {
     }
 
     await _acquireInferenceLock();
+    _generationCancelledByUser = false;
 
     try {
       // Deterministic alarm shortcut: parse clock times and call set_alarm
@@ -1925,7 +1974,7 @@ class ModelOrchestrator {
         return;
       }
 
-      // Deterministic open-app shortcut (YouTube, Settings, etc.).
+      // Deterministic open-app shortcut (YouTube, Settings, browser, etc.).
       final openPackage = OpenAppIntentParser.tryParsePackage(query);
       if (openPackage != null) {
         _statusController.add('Opening app...');
@@ -1941,6 +1990,30 @@ class ModelOrchestrator {
             {
               'name': 'open_app',
               'args': {'package': openPackage},
+              'result': result,
+            },
+          ],
+        );
+        return;
+      }
+
+      // Deterministic web-search shortcut — avoids Gemma looping on old RAG
+      // topics like Twitch when the user only asked to search.
+      final searchTerm = SearchWebIntentParser.tryParse(query);
+      if (searchTerm != null) {
+        _statusController.add('Searching the web...');
+        final result = await ToolExecutorService.instance.searchWeb(searchTerm);
+        final ok = result['success'] == true;
+        yield InferenceResult(
+          text: ok
+              ? 'Opened web search for "$searchTerm".'
+              : 'Could not search: ${result['error'] ?? 'unknown error'}',
+          model: selector.primaryHeavy,
+          isStreaming: false,
+          toolCalls: [
+            {
+              'name': 'search_web',
+              'args': {'query': searchTerm},
               'result': result,
             },
           ],
@@ -2003,16 +2076,9 @@ class ModelOrchestrator {
         );
       }
 
-      // Force primary model when requested - ensures heavy model is used for
-      // reliability-critical scenarios like assistant mode
-      if (forcePrimaryModel && _preferredCustomModelOverride == null) {
-        model = selector.primaryHeavy;
-        if (_debugMode) {
-          _statusController.add(
-            '[DEBUG] Force Primary Model: ${model.displayName}',
-          );
-        }
-      } else if (_preferredCustomModelOverride != null) {
+      // Catalog preferred / custom pin wins over Auto forcePrimary so a user
+      // who selected Gemma 3 is not silently forced onto primaryHeavy (SmolLM).
+      if (_preferredCustomModelOverride != null) {
         // Custom model selected - use it directly (bypasses NovaModel selection)
         // Return early with custom model loading path
         yield* _processWithCustomModel(
@@ -2037,6 +2103,13 @@ class ModelOrchestrator {
               : selector.fastModel;
           _statusController.add(
             'Auto-switched to ${model.displayName} for image input',
+          );
+        }
+      } else if (forcePrimaryModel) {
+        model = selector.primaryHeavy;
+        if (_debugMode) {
+          _statusController.add(
+            '[DEBUG] Force Primary Model: ${model.displayName}',
           );
         }
       } else {
@@ -2089,6 +2162,10 @@ class ModelOrchestrator {
       );
       // #endregion
 
+      if (tools.isNotEmpty) {
+        model = await _maybeEscalateForTools(model: model, tools: tools);
+      }
+
       if (_debugMode) {
         _statusController.add(
           '[DEBUG] Selected model: ${model.displayName} '
@@ -2136,14 +2213,28 @@ class ModelOrchestrator {
       // SmolLM has no FC and cannot absorb tool essays in a tiny KV window.
       final textToolPrompt =
           model != NovaModel.smollm && chatTools.isEmpty && tools.isNotEmpty;
-      final wasNull = _activeChat == null;
-      final pendingCount = _pendingReplay.length;
       final systemInstruction = await _systemPromptFor(
         model,
         ragContext,
         _capContextInjection(attachmentContext),
         textToolPrompt ? tools : null,
       );
+      final sessionKey = _chatSessionKey(
+        model: model,
+        chatTools: chatTools,
+        hasRag: ragContext.trim().isNotEmpty,
+        hasAttachments: hasExtraContext,
+        textToolPrompt: textToolPrompt,
+      );
+      // Warm sessions ignore new systemInstruction / tools — recreate when
+      // the fingerprint changes so RAG / adult / tools stay in sync.
+      if (_activeChat != null &&
+          _lastChatSessionKey != null &&
+          _lastChatSessionKey != sessionKey) {
+        _activeChat = null;
+      }
+      final wasNull = _activeChat == null;
+      final pendingCount = _pendingReplay.length;
       // #region agent log
       await AgentDebugLog.log(
         hypothesisId: 'A',
@@ -2160,6 +2251,7 @@ class ModelOrchestrator {
           'systemPromptLen': systemInstruction.length,
           'textToolPrompt': textToolPrompt,
           'adultMode': _adultModeEnabled,
+          'sessionKeyChanged': wasNull && _lastChatSessionKey != sessionKey,
         },
         runId: 'post-fix',
       );
@@ -2174,6 +2266,7 @@ class ModelOrchestrator {
           tools: chatTools,
           supportImage: model.hasVision && _activeModelSupportsImage,
         );
+        _lastChatSessionKey = sessionKey;
         if (wasNull && _pendingReplay.isNotEmpty) {
           final rawBudget = (_tokenLimitFor(model) * _contextBudgetRatio)
               .round();
@@ -2538,6 +2631,25 @@ class ModelOrchestrator {
 
       inferenceStopwatch.stop();
       fullResponse = _sanitizeAssistantText(fullResponse);
+      final userCancelled = _generationCancelledByUser;
+      _generationCancelledByUser = false;
+
+      // User stop with 0 tokens: UI already marked wasCancelled — do not
+      // overwrite with a scary "empty response / stale session" warning.
+      if (fullResponse.trim().isEmpty && userCancelled) {
+        _activeChat = null;
+        _lastChatSessionKey = null;
+        yield InferenceResult(
+          text: '',
+          model: model,
+          isStreaming: false,
+          thinking: thinkingMode ? currentThinking : null,
+          inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
+        );
+
+        return;
+      }
+
       final reply = fullResponse.trim().isEmpty
           ? '⚠️ Model returned an empty response. '
                 'Edit/regenerate may have left a stale session — try once more, '
@@ -2552,6 +2664,9 @@ class ModelOrchestrator {
           data: {'model': model.name, 'toolRounds': toolRounds},
           runId: 'post-fix',
         );
+        // Drop polluted session so the next turn recreates cleanly.
+        _activeChat = null;
+        _lastChatSessionKey = null;
       }
       // #endregion
       yield InferenceResult(
@@ -2881,8 +2996,12 @@ class ModelOrchestrator {
         'lack device access. '
         'Use exact tool names only ($listed). Never invent names like '
         'google_search. '
-        'open_app packages: com.google.android.youtube, com.android.settings, '
-        'com.android.chrome. '
+        'open_app: if the user types a full package id '
+        '(e.g. app.revanced.android.youtube), use that exact package — '
+        'do not substitute com.google.android.youtube. '
+        'Aliases: youtube→com.google.android.youtube, '
+        'revanced/morphe→app.revanced.android.youtube, '
+        'settings→com.android.settings, chrome→com.android.chrome. '
         'If you must emit text instead of native function calling, reply with '
         'only JSON like '
         '{"name":"search_web","arguments":{"query":"Missypwns twitch"}}.';
@@ -3015,7 +3134,10 @@ class ModelOrchestrator {
       _streamingCompleter!.complete();
     }
     _activeChat = null;
+    _lastChatSessionKey = null;
+    _pendingReplay = const [];
     _activeModelSupportsImage = false;
+    ConversationSummaryService.instance.activeSummary = null;
     // Keep preferred / custom model pinned across history wipe.
     await ChatHistoryService.clear();
     _historyClearedController.add(null);

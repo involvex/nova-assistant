@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
-
 class ChatMessage {
   final String id;
   final String text;
@@ -12,6 +10,10 @@ class ChatMessage {
   final String? modelName;
   final bool isStreaming;
   final bool isError;
+
+  /// True when the user stopped generation; UI may show a stop note without
+  /// putting that note into [text] (so reinjection stays clean).
+  final bool wasCancelled;
   final String? thinking;
   final String? toolCalls;
   final int? inferenceTimeMs;
@@ -26,6 +28,7 @@ class ChatMessage {
     this.modelName,
     this.isStreaming = false,
     this.isError = false,
+    this.wasCancelled = false,
     this.thinking,
     this.toolCalls,
     this.inferenceTimeMs,
@@ -41,6 +44,7 @@ class ChatMessage {
     String? modelName,
     bool? isStreaming,
     bool? isError,
+    bool? wasCancelled,
     String? thinking,
     String? toolCalls,
     int? inferenceTimeMs,
@@ -55,6 +59,7 @@ class ChatMessage {
       modelName: modelName ?? this.modelName,
       isStreaming: isStreaming ?? this.isStreaming,
       isError: isError ?? this.isError,
+      wasCancelled: wasCancelled ?? this.wasCancelled,
       thinking: thinking ?? this.thinking,
       toolCalls: toolCalls ?? this.toolCalls,
       inferenceTimeMs: inferenceTimeMs ?? this.inferenceTimeMs,
@@ -71,6 +76,7 @@ class ChatMessage {
     'modelName': modelName,
     'isStreaming': isStreaming,
     'isError': isError,
+    'wasCancelled': wasCancelled,
     'thinking': thinking,
     'toolCalls': toolCalls,
     'inferenceTimeMs': inferenceTimeMs,
@@ -88,6 +94,7 @@ class ChatMessage {
     modelName: json['modelName'] as String?,
     isStreaming: json['isStreaming'] as bool? ?? false,
     isError: json['isError'] as bool? ?? false,
+    wasCancelled: json['wasCancelled'] as bool? ?? false,
     thinking: json['thinking'] as String?,
     toolCalls: json['toolCalls'] as String?,
     inferenceTimeMs: json['inferenceTimeMs'] as int?,

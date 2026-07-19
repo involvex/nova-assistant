@@ -90,7 +90,11 @@ class NovaTools {
         'Open an application on the device. '
         'Use when the user asks to open/launch an app (English or German: '
         'open, launch, öffne, starte). '
-        'Common packages: YouTube=com.google.android.youtube, '
+        'If the user gives a full Android package id '
+        '(e.g. app.revanced.android.youtube), use that exact string — '
+        'never replace it with com.google.android.youtube. '
+        'Aliases when no package is given: YouTube=com.google.android.youtube, '
+        'ReVanced/Morphe YouTube=app.revanced.android.youtube, '
         'Settings=com.android.settings, Chrome=com.android.chrome, '
         'Spotify=com.spotify.music, Maps=com.google.android.apps.maps.',
     parameters: {
@@ -99,7 +103,8 @@ class NovaTools {
         'package': {
           'type': 'string',
           'description':
-              'Android package name, e.g. com.google.android.youtube',
+              'Exact Android package name. Prefer the id the user typed '
+              '(e.g. app.revanced.android.youtube).',
         },
       },
       'required': ['package'],

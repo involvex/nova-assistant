@@ -3,6 +3,8 @@ import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/export_service.dart';
+import 'package:nova_assistant/services/memory_service.dart';
+import 'package:nova_assistant/services/model_orchestrator.dart';
 
 class ChatHistoryScreen extends StatefulWidget {
   const ChatHistoryScreen({super.key});
@@ -119,6 +121,44 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     if (mounted) {
       _openConversation(conversation);
     }
+  }
+
+  Future<void> _deleteAllConversations() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text(
+          'Delete all chats?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'This removes every conversation and clears the live session. '
+          'Cannot be undone.',
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete all'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await ModelOrchestrator.instance.clearHistory();
+    await MemoryService.clearConversationMemory();
+    if (!mounted) return;
+    await _loadConversations();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('All chats and RAG memory cleared')),
+    );
   }
 
   Future<void> _deleteConversation(Conversation conversation) async {
@@ -411,6 +451,14 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
+        actions: [
+          if (_conversations.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep_outlined, color: Colors.grey),
+              tooltip: 'Delete all',
+              onPressed: _deleteAllConversations,
+            ),
+        ],
       ),
       body: Column(
         children: [

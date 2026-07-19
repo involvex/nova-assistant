@@ -33,7 +33,8 @@ void main() {
 
     test('SmolLM does not advertise function calling', () {
       expect(NovaModel.smollm.supportsFunctionCalling, false);
-      expect(NovaModel.gemma3_1b.supportsFunctionCalling, true);
+      // LiteRT Gemma 3 ignores native tools — text-tool path only.
+      expect(NovaModel.gemma3_1b.supportsFunctionCalling, false);
     });
 
     test('enum has exactly 4 values', () {

@@ -453,8 +453,9 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              'Auto uses smart selection based on your query. Vision queries use '
-              'Gemma 4 E2B, short queries use SmolLM for speed.',
+              'Auto always uses your device\'s recommended model '
+              '(Gemma 3 1B on mid-range phones, Gemma 4 when free RAM allows). '
+              'Pick Manual to pin a specific model.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.8),
               ),

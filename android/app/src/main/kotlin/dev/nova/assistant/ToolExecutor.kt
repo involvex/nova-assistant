@@ -133,13 +133,37 @@ object ToolExecutor {
         val packageName = args["package"] as? String
             ?: throw IllegalArgumentException("package name required")
 
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
-            ?: throw IllegalArgumentException("App not found: $packageName")
+        val pm = context.packageManager
+        val launchIntent = resolveLaunchIntent(pm, packageName)
+            ?: throw IllegalArgumentException(
+                "App not found or not launchable: $packageName. " +
+                    "If it is installed, disable \"Pause app if unused\" for it, " +
+                    "or open it once from the launcher.",
+            )
 
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(launchIntent)
 
         return mapOf("success" to true, "opened" to packageName)
+    }
+
+    /** Prefer standard launcher intent; fall back to MAIN/LAUNCHER query. */
+    private fun resolveLaunchIntent(
+        pm: android.content.pm.PackageManager,
+        packageName: String,
+    ): Intent? {
+        pm.getLaunchIntentForPackage(packageName)?.let { return it }
+
+        val main = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            setPackage(packageName)
+        }
+        val activities = pm.queryIntentActivities(main, 0)
+        val first = activities.firstOrNull() ?: return null
+        return Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            setClassName(first.activityInfo.packageName, first.activityInfo.name)
+        }
     }
 
     private fun searchWeb(context: Context, args: Map<*, *>): Map<String, Any> {

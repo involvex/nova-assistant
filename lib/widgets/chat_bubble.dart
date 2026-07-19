@@ -125,7 +125,11 @@ class ChatBubble extends StatelessWidget {
                     // empty") after a failed/empty model turn.
                     if (message.text.trim().isEmpty && !message.isStreaming)
                       Text(
-                        message.isError ? '⚠️ Error' : '…',
+                        message.isError
+                            ? '⚠️ Error'
+                            : message.wasCancelled
+                            ? '⏹ Stopped'
+                            : '…',
                         style: TextStyle(
                           color: isUser
                               ? Colors.white
@@ -137,33 +141,49 @@ class ChatBubble extends StatelessWidget {
                       // selectable:true during token streaming causes
                       // RangeError (selection past length) and
                       // `_dependents.isEmpty` InheritedWidget teardown crashes.
-                      MarkdownBody(
-                        key: ValueKey(
-                          message.isStreaming
-                              ? 'md-stream-${message.id}'
-                              : 'md-${message.id}',
-                        ),
-                        data: message.text,
-                        selectable: !message.isStreaming,
-                        styleSheet: MarkdownStyleSheet(
-                          p: TextStyle(
-                            color: isUser
-                                ? Colors.white
-                                : Colors.white.withValues(alpha: 0.92),
-                            fontSize: 15,
-                            height: 1.5,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          MarkdownBody(
+                            key: ValueKey(
+                              message.isStreaming
+                                  ? 'md-stream-${message.id}'
+                                  : 'md-${message.id}',
+                            ),
+                            data: message.text,
+                            selectable: !message.isStreaming,
+                            styleSheet: MarkdownStyleSheet(
+                              p: TextStyle(
+                                color: isUser
+                                    ? Colors.white
+                                    : Colors.white.withValues(alpha: 0.92),
+                                fontSize: 15,
+                                height: 1.5,
+                              ),
+                              code: TextStyle(
+                                backgroundColor: Colors.black26,
+                                color: Colors.cyan[100],
+                                fontFamily: 'monospace',
+                                fontSize: 13,
+                              ),
+                              codeblockDecoration: BoxDecoration(
+                                color: Colors.black38,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
                           ),
-                          code: TextStyle(
-                            backgroundColor: Colors.black26,
-                            color: Colors.cyan[100],
-                            fontFamily: 'monospace',
-                            fontSize: 13,
-                          ),
-                          codeblockDecoration: BoxDecoration(
-                            color: Colors.black38,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
+                          if (message.wasCancelled)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                '⏹ Stopped',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.45),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                   ],
                 ),

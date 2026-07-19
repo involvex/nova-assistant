@@ -159,9 +159,9 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
       if (!mounted) return;
 
       if (customModel != null) {
-        widget.onInstalled?.call(customModel);
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
+        final messenger = ScaffoldMessenger.of(context);
+        Navigator.pop(context, customModel);
+        messenger.showSnackBar(
           SnackBar(
             content: Text('Imported: ${customModel.displayName}'),
             backgroundColor: Colors.green,

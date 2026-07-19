@@ -136,6 +136,21 @@ class ModelHuggingFaceURLs {
     }
   }
 
+  /// Gemma repos are gated on HuggingFace and return 401 without a token.
+  static bool requiresHuggingFaceAuth(NovaModel model) {
+    return model == NovaModel.gemma3_1b || model == NovaModel.gemma4E2b;
+  }
+
+  /// True when [url] points at a known gated Gemma asset.
+  static bool urlRequiresHuggingFaceAuth(String url) {
+    final lower = url.toLowerCase();
+
+    return lower.contains('gemma3-1b') ||
+        lower.contains('gemma-4') ||
+        lower.contains('/gemma3') ||
+        lower.contains('/gemma-4');
+  }
+
   static String fileNameFor(NovaModel model) {
     switch (model) {
       case NovaModel.smollm:
@@ -188,7 +203,8 @@ extension NovaModelExtensions on NovaModel {
 
   String get sizeLabel => '$sizeMB MB';
 
-  bool get supportsFunctionCalling => true;
+  /// Catalog capability. Runtime may still refuse tools (e.g. MediaPipe SmolLM).
+  bool get supportsFunctionCalling => this != NovaModel.smollm;
 
   List<String> get capabilityList {
     final list = <String>['Function Calling'];

@@ -193,6 +193,9 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
     setState(() {
       _messages.removeRange(assistantIndex, _messages.length);
     });
+    ModelOrchestrator.instance.invalidateSessionForReplay(
+      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+    );
 
     // Re-send the user message
     _inputController.text = userText;

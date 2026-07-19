@@ -38,16 +38,19 @@
 
 ## Next up (priority order)
 
+Plans: [`docs/superpowers/plans/2026-07-18-README.md`](../docs/superpowers/plans/2026-07-18-README.md)
+
 ### P0 — Hygiene
 
-1. **Soak-test cleanup** — Remove `AGENT_DBG` / ingest helpers after device verification.
+1. **Soak-test cleanup** — Remove `AGENT_DBG` / ingest helpers after device verification (PR #6 / F1). Then bump **0.4.1**.
 
 ### P1 — UX / intelligence
 
-2. Conversation branching from a message  
-3. Share message / chat sheet  
-4. Continuous dictation / audio attach  
+2. **Conversation branching from a message** — [plan](../docs/superpowers/plans/2026-07-18-conversation-branching.md) (ready; implement after greenlight)  
+3. Share message / chat sheet — [stub](../docs/superpowers/plans/2026-07-18-share-sheet-polish.md)  
+4. Continuous dictation / audio attach — [stub](../docs/superpowers/plans/2026-07-18-dictation-audio.md)  
 5. ~~Free-RAM hard gate before Gemma 4 load~~  
+6. Heavy models / image gen — X8 Pro Max soak or [LAN remote](../docs/remote-inference.md); not F1 (see [models.md](../docs/models.md))  
 
 ### P2 — Platform
 

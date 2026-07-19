@@ -250,6 +250,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.dispose();
+    });
   }
 
   Future<void> _loadAppVersion() async {
@@ -1262,6 +1265,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _downloadModel(BuildContext context, NovaModel model) async {
     final url = ModelHuggingFaceURLs.urlFor(model);
+
+    if (ModelHuggingFaceURLs.requiresHuggingFaceAuth(model) &&
+        !await ModelManager.hasHuggingFaceToken()) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Gemma models need a HuggingFace token. Add one in Settings.',
+          ),
+          backgroundColor: Colors.orange[800],
+          action: SnackBarAction(
+            label: 'Add token',
+            textColor: Colors.white,
+            onPressed: () => _showHfTokenDialog(context),
+          ),
+        ),
+      );
+
+      return;
+    }
+
     setState(() => _installStatus = 'Downloading ${model.displayName}...');
 
     // #region agent log

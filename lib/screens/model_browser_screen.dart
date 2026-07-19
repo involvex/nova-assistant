@@ -664,19 +664,19 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
   }
 
   Future<void> _showImportSheet() async {
-    await showModalBottomSheet<void>(
+    final imported = await showModalBottomSheet<CustomModel>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (context) => CustomModelImportSheet(
-        onInstalled: (model) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Imported: ${model.displayName}'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        },
+      builder: (context) => const CustomModelImportSheet(),
+    );
+
+    if (!mounted || imported == null) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Imported: ${imported.displayName}'),
+        backgroundColor: Colors.green,
       ),
     );
   }

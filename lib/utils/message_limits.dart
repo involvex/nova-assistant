@@ -61,7 +61,8 @@ class MessageLimits {
   static int kvTokenLimitFor(NovaModel model, {bool highContext = false}) {
     switch (model) {
       case NovaModel.smollm:
-        return 512;
+        // Match ekv1280 asset headroom; 512 starved system+history → OUT_OF_RANGE.
+        return 1024;
       case NovaModel.fastvlm:
         return 1024;
       case NovaModel.gemma3_1b:

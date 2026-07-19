@@ -31,6 +31,7 @@ import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
 import 'package:nova_assistant/services/follow_up_suggestion_service.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
+import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/widgets/suggestion_chip.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -430,7 +431,26 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
 
     _inputController.text = text;
-    _sendMessage();
+    unawaited(_sendMessage());
+  }
+
+  /// Whether the query asks about the device screen / a screenshot.
+  bool _wantsDeviceScreen(String query, {required bool hasImage}) {
+    if (hasImage) return false;
+    final q = query.toLowerCase();
+
+    return q.contains('screenshot') ||
+        q.contains('capture the screen') ||
+        q.contains('capture my screen') ||
+        q.contains("what's on my screen") ||
+        q.contains('whats on my screen') ||
+        q.contains('what is on my screen') ||
+        q.contains('on my screen') ||
+        (q.contains('screen') &&
+            (q.contains('look') ||
+                q.contains('see') ||
+                q.contains('show') ||
+                q.contains('what')));
   }
 
   Future<void> _checkModelAvailability() async {
@@ -614,6 +634,9 @@ class _AssistantScreenState extends State<AssistantScreen>
     setState(() {
       _messages.removeRange(errorIndex, _messages.length);
     });
+    ModelOrchestrator.instance.invalidateSessionForReplay(
+      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+    );
 
     // Re-send
     _inputController.text = userText;
@@ -635,6 +658,9 @@ class _AssistantScreenState extends State<AssistantScreen>
     setState(() {
       _messages.removeRange(assistantIndex, _messages.length);
     });
+    ModelOrchestrator.instance.invalidateSessionForReplay(
+      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+    );
 
     // Re-send the user message
     _inputController.text = userText;
@@ -679,15 +705,32 @@ class _AssistantScreenState extends State<AssistantScreen>
         ],
       ),
     );
-    controller.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.dispose();
+    });
     if (result == null || result.isEmpty || !mounted) return;
 
     await TtsService.instance.stop();
+    if (!mounted) return;
     setState(() {
       _messages.removeRange(userIndex, _messages.length);
     });
+    ModelOrchestrator.instance.invalidateSessionForReplay(
+      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+    );
+    // #region agent log
+    unawaited(
+      AgentDebugLog.log(
+        hypothesisId: 'A',
+        location: 'assistant_screen.dart:_editUserMessage',
+        message: 'Edit truncated UI history; session invalidated',
+        data: {'remaining': _messages.length, 'newQueryLen': result.length},
+        runId: 'post-fix',
+      ),
+    );
+    // #endregion
     _inputController.text = result;
-    _sendMessage();
+    unawaited(_sendMessage());
   }
 
   Future<void> _speakMessage(String text) async {
@@ -709,20 +752,7 @@ class _AssistantScreenState extends State<AssistantScreen>
 
     // Only offer screen capture when the user asks for the *device screen*
     // and no image is already attached (gallery / prior capture).
-    final wantsDeviceScreen =
-        !hasImage &&
-        (q.contains('screenshot') ||
-            q.contains('capture the screen') ||
-            q.contains('capture my screen') ||
-            q.contains("what's on my screen") ||
-            q.contains('whats on my screen') ||
-            q.contains('what is on my screen') ||
-            q.contains('on my screen') ||
-            (q.contains('screen') &&
-                (q.contains('look') ||
-                    q.contains('see') ||
-                    q.contains('show') ||
-                    q.contains('what'))));
+    final wantsDeviceScreen = _wantsDeviceScreen(query, hasImage: hasImage);
     if (wantsDeviceScreen) {
       tools.add(NovaTools.takeScreenshot);
     }
@@ -791,6 +821,31 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
 
     await _maybeAutoCompact();
+
+    // Screen questions need a real image; SmolLM cannot see the device.
+    final hasImageAlready =
+        _currentScreenshot != null ||
+        _attachmentManager.attachments.any(
+          (a) => a.filePath != null && DocumentExtractor.isImageFile(a.name),
+        );
+    if (_wantsDeviceScreen(text, hasImage: hasImageAlready) &&
+        _currentScreenshot == null) {
+      await _captureAndAttachScreenshot();
+      if (!mounted) return;
+      if (_currentScreenshot == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Screen capture is required to answer "what\'s on my screen?". '
+              'Allow capture or attach a photo.',
+            ),
+            duration: Duration(seconds: 3),
+          ),
+        );
+
+        return;
+      }
+    }
 
     // Wait for initial screenshot to load if still loading (from assistant mode)
     // This ensures screenshot is captured before model selection happens
@@ -913,13 +968,18 @@ class _AssistantScreenState extends State<AssistantScreen>
         });
       }
     } finally {
-      setState(() {
+      if (mounted) {
+        setState(() {
+          _isGenerating = false;
+          if (!_shouldPreserveScreenshot) {
+            _currentScreenshot = null;
+          }
+          _shouldPreserveScreenshot = false;
+        });
+      } else {
         _isGenerating = false;
-        if (!_shouldPreserveScreenshot) {
-          _currentScreenshot = null;
-        }
         _shouldPreserveScreenshot = false;
-      });
+      }
       await _saveMessages();
       _attachmentManager.clear();
     }
@@ -955,7 +1015,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   Future<void> _showModelSelectorSheet(BuildContext context) async {
     final isAutoMode = _selectedModel == null && _selectedCustomModel == null;
 
-    await showModalBottomSheet<void>(
+    final result = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
@@ -989,27 +1049,31 @@ class _AssistantScreenState extends State<AssistantScreen>
           }
           setState(() {});
         },
-        onImportModel: () {
-          Navigator.pop(context);
-          _showCustomModelImportSheet();
-        },
+        onImportModel: () => Navigator.pop(context, 'import'),
       ),
     );
+
+    if (result == 'import' && mounted) {
+      await _showCustomModelImportSheet();
+    }
   }
 
   Future<void> _showCustomModelImportSheet() async {
-    await showModalBottomSheet<void>(
+    final imported = await showModalBottomSheet<CustomModel>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (context) => CustomModelImportSheet(
-        onInstalled: (model) {
-          setState(() {
-            _selectedCustomModel = model;
-          });
-        },
-      ),
+      builder: (context) => const CustomModelImportSheet(),
     );
+
+    if (!mounted || imported == null) return;
+
+    setState(() {
+      _selectedCustomModel = imported;
+      _selectedModel = null;
+    });
+    ModelOrchestrator.instance.preferredCustomModel = imported;
+    ModelOrchestrator.instance.preferredModelType = null;
   }
 
   Future<void> _pickImageFromGallery() async {
@@ -1375,7 +1439,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'First GPU compile can take 1–2 minutes. Do not send yet.',
+                  'First compile can take 1–2 minutes. Do not send yet.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white54, fontSize: 12),
                 ),
@@ -2126,19 +2190,20 @@ class _AssistantScreenState extends State<AssistantScreen>
                   const SizedBox(width: 8),
                   VoiceInputButton(
                     onPartial: (partial) {
+                      if (!mounted) return;
                       _inputController.text = partial;
                       _inputController.selection = TextSelection.collapsed(
                         offset: partial.length,
                       );
                     },
                     onTranscription: (transcript) {
-                      if (transcript.isEmpty) return;
+                      if (!mounted || transcript.isEmpty) return;
                       _inputController.text = transcript;
                       if (_isGenerating || ModelOrchestrator.instance.isBusy) {
                         // Leave full text in the field for the user to send.
                         return;
                       }
-                      _sendMessage();
+                      unawaited(_sendMessage());
                     },
                   ),
                   const SizedBox(width: 8),

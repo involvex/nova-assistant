@@ -26,29 +26,40 @@ class GenerationSafety {
 
   static int maxOutputCharsForCustom() => largeMaxOutputChars;
 
-  /// True when [text] ends with the same ~80-char block repeated ≥3 times.
+  /// True when [text] ends with the same block repeated ≥[minRepeats] times.
+  ///
+  /// Checks every period `p` from 1..[window] so short loops (e.g. "orange"
+  /// ×3) are caught, not only exact [window]-char tiles.
   static bool hasConsecutiveRepetition(
     String text, {
     int window = repetitionWindowChars,
     int minRepeats = repetitionMinRepeats,
   }) {
     if (window < 16 || minRepeats < 2) return false;
-    final need = window * minRepeats;
-    if (text.length < need) return false;
+    if (text.length < 15) return false;
 
-    final chunk = text.substring(text.length - window);
-    if (chunk.trim().isEmpty) return false;
+    for (var p = 1; p <= window; p++) {
+      if (text.length < p * minRepeats) continue;
+      final chunk = text.substring(text.length - p);
+      if (chunk.trim().isEmpty) continue;
 
-    var repeats = 1;
-    var end = text.length - window;
-    while (repeats < minRepeats && end >= window) {
-      final prev = text.substring(end - window, end);
-      if (prev != chunk) break;
-      repeats++;
-      end -= window;
+      var isRepeat = true;
+      for (var i = 1; i < minRepeats; i++) {
+        final prev = text.substring(
+          text.length - p * (i + 1),
+          text.length - p * i,
+        );
+        if (prev != chunk) {
+          isRepeat = false;
+          break;
+        }
+      }
+      if (isRepeat && p * minRepeats >= 15) {
+        return true;
+      }
     }
 
-    return repeats >= minRepeats;
+    return false;
   }
 
   /// Returns a user-facing suffix when [text] hits a safety stop, else null.

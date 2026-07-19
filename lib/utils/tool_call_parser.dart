@@ -88,17 +88,23 @@ class ToolCallParser {
   }
 
   /// Removes tool-call markup so it is not shown in the chat UI.
+  ///
+  /// Also strips incomplete/in-progress tool markup so streaming tokens do not
+  /// flicker raw `<|tool_call>...` into the bubble.
   static String stripMarkup(String text) {
     var out = text;
     out = out.replaceAll(
       RegExp(
-        r'<\|?tool_call\|?>[\s\S]*?(?:</?\|?tool_call\|?>|<tool_call\|>)',
+        r'<\|?tool_call\|?>[\s\S]*?(?:</?\|?tool_call\|?>|<tool_call\|>|$)',
         caseSensitive: false,
       ),
       '',
     );
     out = out.replaceAll(
-      RegExp(r'call:\s*[a-zA-Z0-9_]+\s*\{[^{}]*\}', caseSensitive: false),
+      RegExp(
+        r'call:\s*[a-zA-Z0-9_]+\s*\{[^{}]*(?:\}|$)',
+        caseSensitive: false,
+      ),
       '',
     );
     out = out.replaceAll(RegExp(r'<\|?"?\|>'), '');
@@ -161,9 +167,9 @@ class ToolCallParser {
   }
 
   static Map<String, dynamic> _parseLooseArgs(String raw) {
-    final asJson = raw
-        .replaceAll(RegExp(r'<\|?"?\|>'), '"')
-        .replaceAll("'", '"');
+    // Normalize ChatML quote tokens only — do not rewrite apostrophes in
+    // queries like "today's weather".
+    final asJson = raw.replaceAll(RegExp(r'<\|?"?\|>'), '"');
     try {
       final decoded = jsonDecode(asJson);
       if (decoded is Map) {

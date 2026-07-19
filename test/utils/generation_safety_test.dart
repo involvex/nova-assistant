@@ -19,6 +19,11 @@ void main() {
       expect(GenerationSafety.hasConsecutiveRepetition(text), isTrue);
     });
 
+    test('hasConsecutiveRepetition detects short repeated phrases', () {
+      final loop = 'orange! ' * 6;
+      expect(GenerationSafety.hasConsecutiveRepetition(loop), isTrue);
+    });
+
     test('hasConsecutiveRepetition ignores short or unique text', () {
       expect(GenerationSafety.hasConsecutiveRepetition('hello world'), isFalse);
       // Unique non-repeating content longer than 3 windows.

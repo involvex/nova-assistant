@@ -283,6 +283,33 @@ class McpService {
       );
     }
 
+    // Prefer live MCP JSON-RPC client when this tool was discovered from a
+    // connected server.
+    if (tool.type == ExternalToolType.mcp) {
+      final serverId = tool.config['serverId'];
+      if (serverId != null && serverId.isNotEmpty) {
+        final live = await executeMcpTool(serverId, toolName, args);
+        if (live != null) {
+          return ExternalToolResult(success: true, data: live);
+        }
+        // Not connected — try connect once, then call again.
+        final connected = await connectServer(serverId);
+        if (connected) {
+          final retry = await executeMcpTool(serverId, toolName, args);
+          if (retry != null) {
+            return ExternalToolResult(success: true, data: retry);
+          }
+        }
+
+        return ExternalToolResult(
+          success: false,
+          error:
+              lastConnectError ??
+              'MCP server not connected for tool: $toolName',
+        );
+      }
+    }
+
     final provider = _providers[tool.type];
     if (provider == null) {
       return ExternalToolResult(
@@ -292,6 +319,79 @@ class McpService {
     }
 
     return provider.execute(tool, args);
+  }
+
+  Future<void> updateServer(McpServerConfig server) async {
+    final index = _servers.indexWhere((s) => s.id == server.id);
+    if (index >= 0) {
+      _servers[index] = server;
+    } else {
+      _servers.add(server);
+    }
+    await _saveServers();
+  }
+
+  /// Installs or updates a catalog preset (MCP server or HTTP tool).
+  Future<McpServerConfig?> installPreset({
+    required String presetId,
+    required String title,
+    required bool isMcp,
+    String? url,
+    McpTransport transport = McpTransport.streamableHttp,
+    McpAuthMode authMode = McpAuthMode.none,
+    String? authToken,
+    String? apiKeyHeader,
+    Map<String, String> extraHeaders = const {},
+    String? oauthAuthUrl,
+    String? oauthTokenUrl,
+    String? oauthClientId,
+    String? oauthRedirectUri,
+    String? oauthScope,
+    ExternalTool? httpTool,
+  }) async {
+    if (isMcp) {
+      final existing = _servers.where((s) => s.presetId == presetId).toList();
+      final id = existing.isNotEmpty ? existing.first.id : _uuid.v4();
+      final server = McpServerConfig(
+        id: id,
+        name: title,
+        url: url ?? '',
+        transport: transport,
+        authMode: authMode,
+        authToken: authToken,
+        apiKeyHeader: apiKeyHeader,
+        extraHeaders: extraHeaders,
+        oauthAuthUrl: oauthAuthUrl,
+        oauthTokenUrl: oauthTokenUrl,
+        oauthClientId: oauthClientId,
+        oauthRedirectUri: oauthRedirectUri ?? 'nova://mcp/oauth',
+        oauthScope: oauthScope,
+        presetId: presetId,
+        enabled: true,
+      );
+      await updateServer(server);
+
+      return server;
+    }
+
+    if (httpTool != null) {
+      final existing = _tools.where((t) => t.config['presetId'] == presetId);
+      final existingId = existing.isNotEmpty ? existing.first.id : null;
+      _tools.removeWhere((t) => t.config['presetId'] == presetId);
+      await addTool(
+        ExternalTool(
+          id: existingId ?? httpTool.id,
+          name: httpTool.name,
+          description: httpTool.description,
+          type: httpTool.type,
+          parameters: httpTool.parameters,
+          config: httpTool.config,
+          enabled: httpTool.enabled,
+        ),
+      );
+    }
+
+    return null;
   }
 
   Future<void> addSource(DataSource source) async {

@@ -114,19 +114,36 @@ class HttpToolProvider implements ExternalToolProvider {
       final url = tool.config['url'] ?? '';
       final method = tool.config['method']?.toUpperCase() ?? 'GET';
       final headers = _parseHeaders(tool.config['headers'] ?? '');
+      final bodyArgs = Map<String, dynamic>.from(args);
+      final apiKeyBodyField = tool.config['apiKeyBodyField'];
+      final apiKey = tool.config['apiKey'];
+      if (apiKeyBodyField != null &&
+          apiKeyBodyField.isNotEmpty &&
+          apiKey != null &&
+          apiKey.isNotEmpty) {
+        bodyArgs[apiKeyBodyField] = apiKey;
+      }
 
       final client = HttpClient();
       try {
-        final uri = Uri.parse(url);
+        var uri = Uri.parse(url);
+        if (method == 'GET' && bodyArgs.isNotEmpty) {
+          uri = uri.replace(
+            queryParameters: {
+              ...uri.queryParameters,
+              for (final e in bodyArgs.entries) e.key: '${e.value}',
+            },
+          );
+        }
         final request = await client.openUrl(method, uri);
 
         headers.forEach((key, value) {
           request.headers.set(key, value);
         });
 
-        if (method == 'POST' || method == 'PUT') {
+        if (method == 'POST' || method == 'PUT' || method == 'PATCH') {
           request.headers.contentType = ContentType.json;
-          request.write(jsonEncode(args));
+          request.write(jsonEncode(bodyArgs));
         }
 
         final response = await request.close();

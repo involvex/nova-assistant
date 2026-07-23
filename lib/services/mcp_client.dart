@@ -8,12 +8,22 @@ import 'package:nova_assistant/utils/agent_debug_log.dart';
 
 enum McpTransport { httpSse, streamableHttp, stdio }
 
+/// How Nova authenticates to an MCP server.
+enum McpAuthMode { none, bearer, apiKey, oauth }
+
 class McpServerConfig {
   final String id;
   final String name;
   final String url;
   final McpTransport transport;
+  final McpAuthMode authMode;
   final String? authToken;
+
+  /// Named header for [McpAuthMode.apiKey] (e.g. `DD-API-KEY`).
+  final String? apiKeyHeader;
+
+  /// Extra headers (e.g. Datadog application key).
+  final Map<String, String> extraHeaders;
   final String? command;
   final List<String> args;
   final String? oauthAuthUrl;
@@ -21,6 +31,9 @@ class McpServerConfig {
   final String? oauthClientId;
   final String? oauthRedirectUri;
   final String? oauthScope;
+
+  /// Catalog preset id when installed from the preset catalog.
+  final String? presetId;
   bool connected;
   bool enabled;
 
@@ -29,7 +42,10 @@ class McpServerConfig {
     required this.name,
     required this.url,
     this.transport = McpTransport.httpSse,
+    this.authMode = McpAuthMode.none,
     this.authToken,
+    this.apiKeyHeader,
+    this.extraHeaders = const {},
     this.command,
     this.args = const [],
     this.oauthAuthUrl,
@@ -37,24 +53,29 @@ class McpServerConfig {
     this.oauthClientId,
     this.oauthRedirectUri,
     this.oauthScope,
+    this.presetId,
     this.connected = false,
     this.enabled = true,
   });
 
   bool get hasOAuth =>
-      oauthAuthUrl != null &&
-      oauthAuthUrl!.isNotEmpty &&
-      oauthTokenUrl != null &&
-      oauthTokenUrl!.isNotEmpty &&
-      oauthClientId != null &&
-      oauthClientId!.isNotEmpty;
+      authMode == McpAuthMode.oauth ||
+      (oauthAuthUrl != null &&
+          oauthAuthUrl!.isNotEmpty &&
+          oauthTokenUrl != null &&
+          oauthTokenUrl!.isNotEmpty &&
+          oauthClientId != null &&
+          oauthClientId!.isNotEmpty);
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
     'url': url,
     'transport': transport.name,
+    'authMode': authMode.name,
     'authToken': authToken,
+    'apiKeyHeader': apiKeyHeader,
+    'extraHeaders': extraHeaders,
     'command': command,
     'args': args,
     'oauthAuthUrl': oauthAuthUrl,
@@ -62,47 +83,89 @@ class McpServerConfig {
     'oauthClientId': oauthClientId,
     'oauthRedirectUri': oauthRedirectUri,
     'oauthScope': oauthScope,
+    'presetId': presetId,
     'enabled': enabled,
   };
 
-  factory McpServerConfig.fromJson(Map<String, dynamic> json) =>
-      McpServerConfig(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        url: json['url'] as String,
-        transport: McpTransport.values.firstWhere(
-          (t) => t.name == json['transport'],
-          orElse: () => McpTransport.httpSse,
-        ),
-        authToken: json['authToken'] as String?,
-        command: json['command'] as String?,
-        args: (json['args'] as List<dynamic>?)?.cast<String>() ?? [],
-        oauthAuthUrl: json['oauthAuthUrl'] as String?,
-        oauthTokenUrl: json['oauthTokenUrl'] as String?,
-        oauthClientId: json['oauthClientId'] as String?,
-        oauthRedirectUri: json['oauthRedirectUri'] as String?,
-        oauthScope: json['oauthScope'] as String?,
-        enabled: json['enabled'] as bool? ?? true,
+  factory McpServerConfig.fromJson(Map<String, dynamic> json) {
+    final modeRaw = json['authMode'] as String?;
+    var authMode = McpAuthMode.none;
+    if (modeRaw != null) {
+      authMode = McpAuthMode.values.firstWhere(
+        (m) => m.name == modeRaw,
+        orElse: () => McpAuthMode.none,
       );
+    } else if ((json['authToken'] as String?)?.isNotEmpty == true) {
+      authMode = McpAuthMode.bearer;
+    } else if ((json['oauthAuthUrl'] as String?)?.isNotEmpty == true) {
+      authMode = McpAuthMode.oauth;
+    }
+
+    final extraRaw = json['extraHeaders'];
+    final extraHeaders = extraRaw is Map
+        ? extraRaw.map((k, v) => MapEntry(k.toString(), v.toString()))
+        : <String, String>{};
+
+    return McpServerConfig(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      url: json['url'] as String,
+      transport: McpTransport.values.firstWhere(
+        (t) => t.name == json['transport'],
+        orElse: () => McpTransport.httpSse,
+      ),
+      authMode: authMode,
+      authToken: json['authToken'] as String?,
+      apiKeyHeader: json['apiKeyHeader'] as String?,
+      extraHeaders: extraHeaders,
+      command: json['command'] as String?,
+      args: (json['args'] as List<dynamic>?)?.cast<String>() ?? [],
+      oauthAuthUrl: json['oauthAuthUrl'] as String?,
+      oauthTokenUrl: json['oauthTokenUrl'] as String?,
+      oauthClientId: json['oauthClientId'] as String?,
+      oauthRedirectUri: json['oauthRedirectUri'] as String?,
+      oauthScope: json['oauthScope'] as String?,
+      presetId: json['presetId'] as String?,
+      enabled: json['enabled'] as bool? ?? true,
+    );
+  }
 
   McpServerConfig copyWith({
+    String? name,
+    String? url,
+    McpTransport? transport,
+    McpAuthMode? authMode,
     String? authToken,
+    String? apiKeyHeader,
+    Map<String, String>? extraHeaders,
+    String? command,
+    List<String>? args,
+    String? oauthAuthUrl,
+    String? oauthTokenUrl,
+    String? oauthClientId,
+    String? oauthRedirectUri,
+    String? oauthScope,
+    String? presetId,
     bool? connected,
     bool? enabled,
   }) {
     return McpServerConfig(
       id: id,
-      name: name,
-      url: url,
-      transport: transport,
+      name: name ?? this.name,
+      url: url ?? this.url,
+      transport: transport ?? this.transport,
+      authMode: authMode ?? this.authMode,
       authToken: authToken ?? this.authToken,
-      command: command,
-      args: args,
-      oauthAuthUrl: oauthAuthUrl,
-      oauthTokenUrl: oauthTokenUrl,
-      oauthClientId: oauthClientId,
-      oauthRedirectUri: oauthRedirectUri,
-      oauthScope: oauthScope,
+      apiKeyHeader: apiKeyHeader ?? this.apiKeyHeader,
+      extraHeaders: extraHeaders ?? this.extraHeaders,
+      command: command ?? this.command,
+      args: args ?? this.args,
+      oauthAuthUrl: oauthAuthUrl ?? this.oauthAuthUrl,
+      oauthTokenUrl: oauthTokenUrl ?? this.oauthTokenUrl,
+      oauthClientId: oauthClientId ?? this.oauthClientId,
+      oauthRedirectUri: oauthRedirectUri ?? this.oauthRedirectUri,
+      oauthScope: oauthScope ?? this.oauthScope,
+      presetId: presetId ?? this.presetId,
       connected: connected ?? this.connected,
       enabled: enabled ?? this.enabled,
     );
@@ -182,7 +245,7 @@ class McpClient {
     if (config.authToken != null && config.authToken!.isNotEmpty) {
       return config.authToken;
     }
-    if (config.hasOAuth) {
+    if (config.authMode == McpAuthMode.oauth || config.hasOAuth) {
       return McpOAuthService.instance.loadAccessToken(config.id);
     }
 
@@ -311,8 +374,36 @@ class McpClient {
   }
 
   void _applyAuth(HttpClientRequest request) {
-    if (_resolvedToken != null && _resolvedToken!.isNotEmpty) {
-      request.headers.set('Authorization', 'Bearer $_resolvedToken');
+    for (final entry in config.extraHeaders.entries) {
+      if (entry.key.isNotEmpty && entry.value.isNotEmpty) {
+        request.headers.set(entry.key, entry.value);
+      }
+    }
+
+    switch (config.authMode) {
+      case McpAuthMode.none:
+        break;
+      case McpAuthMode.bearer:
+      case McpAuthMode.oauth:
+        if (_resolvedToken != null && _resolvedToken!.isNotEmpty) {
+          request.headers.set('Authorization', 'Bearer $_resolvedToken');
+        }
+        break;
+      case McpAuthMode.apiKey:
+        final header =
+            (config.apiKeyHeader != null &&
+                config.apiKeyHeader!.trim().isNotEmpty)
+            ? config.apiKeyHeader!.trim()
+            : 'Authorization';
+        if (_resolvedToken != null && _resolvedToken!.isNotEmpty) {
+          if (header.toLowerCase() == 'authorization' &&
+              !_resolvedToken!.toLowerCase().startsWith('bearer ')) {
+            request.headers.set(header, 'Bearer $_resolvedToken');
+          } else {
+            request.headers.set(header, _resolvedToken!);
+          }
+        }
+        break;
     }
   }
 

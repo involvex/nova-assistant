@@ -3,12 +3,16 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:nova_assistant/models/external_tool.dart';
+import 'package:nova_assistant/models/mcp_preset.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/services/mcp_client.dart';
 import 'package:nova_assistant/services/mcp_oauth.dart';
+import 'package:nova_assistant/services/mcp_preset_catalog.dart';
+import 'package:nova_assistant/services/mcp_preset_installer.dart';
 
 class McpSettingsScreen extends StatefulWidget {
   const McpSettingsScreen({super.key});
@@ -29,6 +33,7 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(_ensureLoaded());
     _tools = _mcpService.tools;
     _sources = _mcpService.sources;
     _servers = _mcpService.servers;
@@ -40,6 +45,16 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
     });
     _serversSub = _mcpService.serversStream.listen((servers) {
       if (mounted) setState(() => _servers = servers);
+    });
+  }
+
+  Future<void> _ensureLoaded() async {
+    await _mcpService.initialize();
+    if (!mounted) return;
+    setState(() {
+      _tools = _mcpService.tools;
+      _sources = _mcpService.sources;
+      _servers = _mcpService.servers;
     });
   }
 
@@ -62,6 +77,15 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _buildSectionHeader('Presets', Icons.auto_awesome_outlined),
+          Text(
+            'One-tap useful MCP / HTTP tools. Enter an API key or use login '
+            'when the provider supports it.',
+            style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          ...McpPresetCatalog.all.map(_buildPresetCard),
+          const SizedBox(height: 24),
           _buildSectionHeader('External Tools', Icons.build_outlined),
           if (_tools.isEmpty) _buildEmptyState('No external tools configured'),
           ..._tools.map(_buildToolTile),
@@ -100,6 +124,253 @@ class _McpSettingsScreenState extends State<McpSettingsScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildPresetCard(McpPreset preset) {
+    final installed = McpPresetInstaller.isInstalled(preset);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      color: const Color(0xFF1A1A2E),
+      child: ListTile(
+        leading: Icon(
+          preset.kind == McpPresetKind.mcp ? Icons.hub_outlined : Icons.http,
+          color: const Color(0xFF6C63FF),
+        ),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                preset.title,
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+            if (installed)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'Installed',
+                  style: TextStyle(color: Colors.greenAccent, fontSize: 11),
+                ),
+              ),
+          ],
+        ),
+        subtitle: Text(
+          '${preset.category} · ${preset.description}',
+          style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+        onTap: () => _showPresetConfigureSheet(preset),
+      ),
+    );
+  }
+
+  Future<void> _showPresetConfigureSheet(McpPreset preset) async {
+    var authMode = preset.defaultAuthMode;
+    if (authMode == McpAuthMode.none && preset.supportsApiKey) {
+      authMode = preset.supportedAuthModes.contains(McpAuthMode.bearer)
+          ? McpAuthMode.bearer
+          : McpAuthMode.apiKey;
+    }
+    final controllers = <String, TextEditingController>{
+      for (final f in preset.authFields) f.key: TextEditingController(),
+    };
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1A1A2E),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModal) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      preset.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      preset.description,
+                      style: TextStyle(color: Colors.grey.shade400),
+                    ),
+                    if (preset.supportsApiKey && preset.supportsLogin) ...[
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('API key'),
+                            selected: authMode != McpAuthMode.oauth,
+                            onSelected: (_) => setModal(() {
+                              authMode =
+                                  preset.supportedAuthModes.contains(
+                                    McpAuthMode.bearer,
+                                  )
+                                  ? McpAuthMode.bearer
+                                  : McpAuthMode.apiKey;
+                            }),
+                          ),
+                          ChoiceChip(
+                            label: const Text('Login'),
+                            selected: authMode == McpAuthMode.oauth,
+                            onSelected: (_) => setModal(() {
+                              authMode = McpAuthMode.oauth;
+                            }),
+                          ),
+                        ],
+                      ),
+                    ],
+                    if (authMode == McpAuthMode.oauth) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'Open the provider login / token page, then paste the '
+                        'access token below. After install, use Authorize on '
+                        'the server menu if OAuth endpoints are configured.',
+                        style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 12,
+                        ),
+                      ),
+                      if (preset.loginHintUrl != null) ...[
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final uri = Uri.parse(preset.loginHintUrl!);
+                            await launchUrl(
+                              uri,
+                              mode: LaunchMode.externalApplication,
+                            );
+                          },
+                          icon: const Icon(Icons.open_in_new),
+                          label: const Text('Open login / tokens'),
+                        ),
+                      ],
+                    ],
+                    ...preset.authFields.map((field) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: TextField(
+                          controller: controllers[field.key],
+                          obscureText: field.secret,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            labelText: field.label,
+                            labelStyle: TextStyle(color: Colors.grey.shade400),
+                            enabledBorder: OutlineInputBorder(
+                              borderSide: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.2),
+                              ),
+                            ),
+                            focusedBorder: const OutlineInputBorder(
+                              borderSide: BorderSide(color: Color(0xFF6C63FF)),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                    if (preset.docsUrl != null) ...[
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: () async {
+                          await launchUrl(
+                            Uri.parse(preset.docsUrl!),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        },
+                        child: const Text('Documentation'),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: () async {
+                        final secrets = <String, String>{
+                          for (final e in controllers.entries)
+                            e.key: e.value.text.trim(),
+                        };
+                        await McpPresetInstaller.install(
+                          preset,
+                          authMode: authMode,
+                          secrets: secrets,
+                        );
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx);
+                        if (!mounted) return;
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              McpPresetInstaller.isInstalled(preset)
+                                  ? '${preset.title} installed'
+                                  : 'Installed ${preset.title}',
+                            ),
+                          ),
+                        );
+                        if (preset.kind == McpPresetKind.mcp) {
+                          final matches = _mcpService.servers
+                              .where((s) => s.presetId == preset.id)
+                              .toList();
+                          final server = matches.isEmpty ? null : matches.first;
+                          if (server != null &&
+                              (secrets['token']?.isNotEmpty ?? false)) {
+                            final ok = await _mcpService.connectServer(
+                              server.id,
+                            );
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  ok
+                                      ? 'Connected to ${preset.title}'
+                                      : (_mcpService.lastConnectError ??
+                                            'Connect failed — try Connect from the server menu'),
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF6C63FF),
+                      ),
+                      child: Text(
+                        McpPresetInstaller.isInstalled(preset)
+                            ? 'Update'
+                            : 'Install',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    for (final c in controllers.values) {
+      c.dispose();
+    }
   }
 
   Widget _buildSectionHeader(String title, IconData icon) {

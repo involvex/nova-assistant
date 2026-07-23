@@ -69,6 +69,7 @@ void main() async {
     await NotificationService.instance.requestPermission();
     await TtsService.instance.initialize();
     await PromptPresetsService.instance.initialize();
+    await McpService.instance.initialize();
 
     await ModelOrchestrator.instance.applyRamAwareModelDefaults();
     _prefetchModels();

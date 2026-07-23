@@ -1,15 +1,39 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class _FakePathProvider extends Fake
+    with MockPlatformInterfaceMixin
+    implements PathProviderPlatform {
+  _FakePathProvider(this.root);
+  final Directory root;
+
+  @override
+  Future<String?> getApplicationDocumentsPath() async => root.path;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  late Directory tempDir;
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     await SharedPreferences.getInstance();
+    tempDir = await Directory.systemTemp.createTemp('nova_summary_');
+    PathProviderPlatform.instance = _FakePathProvider(tempDir);
+  });
+
+  tearDown(() async {
+    if (await tempDir.exists()) {
+      await tempDir.delete(recursive: true);
+    }
   });
 
   test('compactNow returns summary and keeps recent turns', () async {

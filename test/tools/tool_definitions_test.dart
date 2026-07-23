@@ -7,8 +7,15 @@ void main() {
       expect(NovaTools.all, isNotEmpty);
     });
 
-    test('all tools list has 15 tools', () {
-      expect(NovaTools.all.length, 15);
+    test('all tools list has expected built-in count', () {
+      // Built-ins include open_app_info + open_battery_settings; force_stop_app
+      // is only added when Advanced Shizuku force-stop is enabled.
+      expect(NovaTools.all.length, 17);
+      expect(NovaTools.all.any((t) => t.name == 'open_app_info'), isTrue);
+      expect(
+        NovaTools.all.any((t) => t.name == 'open_battery_settings'),
+        isTrue,
+      );
     });
 
     test('each tool has a unique name', () {
@@ -54,14 +61,26 @@ void main() {
         expect(NovaTools.setAlarm.name, 'set_alarm');
       });
 
-      test('requires hour and minute', () {
+      test('allows hour/minute or duration_minutes', () {
         final required = NovaTools.setAlarm.parameters['required'] as List;
-        expect(required, containsAll(['hour', 'minute']));
+        // Relative timers use duration_minutes; absolute times use hour/minute.
+        expect(required, isEmpty);
+        final props = NovaTools.setAlarm.parameters['properties'] as Map;
+        expect(props.containsKey('hour'), isTrue);
+        expect(props.containsKey('minute'), isTrue);
+        expect(props.containsKey('duration_minutes'), isTrue);
       });
 
       test('has hour parameter with integer type', () {
         final props = NovaTools.setAlarm.parameters['properties'] as Map;
         expect(props['hour']['type'], 'integer');
+      });
+
+      test('description mentions relative timers', () {
+        expect(
+          NovaTools.setAlarm.description,
+          contains('duration_minutes'),
+        );
       });
     });
 

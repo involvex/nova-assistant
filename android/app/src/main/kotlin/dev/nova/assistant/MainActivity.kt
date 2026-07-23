@@ -40,6 +40,36 @@ class MainActivity : FlutterActivity() {
             applicationContext
         )
 
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.nova.assistant/shizuku")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "status" -> result.success(ShizukuPowerHelper.status())
+                        "requestPermission" ->
+                            result.success(ShizukuPowerHelper.requestPermission(this))
+                        "forceStop" -> {
+                            val pkg = call.argument<String>("package")
+                                ?: throw IllegalArgumentException("package required")
+                            result.success(ShizukuPowerHelper.forceStopPackage(pkg))
+                        }
+                        "openAppInfo" -> {
+                            val pkg = call.argument<String>("package")
+                                ?: throw IllegalArgumentException("package required")
+                            result.success(
+                                ShizukuPowerHelper.openAppInfo(applicationContext, pkg),
+                            )
+                        }
+                        "openBatterySettings" ->
+                            result.success(
+                                ShizukuPowerHelper.openBatterySettings(applicationContext),
+                            )
+                        else -> result.notImplemented()
+                    }
+                } catch (e: Exception) {
+                    result.error("SHIZUKU_ERROR", e.message, null)
+                }
+            }
+
         ScreenCaptureHelper.registerWith(
             flutterEngine.dartExecutor.binaryMessenger,
             this

@@ -31,6 +31,7 @@ import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
 import 'package:nova_assistant/services/follow_up_suggestion_service.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
+import 'package:nova_assistant/services/shizuku_service.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/widgets/suggestion_chip.dart';
@@ -103,6 +104,8 @@ class _AssistantScreenState extends State<AssistantScreen>
         }
       },
     );
+    unawaited(ShizukuService.instance.ensureLoaded());
+    ShizukuService.instance.confirmationHandler = _confirmForceStop;
     if (widget.initialPrompt != null && widget.initialPrompt!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -573,6 +576,7 @@ class _AssistantScreenState extends State<AssistantScreen>
 
   @override
   void dispose() {
+    ShizukuService.instance.confirmationHandler = null;
     WidgetsBinding.instance.removeObserver(this);
     _historyClearedSub?.cancel();
     _statusSub?.cancel();
@@ -581,6 +585,38 @@ class _AssistantScreenState extends State<AssistantScreen>
     _scrollController.dispose();
     _inputFocus.dispose();
     super.dispose();
+  }
+
+  Future<bool> _confirmForceStop(String packageName) async {
+    if (!mounted) return false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text(
+          'Force-stop app?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'Force-stop $packageName?\n\n'
+          'Unsaved work in that app may be lost.',
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Force-stop'),
+          ),
+        ],
+      ),
+    );
+
+    return ok == true;
   }
 
   @override
@@ -756,7 +792,13 @@ class _AssistantScreenState extends State<AssistantScreen>
       NovaTools.cancelAlarm,
       NovaTools.openSettings,
       NovaTools.openApp,
+      NovaTools.openAppInfo,
+      NovaTools.openBatterySettings,
     ]);
+
+    if (ShizukuService.instance.shouldExposeForceStopTool) {
+      tools.add(NovaTools.forceStopApp);
+    }
 
     // Only offer screen capture when the user asks for the *device screen*
     // and no image is already attached (gallery / prior capture).

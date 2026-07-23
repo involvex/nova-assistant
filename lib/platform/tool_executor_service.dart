@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:nova_assistant/models/tool_progress.dart';
+import 'package:nova_assistant/services/shizuku_service.dart';
 
 class ToolExecutorService {
   static const _channel = MethodChannel('dev.nova.assistant/tools');
@@ -34,6 +35,11 @@ class ToolExecutorService {
     String toolName,
     Map<String, dynamic> args,
   ) async {
+    if (toolName == 'force_stop_app') {
+      final pkg = args['package']?.toString() ?? '';
+      return ShizukuService.instance.forceStopApp(pkg);
+    }
+
     try {
       final result = await _channel.invokeMethod(toolName, args);
       if (result is Map) {

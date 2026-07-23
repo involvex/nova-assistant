@@ -52,5 +52,45 @@ void main() {
       expect(result!.hour, 7);
       expect(result.minute, 0);
     });
+
+    test('parses German timer for 10 minutes', () {
+      final fixed = DateTime(2026, 7, 19, 16, 20);
+      final result = AlarmTimeParser.tryParseTimer(
+        'stell mir einen Timer für 10 Minuten',
+        now: fixed,
+      );
+      expect(result, isNotNull);
+      expect(result!.durationMinutes, 10);
+      expect(result.hour, 16);
+      expect(result.minute, 30);
+    });
+
+    test('parses English timer for 5 minutes', () {
+      final fixed = DateTime(2026, 7, 19, 8, 0);
+      final result = AlarmTimeParser.tryParseTimer(
+        'set a timer for 5 minutes',
+        now: fixed,
+      );
+      expect(result, isNotNull);
+      expect(result!.durationMinutes, 5);
+      expect(result.hour, 8);
+      expect(result.minute, 5);
+    });
+
+    test('parses in N Minuten relative timer', () {
+      final fixed = DateTime(2026, 7, 19, 12, 0);
+      final result = AlarmTimeParser.tryParseTimer(
+        'in 15 Minuten',
+        now: fixed,
+      );
+      expect(result, isNotNull);
+      expect(result!.durationMinutes, 15);
+      expect(result.hour, 12);
+      expect(result.minute, 15);
+    });
+
+    test('timer returns null without duration', () {
+      expect(AlarmTimeParser.tryParseTimer('set a timer'), isNull);
+    });
   });
 }

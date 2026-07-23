@@ -234,6 +234,24 @@ Regeln:
     await p.setString(_dismissedKey, jsonEncode(set.toList()));
   }
 
+  /// Dismisses every currently visible derived entry.
+  Future<void> clearAllDerived() async {
+    final derived = await listDerived();
+    if (derived.isEmpty) return;
+    final set = await _loadDismissed();
+    for (final item in derived) {
+      set.add(item.id);
+    }
+    final p = await _p;
+    await p.setString(_dismissedKey, jsonEncode(set.toList()));
+  }
+
+  /// Clears all saved custom memories and dismisses all derived hints.
+  Future<void> clearAllOverviewMemories() async {
+    await MemoryService.clearAllCustomMemories();
+    await clearAllDerived();
+  }
+
   Future<Set<String>> _loadDismissed() async {
     try {
       final p = await _p;

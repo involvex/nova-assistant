@@ -58,6 +58,12 @@ class _UserMemoryOverviewScreenState extends State<UserMemoryOverviewScreen> {
         backgroundColor: const Color(0xFF1A1A2E),
         title: const Text('Memory overview'),
         actions: [
+          if (_stored.isNotEmpty || _derived.isNotEmpty)
+            IconButton(
+              tooltip: 'Delete all',
+              onPressed: _deleteAllOverview,
+              icon: const Icon(Icons.delete_sweep_outlined),
+            ),
           IconButton(
             tooltip: 'Refresh',
             onPressed: _load,
@@ -171,32 +177,52 @@ class _UserMemoryOverviewScreenState extends State<UserMemoryOverviewScreen> {
         ? 'promoted'
         : 'manual';
 
-    return Card(
-      color: const Color(0xFF1A1A2E),
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        title: Text(item.title, style: const TextStyle(color: Colors.white)),
-        subtitle: Text(
-          '${item.content}\n$date · $sourceLabel',
-          style: TextStyle(color: Colors.grey[500], fontSize: 12),
+    return Dismissible(
+      key: Key('stored-${item.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFF6B6B).withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(12),
         ),
-        isThreeLine: true,
-        trailing: PopupMenuButton<String>(
-          onSelected: (v) async {
-            if (v == 'edit') {
-              await _editStored(item);
-            } else if (v == 'delete') {
-              await MemoryService.deleteCustomMemory(item.id);
-              await _load();
-            }
-          },
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'edit', child: Text('Edit')),
-            PopupMenuItem(
-              value: 'delete',
-              child: Text('Delete', style: TextStyle(color: Colors.red)),
-            ),
-          ],
+        child: const Icon(Icons.delete_outline, color: Color(0xFFFF6B6B)),
+      ),
+      confirmDismiss: (_) async {
+        await MemoryService.deleteCustomMemory(item.id);
+        await _load();
+
+        return false;
+      },
+      child: Card(
+        color: const Color(0xFF1A1A2E),
+        margin: const EdgeInsets.only(bottom: 8),
+        child: ListTile(
+          title: Text(item.title, style: const TextStyle(color: Colors.white)),
+          subtitle: Text(
+            '${item.content}\n$date · $sourceLabel',
+            style: TextStyle(color: Colors.grey[500], fontSize: 12),
+          ),
+          isThreeLine: true,
+          trailing: PopupMenuButton<String>(
+            onSelected: (v) async {
+              if (v == 'edit') {
+                await _editStored(item);
+              } else if (v == 'delete') {
+                await MemoryService.deleteCustomMemory(item.id);
+                await _load();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('Edit')),
+              PopupMenuItem(
+                value: 'delete',
+                child: Text('Delete', style: TextStyle(color: Colors.red)),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -205,41 +231,92 @@ class _UserMemoryOverviewScreenState extends State<UserMemoryOverviewScreen> {
   Widget _buildDerivedCard(DerivedMemoryItem item) {
     final origin = item.origin == DerivedMemoryOrigin.rag ? 'Chat' : 'Summary';
 
-    return Card(
-      color: const Color(0xFF1A1A2E),
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        title: Text(
-          item.text,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
+    return Dismissible(
+      key: Key('derived-${item.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFF6B6B).withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(12),
         ),
-        subtitle: Text(
-          '${_fmtDate(item.derivedAt)} · $origin',
-          style: TextStyle(color: Colors.grey[500], fontSize: 12),
-        ),
-        trailing: PopupMenuButton<String>(
-          onSelected: (v) async {
-            if (v == 'promote') {
-              await _service.promoteDerived(item);
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Saved to memories')),
-              );
-              await _load();
-            } else if (v == 'dismiss') {
-              await _service.dismissDerived(item.id);
-              await _load();
-            }
-          },
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'promote', child: Text('Promote')),
-            PopupMenuItem(value: 'dismiss', child: Text('Dismiss')),
-          ],
+        child: const Icon(Icons.delete_outline, color: Color(0xFFFF6B6B)),
+      ),
+      confirmDismiss: (_) async {
+        await _service.dismissDerived(item.id);
+        await _load();
+
+        return false;
+      },
+      child: Card(
+        color: const Color(0xFF1A1A2E),
+        margin: const EdgeInsets.only(bottom: 8),
+        child: ListTile(
+          title: Text(
+            item.text,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            '${_fmtDate(item.derivedAt)} · $origin',
+            style: TextStyle(color: Colors.grey[500], fontSize: 12),
+          ),
+          trailing: PopupMenuButton<String>(
+            onSelected: (v) async {
+              if (v == 'promote') {
+                await _service.promoteDerived(item);
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Saved to memories')),
+                );
+                await _load();
+              } else if (v == 'dismiss') {
+                await _service.dismissDerived(item.id);
+                await _load();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'promote', child: Text('Promote')),
+              PopupMenuItem(value: 'dismiss', child: Text('Dismiss')),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  Future<void> _deleteAllOverview() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text(
+          'Delete all memories?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'This removes all saved memories and dismisses all derived hints.',
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete all'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await _service.clearAllOverviewMemories();
+    await _load();
   }
 
   Future<void> _editStored(StoredMemoryItem item) async {

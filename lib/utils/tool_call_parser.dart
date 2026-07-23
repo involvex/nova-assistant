@@ -19,6 +19,8 @@ class ToolCallParser {
     'current_time': 'get_time',
     'set_an_alarm': 'set_alarm',
     'create_alarm': 'set_alarm',
+    'set_timer': 'set_alarm',
+    'create_timer': 'set_alarm',
     'launch_app': 'open_app',
     'start_app': 'open_app',
     'open_application': 'open_app',
@@ -26,6 +28,9 @@ class ToolCallParser {
     'take_a_screenshot': 'take_screenshot',
     'check_weather': 'get_weather',
     'get_current_weather': 'get_weather',
+    'force_stop': 'force_stop_app',
+    'kill_app': 'force_stop_app',
+    'stop_app': 'force_stop_app',
   };
 
   /// Returns normalized tool calls, or null if none found.
@@ -47,7 +52,10 @@ class ToolCallParser {
   }
 
   /// Maps aliases and argument shapes to what the native executor expects.
-  static Map<String, dynamic> normalizeCall(Map<String, dynamic> call) {
+  static Map<String, dynamic> normalizeCall(
+    Map<String, dynamic> call, {
+    DateTime? now,
+  }) {
     final rawName = (call['name'] as String? ?? '').trim();
     final lower = rawName.toLowerCase();
     final name = aliases[rawName] ?? aliases[lower] ?? rawName;
@@ -73,7 +81,7 @@ class ToolCallParser {
       }
     }
 
-    if (name == 'open_app') {
+    if (name == 'open_app' || name == 'force_stop_app') {
       final pkg = _firstString(args, const [
         'package',
         'package_name',
@@ -85,14 +93,26 @@ class ToolCallParser {
       }
     }
 
+    if (name == 'set_alarm') {
+      _normalizeAlarmArgs(args, now: now);
+    }
+
     return {'name': name, 'args': args};
   }
 
-  /// Removes tool-call markup and chat-template tokens from assistant text.
-  ///
-  /// Also strips incomplete/in-progress tool markup so streaming tokens do not
-  /// flicker raw `<|tool_call>...` into the bubble. Strips ChatML / Gemma turn
-  /// markers that small models often leak into the visible reply.
+  /// Canonical signature for same-call dedupe across tool rounds.
+  static String callSignature(String name, Map<String, dynamic> args) {
+    final keys = args.keys.map((k) => k.toString()).toList()..sort();
+    final canonical = <String, dynamic>{};
+    for (final key in keys) {
+      canonical[key] = args[key];
+    }
+
+    return '$name:${jsonEncode(canonical)}';
+  }
+
+  /// Removes tool-call markup, role/JSON tool envelopes, and chat-template
+  /// tokens from assistant text so they never fill the chat bubble.
   static String stripMarkup(String text) {
     var out = text;
     out = out.replaceAll(
@@ -123,40 +143,209 @@ class ToolCallParser {
     // Orphan special-token leftovers
     out = out.replaceAll(RegExp(r'<\|[^|>]{0,32}\|>'), '');
     out = out.replaceAll(RegExp(r'<\|?"?\|>'), '');
+    out = _stripToolJsonArtifacts(out);
     out = out.replaceAll(RegExp(r'[ \t]+\n'), '\n');
     out = out.replaceAll(RegExp(r'\n{3,}'), '\n\n');
 
     return out.trim();
   }
 
-  static List<Map<String, dynamic>>? _parseJsonCalls(String text) {
-    final decoded = _decodeJsonObject(text);
-    if (decoded == null) return null;
+  /// Maps relative timer durations to wall-clock hour/minute.
+  static void _normalizeAlarmArgs(Map<String, dynamic> args, {DateTime? now}) {
+    final hasHour =
+        args['hour'] is num ||
+        (args['hour'] is String &&
+            int.tryParse(args['hour'] as String) != null);
+    final hasMinute =
+        args['minute'] is num ||
+        (args['minute'] is String &&
+            int.tryParse(args['minute'] as String) != null);
 
+    final duration = _asPositiveInt(
+      args['duration_minutes'] ??
+          args['duration'] ??
+          args['minutes'] ??
+          args['durationMinutes'],
+    );
+
+    if (duration != null && duration > 0 && (!hasHour || !hasMinute)) {
+      final clock = (now ?? DateTime.now()).add(Duration(minutes: duration));
+      args['hour'] = clock.hour;
+      args['minute'] = clock.minute;
+      final existing = args['message'];
+      if (existing is! String || existing.trim().isEmpty) {
+        args['message'] = 'Timer $duration min';
+      }
+    }
+
+    if (args['hour'] is String) {
+      final h = int.tryParse(args['hour'] as String);
+      if (h != null) args['hour'] = h;
+    }
+    if (args['minute'] is String) {
+      final m = int.tryParse(args['minute'] as String);
+      if (m != null) args['minute'] = m;
+    }
+
+    args
+      ..remove('duration_minutes')
+      ..remove('duration')
+      ..remove('minutes')
+      ..remove('durationMinutes');
+  }
+
+  static int? _asPositiveInt(dynamic raw) {
+    if (raw is int) return raw > 0 ? raw : null;
+    if (raw is num) {
+      final v = raw.toInt();
+
+      return v > 0 ? v : null;
+    }
+    if (raw is String) {
+      final v = int.tryParse(raw.trim());
+      if (v != null && v > 0) return v;
+    }
+
+    return null;
+  }
+
+  /// Removes OpenAI-style role/tool_calls JSON and bare name/arguments tool
+  /// objects (including concatenated repeats) from visible text.
+  static String _stripToolJsonArtifacts(String text) {
+    if (!text.contains('{')) return text;
+
+    final buffer = StringBuffer();
+    var i = 0;
+    while (i < text.length) {
+      if (text[i] != '{') {
+        buffer.write(text[i]);
+        i++;
+        continue;
+      }
+
+      final end = _matchingBraceEnd(text, i);
+      if (end < 0) {
+        buffer.write(text.substring(i));
+        break;
+      }
+
+      final candidate = text.substring(i, end + 1);
+      if (_looksLikeToolJson(candidate)) {
+        i = end + 1;
+        continue;
+      }
+
+      buffer.write(candidate);
+      i = end + 1;
+    }
+
+    return buffer.toString();
+  }
+
+  static int _matchingBraceEnd(String text, int start) {
+    var depth = 0;
+    var inString = false;
+    var escape = false;
+    for (var i = start; i < text.length; i++) {
+      final ch = text[i];
+      if (inString) {
+        if (escape) {
+          escape = false;
+        } else if (ch == '\\') {
+          escape = true;
+        } else if (ch == '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        inString = true;
+        continue;
+      }
+      if (ch == '{') {
+        depth++;
+      } else if (ch == '}') {
+        depth--;
+        if (depth == 0) return i;
+      }
+    }
+
+    return -1;
+  }
+
+  static bool _looksLikeToolJson(String candidate) {
+    try {
+      final decoded = jsonDecode(candidate);
+      if (decoded is! Map) return false;
+      final map = Map<String, dynamic>.from(decoded);
+      if (map['tool_calls'] is List) return true;
+      final name = map['name'];
+      if (name is String && name.trim().isNotEmpty) {
+        if (map.containsKey('arguments') ||
+            map.containsKey('args') ||
+            map['type'] == 'function') {
+          return true;
+        }
+      }
+      final role = map['role'];
+      if (role is String &&
+          (role == 'assistant' || role == 'tool') &&
+          map.containsKey('tool_calls')) {
+        return true;
+      }
+    } catch (_) {}
+
+    return false;
+  }
+
+  static List<Map<String, dynamic>>? _parseJsonCalls(String text) {
     final results = <Map<String, dynamic>>[];
 
-    if (decoded['tool_calls'] is List) {
-      for (final call in decoded['tool_calls'] as List) {
-        if (call is! Map) continue;
-        final fn = call['function'] as Map?;
-        final name = (fn?['name'] ?? call['name']) as String?;
-        if (name == null || name.isEmpty) continue;
+    // Concatenated role envelopes: {...}{...}
+    var searchFrom = 0;
+    while (searchFrom < text.length) {
+      final start = text.indexOf('{', searchFrom);
+      if (start < 0) break;
+      final end = _matchingBraceEnd(text, start);
+      if (end < 0) break;
+      final candidate = text.substring(start, end + 1);
+      final decoded = _tryDecodeMap(candidate);
+      searchFrom = end + 1;
+      if (decoded == null) continue;
+
+      if (decoded['tool_calls'] is List) {
+        for (final call in decoded['tool_calls'] as List) {
+          if (call is! Map) continue;
+          final fn = call['function'] as Map?;
+          final name = (fn?['name'] ?? call['name']) as String?;
+          if (name == null || name.isEmpty) continue;
+          results.add({
+            'name': name,
+            'args': _coerceArguments(fn?['arguments'] ?? call['arguments']),
+          });
+        }
+        continue;
+      }
+
+      if (decoded['name'] is String) {
         results.add({
-          'name': name,
-          'args': _coerceArguments(fn?['arguments'] ?? call['arguments']),
+          'name': decoded['name'] as String,
+          'args': _coerceArguments(decoded['arguments'] ?? decoded['args']),
         });
       }
-      if (results.isNotEmpty) return results;
     }
 
-    if (decoded['name'] is String) {
-      results.add({
-        'name': decoded['name'] as String,
-        'args': _coerceArguments(decoded['arguments'] ?? decoded['args']),
-      });
+    if (results.isEmpty) return null;
 
-      return results;
-    }
+    return results;
+  }
+
+  static Map<String, dynamic>? _tryDecodeMap(String candidate) {
+    try {
+      final decoded = jsonDecode(candidate);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {}
 
     return null;
   }
@@ -197,6 +386,20 @@ class ToolCallParser {
       // Fall through to heuristic parsing.
     }
 
+    // Quote bare keys so {duration_minutes:10} can decode.
+    try {
+      final quotedKeys = asJson.replaceAllMapped(
+        RegExp(r'([{\[,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:'),
+        (m) => '${m[1]}"${m[2]}":',
+      );
+      final decoded = jsonDecode(quotedKeys);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      // Fall through.
+    }
+
     final args = <String, dynamic>{};
     final queriesMatch = RegExp(
       r'queries\s*:\s*\[\s*(.*?)\s*\]',
@@ -227,6 +430,30 @@ class ToolCallParser {
     ).firstMatch(raw);
     if (packageMatch != null) {
       args['package'] = packageMatch.group(1);
+    }
+
+    final durationMatch = RegExp(
+      r'''(?:duration_minutes|durationMinutes|duration|minutes)\s*:\s*(\d+)''',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    if (durationMatch != null) {
+      args['duration_minutes'] = int.parse(durationMatch.group(1)!);
+    }
+
+    final hourMatch = RegExp(
+      r'''hour\s*:\s*(\d+)''',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    if (hourMatch != null) {
+      args['hour'] = int.parse(hourMatch.group(1)!);
+    }
+
+    final minuteMatch = RegExp(
+      r'''minute\s*:\s*(\d+)''',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    if (minuteMatch != null) {
+      args['minute'] = int.parse(minuteMatch.group(1)!);
     }
 
     return args;
@@ -274,20 +501,5 @@ class ToolCallParser {
     }
 
     return <String, dynamic>{};
-  }
-
-  static Map<String, dynamic>? _decodeJsonObject(String text) {
-    try {
-      final trimmed = text.trim();
-      final start = trimmed.indexOf('{');
-      final end = trimmed.lastIndexOf('}');
-      if (start < 0 || end <= start) return null;
-      final candidate = trimmed.substring(start, end + 1);
-      final decoded = jsonDecode(candidate);
-      if (decoded is Map<String, dynamic>) return decoded;
-      if (decoded is Map) return Map<String, dynamic>.from(decoded);
-    } catch (_) {}
-
-    return null;
   }
 }

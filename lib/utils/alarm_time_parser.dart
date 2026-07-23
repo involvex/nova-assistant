@@ -1,7 +1,7 @@
-/// Parses natural-language alarm times from user queries.
+/// Parses natural-language alarm and timer times from user queries.
 ///
-/// Examples: "set an alarm for 7 AM", "alarm at 7pm", "wake me at 19:30",
-/// "stell einen Wecker um 19:00", "Wecker auf 7 Uhr".
+/// Alarm examples: "set an alarm for 7 AM", "Wecker auf 7 Uhr".
+/// Timer examples: "timer for 10 minutes", "stell mir einen Timer für 10 Minuten".
 class AlarmTimeParser {
   AlarmTimeParser._();
 
@@ -13,6 +13,22 @@ class AlarmTimeParser {
     r'weck\s+mich|'
     r'(wecker|alarm)\s+(auf|um|für|fuer)'
     r')\b',
+    caseSensitive: false,
+  );
+
+  static final RegExp _timerIntent = RegExp(
+    r'\b('
+    r'timer|countdown|egg[\s-]?timer|'
+    r'set\s+(a\s+)?timer|'
+    r'stell(e|en)?\s+(mir\s+)?(einen?\s+)?timer|'
+    r'timer\s+(für|fuer|for|auf)|'
+    r'in\s+\d+\s*(minutes?|mins?|minuten?)'
+    r')\b',
+    caseSensitive: false,
+  );
+
+  static final RegExp _durationMinutes = RegExp(
+    r'\b(?:für|fuer|for|in|auf)?\s*(\d+)\s*(minutes?|mins?|minuten?|min\.?)\b',
     caseSensitive: false,
   );
 
@@ -69,5 +85,25 @@ class AlarmTimeParser {
     }
 
     return null;
+  }
+
+  /// Parses relative timers ("10 minutes") into a wall-clock alarm time.
+  ///
+  /// Uses [now] when provided (tests); otherwise [DateTime.now].
+  static ({int hour, int minute, int durationMinutes})? tryParseTimer(
+    String query, {
+    DateTime? now,
+  }) {
+    if (!_timerIntent.hasMatch(query)) return null;
+
+    final match = _durationMinutes.firstMatch(query);
+    if (match == null) return null;
+
+    final duration = int.parse(match.group(1)!);
+    if (duration < 1 || duration > 24 * 60) return null;
+
+    final clock = (now ?? DateTime.now()).add(Duration(minutes: duration));
+
+    return (hour: clock.hour, minute: clock.minute, durationMinutes: duration);
   }
 }

@@ -54,6 +54,17 @@ object ToolExecutor {
                     "send_sms" -> sendSms(context, args)
                     "open_settings" -> openSettings(context)
                     "take_screenshot" -> takeScreenshot()
+                    "force_stop_app" -> {
+                        val pkg = args["package"] as? String
+                            ?: throw IllegalArgumentException("package required")
+                        ShizukuPowerHelper.forceStopPackage(pkg)
+                    }
+                    "open_app_info" -> {
+                        val pkg = args["package"] as? String
+                            ?: throw IllegalArgumentException("package required")
+                        ShizukuPowerHelper.openAppInfo(context, pkg)
+                    }
+                    "open_battery_settings" -> ShizukuPowerHelper.openBatterySettings(context)
                     else -> throw IllegalArgumentException("Unknown tool: $toolName")
                 }
                 result.success(output)
@@ -93,11 +104,28 @@ object ToolExecutor {
     }
 
     private fun setAlarm(context: Context, args: Map<*, *>): Map<String, Any> {
-        val hour = (args["hour"] as? Number)?.toInt()
-            ?: throw IllegalArgumentException("hour required")
-        val minute = (args["minute"] as? Number)?.toInt()
-            ?: throw IllegalArgumentException("minute required")
-        val message = args["message"] as? String ?: "Alarm"
+        var hour = (args["hour"] as? Number)?.toInt()
+        var minute = (args["minute"] as? Number)?.toInt()
+        val durationMinutes = (args["duration_minutes"] as? Number)?.toInt()
+            ?: (args["duration"] as? Number)?.toInt()
+            ?: (args["minutes"] as? Number)?.toInt()
+
+        if ((hour == null || minute == null) && durationMinutes != null && durationMinutes > 0) {
+            val cal = java.util.Calendar.getInstance()
+            cal.add(java.util.Calendar.MINUTE, durationMinutes)
+            hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+            minute = cal.get(java.util.Calendar.MINUTE)
+        }
+
+        hour ?: throw IllegalArgumentException("hour required")
+        minute ?: throw IllegalArgumentException("minute required")
+
+        val message = args["message"] as? String
+            ?: if (durationMinutes != null && durationMinutes > 0) {
+                "Timer $durationMinutes min"
+            } else {
+                "Alarm"
+            }
 
         sendProgress("set_alarm", "executing", 0.5, "Setting alarm for $hour:$minute...")
         val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {

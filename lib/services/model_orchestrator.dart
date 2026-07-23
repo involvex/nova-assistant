@@ -1559,6 +1559,8 @@ class ModelOrchestrator {
     bool hasPendingToolCalls = true;
     int toolRounds = 0;
     final List<Map<String, dynamic>> allToolCalls = [];
+    final executedToolSignatures = <String>{};
+    final lastToolResults = <String, Map<String, dynamic>>{};
     var safetyStopped = false;
     final maxOutputChars = GenerationSafety.maxOutputCharsForCustom();
 
@@ -1608,6 +1610,28 @@ class ModelOrchestrator {
                 final toolArgs = Map<String, dynamic>.from(
                   parsed['args'] as Map,
                 );
+                final signature = ToolCallParser.callSignature(
+                  toolName,
+                  toolArgs,
+                );
+                if (executedToolSignatures.contains(signature)) {
+                  allToolCalls.add({
+                    'name': toolName,
+                    'args': toolArgs,
+                    'result': {
+                      'success': true,
+                      'message':
+                          'Already called this turn with the same arguments. '
+                          'Use the previous result. Do not call this tool again.',
+                      if (lastToolResults[signature] != null)
+                        'previous': lastToolResults[signature],
+                    },
+                    'status': 'completed',
+                  });
+                  hasPendingToolCalls = false;
+                  continue;
+                }
+
                 _statusController.add('Executing $toolName...');
 
                 allToolCalls.add({
@@ -1633,6 +1657,9 @@ class ModelOrchestrator {
                     toolArgs,
                   );
                 }
+
+                executedToolSignatures.add(signature);
+                lastToolResults[signature] = toolResult;
 
                 allToolCalls.add({
                   'name': toolName,
@@ -1939,6 +1966,43 @@ class ModelOrchestrator {
     _generationCancelledByUser = false;
 
     try {
+      // Deterministic timer shortcut (relative duration → wall-clock alarm).
+      final parsedTimer = AlarmTimeParser.tryParseTimer(query);
+      if (parsedTimer != null) {
+        _statusController.add('Setting timer...');
+        final message = 'Timer ${parsedTimer.durationMinutes} min';
+        final result = await ToolExecutorService.instance.setAlarm(
+          parsedTimer.hour,
+          parsedTimer.minute,
+          message,
+        );
+        final ok = result['success'] == true;
+        final label =
+            '${parsedTimer.hour.toString().padLeft(2, '0')}:'
+            '${parsedTimer.minute.toString().padLeft(2, '0')}';
+        yield InferenceResult(
+          text: ok
+              ? 'Timer set for ${parsedTimer.durationMinutes} minutes '
+                    '(alarm at $label).'
+              : 'Could not set the timer: ${result['error'] ?? 'unknown error'}',
+          model: selector.primaryHeavy,
+          isStreaming: false,
+          toolCalls: [
+            {
+              'name': 'set_alarm',
+              'args': {
+                'hour': parsedTimer.hour,
+                'minute': parsedTimer.minute,
+                'message': message,
+                'duration_minutes': parsedTimer.durationMinutes,
+              },
+              'result': result,
+            },
+          ],
+        );
+        return;
+      }
+
       // Deterministic alarm shortcut: parse clock times and call set_alarm
       // without relying on the on-device model to convert AM/PM.
       final parsedAlarm = AlarmTimeParser.tryParse(query);
@@ -2379,6 +2443,8 @@ class ModelOrchestrator {
       bool hasPendingToolCalls = true;
       int toolRounds = 0;
       final List<Map<String, dynamic>> allToolCalls = [];
+      final executedToolSignatures = <String>{};
+      final lastToolResults = <String, Map<String, dynamic>>{};
 
       _isStreaming = true;
       _streamingCompleter = Completer<void>();
@@ -2417,7 +2483,7 @@ class ModelOrchestrator {
                 safetyStopped = true;
                 fullResponse = '$fullResponse$safetyMsg';
                 yield InferenceResult(
-                  text: fullResponse,
+                  text: _sanitizeAssistantText(fullResponse),
                   model: model,
                   isStreaming: true,
                   thinking: thinkingMode ? currentThinking : null,
@@ -2439,6 +2505,35 @@ class ModelOrchestrator {
                   final toolArgs = Map<String, dynamic>.from(
                     parsed['args'] as Map,
                   );
+                  final signature = ToolCallParser.callSignature(
+                    toolName,
+                    toolArgs,
+                  );
+
+                  if (executedToolSignatures.contains(signature)) {
+                    final dupResult = <String, dynamic>{
+                      'success': true,
+                      'message':
+                          'Already called this turn with the same arguments. '
+                          'Use the previous result. Do not call this tool again.',
+                      if (lastToolResults[signature] != null)
+                        'previous': lastToolResults[signature],
+                    };
+                    allToolCalls.add({
+                      'name': toolName,
+                      'args': toolArgs,
+                      'result': dupResult,
+                      'status': 'done',
+                    });
+                    await _activeChat!.addQuery(
+                      Message.toolResponse(
+                        toolName: toolName,
+                        response: dupResult,
+                      ),
+                    );
+                    hasPendingToolCalls = false;
+                    continue;
+                  }
 
                   // Block redundant screen captures when an image is already
                   // in context (attached photo / prior screenshot this turn).
@@ -2485,6 +2580,14 @@ class ModelOrchestrator {
                     yield update;
                   }
 
+                  final completed = allToolCalls.isNotEmpty
+                      ? allToolCalls.last['result']
+                      : null;
+                  if (completed is Map<String, dynamic>) {
+                    lastToolResults[signature] = completed;
+                  }
+                  executedToolSignatures.add(signature);
+
                   if (toolName == 'take_screenshot') {
                     screenshotToolCallsThisTurn++;
                     imageAlreadyAvailable = true;
@@ -2504,23 +2607,61 @@ class ModelOrchestrator {
             } else if (event is ThinkingResponse) {
               currentThinking = event.content;
               yield InferenceResult(
-                text: fullResponse,
+                text: _sanitizeAssistantText(fullResponse),
                 model: model,
                 isStreaming: true,
                 thinking: currentThinking,
                 toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
               );
             } else if (event is FunctionCallResponse) {
-              if (event.name == 'take_screenshot' &&
-                  (imageAlreadyAvailable || screenshotToolCallsThisTurn > 0)) {
+              final normalized = ToolCallParser.normalizeCall({
+                'name': event.name,
+                'args': Map<String, dynamic>.from(event.args),
+              });
+              final toolName = normalized['name'] as String;
+              final toolArgs = Map<String, dynamic>.from(
+                normalized['args'] as Map,
+              );
+              final signature = ToolCallParser.callSignature(
+                toolName,
+                toolArgs,
+              );
+
+              if (executedToolSignatures.contains(signature)) {
+                final dupResult = <String, dynamic>{
+                  'success': true,
+                  'message':
+                      'Already called this turn with the same arguments. '
+                      'Use the previous result. Do not call this tool again.',
+                  if (lastToolResults[signature] != null)
+                    'previous': lastToolResults[signature],
+                };
                 allToolCalls.add({
-                  'name': event.name,
-                  'args': Map<String, dynamic>.from(event.args),
+                  'name': toolName,
+                  'args': toolArgs,
+                  'result': dupResult,
                   'status': 'done',
                 });
                 await _activeChat!.addQuery(
                   Message.toolResponse(
-                    toolName: event.name,
+                    toolName: toolName,
+                    response: dupResult,
+                  ),
+                );
+                hasPendingToolCalls = false;
+                continue;
+              }
+
+              if (toolName == 'take_screenshot' &&
+                  (imageAlreadyAvailable || screenshotToolCallsThisTurn > 0)) {
+                allToolCalls.add({
+                  'name': toolName,
+                  'args': toolArgs,
+                  'status': 'done',
+                });
+                await _activeChat!.addQuery(
+                  Message.toolResponse(
+                    toolName: toolName,
                     response: {
                       'success': true,
                       'message':
@@ -2534,17 +2675,17 @@ class ModelOrchestrator {
               }
 
               // Plugin-level function call detected
-              _statusController.add('Executing ${event.name}...');
+              _statusController.add('Executing $toolName...');
 
               allToolCalls.add({
-                'name': event.name,
-                'args': Map<String, dynamic>.from(event.args),
+                'name': toolName,
+                'args': toolArgs,
                 'status': 'executing',
               });
 
               await for (final update in _executeToolWithProgress(
-                event.name,
-                Map<String, dynamic>.from(event.args),
+                toolName,
+                toolArgs,
                 allToolCalls,
                 model,
                 currentThinking,
@@ -2554,7 +2695,15 @@ class ModelOrchestrator {
                 yield update;
               }
 
-              if (event.name == 'take_screenshot') {
+              final completed = allToolCalls.isNotEmpty
+                  ? allToolCalls.last['result']
+                  : null;
+              if (completed is Map<String, dynamic>) {
+                lastToolResults[signature] = completed;
+              }
+              executedToolSignatures.add(signature);
+
+              if (toolName == 'take_screenshot') {
                 screenshotToolCallsThisTurn++;
                 imageAlreadyAvailable = true;
               }
@@ -2606,7 +2755,8 @@ class ModelOrchestrator {
         yield InferenceResult(
           text: fullResponse.trim().isEmpty
               ? '⚠️ Inference failed.\n\n$hint\n\n$streamError'
-              : '$fullResponse\n\n⚠️ Inference interrupted.\n$hint',
+              : '${_sanitizeAssistantText(fullResponse)}\n\n'
+                    '⚠️ Inference interrupted.\n$hint',
           model: model,
           isStreaming: false,
           thinking: thinkingMode ? currentThinking : null,
@@ -2618,14 +2768,15 @@ class ModelOrchestrator {
 
       if (toolRounds >= _maxToolRounds && hasPendingToolCalls) {
         inferenceStopwatch.stop();
+        final capped = _sanitizeAssistantText(fullResponse);
         yield InferenceResult(
-          text: '$fullResponse\n\n[Tool call limit reached]',
+          text: '$capped\n\n[Tool call limit reached]',
           model: model,
           isStreaming: false,
           thinking: thinkingMode ? currentThinking : null,
           inferenceTimeMs: inferenceStopwatch.elapsedMilliseconds,
         );
-        await MemoryService.storeConversation(query, fullResponse);
+        await MemoryService.storeConversation(query, capped);
         return;
       }
 
@@ -2726,7 +2877,7 @@ class ModelOrchestrator {
       allToolCalls.last['progress'] = 'Starting $toolName...';
     }
     yield InferenceResult(
-      text: fullResponse,
+      text: _sanitizeAssistantText(fullResponse),
       model: model,
       isStreaming: true,
       thinking: thinkingMode ? currentThinking : null,
@@ -2744,31 +2895,44 @@ class ModelOrchestrator {
         'search_notes',
         'list_notes',
       };
-      if (dartTools.contains(toolName)) {
-        if (['create_task', 'list_tasks', 'complete_task'].contains(toolName)) {
+      final normalized = ToolCallParser.normalizeCall({
+        'name': toolName,
+        'args': toolArgs,
+      });
+      final resolvedName = normalized['name'] as String;
+      final resolvedArgs = Map<String, dynamic>.from(
+        normalized['args'] as Map,
+      );
+
+      if (dartTools.contains(resolvedName)) {
+        if (['create_task', 'list_tasks', 'complete_task']
+            .contains(resolvedName)) {
           toolResult = await TaskService.instance.executeTool(
-            toolName,
-            toolArgs,
+            resolvedName,
+            resolvedArgs,
           );
         } else {
           toolResult = await NoteService.instance.executeTool(
-            toolName,
-            toolArgs,
+            resolvedName,
+            resolvedArgs,
           );
         }
       } else {
         // Try MCP external tools first, then native tools
         ExternalToolResult? mcpResult;
-        if (McpService.instance.getTool(toolName) != null) {
-          mcpResult = await McpService.instance.executeTool(toolName, toolArgs);
+        if (McpService.instance.getTool(resolvedName) != null) {
+          mcpResult = await McpService.instance.executeTool(
+            resolvedName,
+            resolvedArgs,
+          );
         }
 
         if (mcpResult != null) {
           toolResult = mcpResult.toJson();
         } else {
           toolResult = await ToolExecutorService.instance.executeTool(
-            toolName,
-            toolArgs,
+            resolvedName,
+            resolvedArgs,
           );
         }
       }
@@ -2786,14 +2950,21 @@ class ModelOrchestrator {
 
     // Yield final state with completed tool
     yield InferenceResult(
-      text: fullResponse,
+      text: _sanitizeAssistantText(fullResponse),
       model: model,
       isStreaming: true,
       thinking: thinkingMode ? currentThinking : null,
       toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
     );
 
-    await _sendToolResponse(toolName, toolResult);
+    await _sendToolResponse(
+      ToolCallParser.normalizeCall({
+            'name': toolName,
+            'args': toolArgs,
+          })['name']
+          as String,
+      toolResult,
+    );
   }
 
   /// Send a tool response to the model. For [take_screenshot], the image

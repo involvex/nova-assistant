@@ -30,13 +30,14 @@ import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/services/settings_backup_service.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/memory_service.dart';
+import 'package:nova_assistant/services/shizuku_service.dart';
 import 'package:nova_assistant/screens/prompt_presets_screen.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ignore_for_file: use_build_context_synchronously
 
-enum _SettingsHub { models, assistant, memory, appData }
+enum _SettingsHub { models, assistant, memory, appData, advanced }
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -59,6 +60,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isAssistantRoleHeld = false;
   bool _debugMode = false;
   String _debugMemoryLabel = 'Tap to refresh';
+  bool _shizukuAdvanced = false;
+  bool _shizukuAllowForceStop = false;
+  String _shizukuStatusLabel = 'Checking…';
   AssistantRole _assistantRole = AssistantRole.helpful;
   AssistantLanguage _assistantLanguage = AssistantLanguage.match;
   String _installStatus = '';
@@ -114,6 +118,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _autoCompact = prefs.getBool('settings_auto_compact') ?? true;
         _adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
         _debugMode = prefs.getBool('settings_debug_mode') ?? false;
+        _shizukuAdvanced = prefs.getBool('settings_shizuku_advanced') ?? false;
+        _shizukuAllowForceStop =
+            prefs.getBool('settings_shizuku_allow_force_stop') ?? false;
         _assistantRole = AssistantRole.fromString(
           prefs.getString('settings_assistant_role'),
         );
@@ -125,6 +132,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (_debugMode) {
         unawaited(_refreshDebugMemory());
       }
+      unawaited(ShizukuService.instance.ensureLoaded());
     }
   }
 
@@ -291,6 +299,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _SettingsHub.assistant => 'Assistant',
     _SettingsHub.memory => 'Memory & knowledge',
     _SettingsHub.appData => 'App & data',
+    _SettingsHub.advanced => 'Advanced (Shizuku)',
   };
 
   @override
@@ -317,6 +326,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _SettingsHub.assistant => _assistantHubChildren(context),
                 _SettingsHub.memory => _memoryHubChildren(context),
                 _SettingsHub.appData => _appDataHubChildren(context),
+                _SettingsHub.advanced => _advancedHubChildren(context),
               },
             ),
     );
@@ -349,6 +359,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: 'App & data',
           subtitle: 'Voice, tools, backup, about',
           onTap: () => setState(() => _hub = _SettingsHub.appData),
+        ),
+        _hubTile(
+          icon: Icons.security_outlined,
+          title: 'Advanced (Shizuku)',
+          subtitle: 'Force-stop apps, app info, battery (power users)',
+          onTap: () {
+            setState(() => _hub = _SettingsHub.advanced);
+            unawaited(_refreshShizukuStatus());
+          },
         ),
       ],
     );
@@ -929,6 +948,130 @@ class _SettingsScreenState extends State<SettingsScreen> {
         subtitle: 'Built with Flutter + flutter_gemma',
       ),
     ];
+  }
+
+  List<Widget> _advancedHubChildren(BuildContext context) {
+    return [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text(
+          'Power-user controls for freeing RAM before heavy models. '
+          'Does not change CPU governors or thermal policy.',
+          style: TextStyle(color: Colors.grey[500], fontSize: 13),
+        ),
+      ),
+      _toggleTile(
+        icon: Icons.security_outlined,
+        title: 'Enable Advanced (Shizuku)',
+        subtitle: 'Show power-user tools and status',
+        value: _shizukuAdvanced,
+        onChanged: (v) async {
+          setState(() => _shizukuAdvanced = v);
+          await ShizukuService.instance.setAdvancedEnabled(v);
+          await _refreshShizukuStatus();
+        },
+      ),
+      if (_shizukuAdvanced) ...[
+        _infoTile(
+          icon: Icons.info_outline,
+          title: 'Privilege status',
+          subtitle: _shizukuStatusLabel,
+        ),
+        _actionTile(
+          icon: Icons.vpn_key_outlined,
+          title: 'Request Shizuku permission',
+          subtitle: 'Grant Nova access via the Shizuku app',
+          onTap: () async {
+            final result = await ShizukuService.instance.requestPermission();
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  result['success'] == true
+                      ? 'Permission request sent — check Shizuku'
+                      : (result['error']?.toString() ?? 'Request failed'),
+                ),
+              ),
+            );
+            await _refreshShizukuStatus();
+          },
+        ),
+        _toggleTile(
+          icon: Icons.dangerous_outlined,
+          title: 'Allow assistant to force-stop apps',
+          subtitle:
+              'Exposes force_stop_app to the model (always confirms first)',
+          value: _shizukuAllowForceStop,
+          onChanged: (v) async {
+            setState(() => _shizukuAllowForceStop = v);
+            await ShizukuService.instance.setAllowAssistantForceStop(v);
+          },
+        ),
+        _actionTile(
+          icon: Icons.refresh,
+          title: 'Refresh status',
+          subtitle: 'Re-check Shizuku / su availability',
+          onTap: _refreshShizukuStatus,
+        ),
+        _sectionHeader('Non-root helpers'),
+        _actionTile(
+          icon: Icons.battery_full_outlined,
+          title: 'Open battery settings',
+          subtitle: 'System power usage screen',
+          onTap: () async {
+            final result = await ShizukuService.instance.openBatterySettings();
+            if (!context.mounted) return;
+            if (result['success'] != true) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(result['error']?.toString() ?? 'Failed'),
+                ),
+              );
+            }
+          },
+        ),
+        _actionTile(
+          icon: Icons.apps_outlined,
+          title: 'Open Chrome app info',
+          subtitle: 'Example: force-stop manually from App Info',
+          onTap: () async {
+            await ShizukuService.instance.openAppInfo('com.android.chrome');
+          },
+        ),
+        _actionTile(
+          icon: Icons.memory_outlined,
+          title: 'Unload inference model',
+          subtitle: 'Free Nova RAM without killing other apps',
+          onTap: () async {
+            await ModelOrchestrator.instance.releaseIdleResources(force: true);
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Model unload requested')),
+            );
+          },
+        ),
+      ],
+    ];
+  }
+
+  Future<void> _refreshShizukuStatus() async {
+    await ShizukuService.instance.ensureLoaded();
+    final status = await ShizukuService.instance.status();
+    if (!mounted) return;
+    final ready = status['ready'] == true;
+    final binder = status['binderAlive'] == true;
+    final perm = status['permissionGranted'] == true;
+    final su = status['suAvailable'] == true;
+    setState(() {
+      _shizukuAdvanced = ShizukuService.instance.advancedEnabled;
+      _shizukuAllowForceStop = ShizukuService.instance.allowAssistantForceStop;
+      _shizukuStatusLabel = ready
+          ? 'Ready'
+                '${binder && perm ? ' (Shizuku)' : ''}'
+                '${su ? ' (su)' : ''}'
+          : 'Not ready — binder=${binder ? 'yes' : 'no'}, '
+                'permission=${perm ? 'yes' : 'no'}, su=${su ? 'yes' : 'no'}';
+    });
   }
 
   // Hub helpers above; install / dialogs below.

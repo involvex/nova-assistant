@@ -1,9 +1,11 @@
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
+import 'package:nova_assistant/services/shizuku_service.dart';
 
 class NovaTools {
   static List<Tool> get all => [
     ..._builtInTools,
+    if (ShizukuService.instance.shouldExposeForceStopTool) forceStopApp,
     ...McpService.instance.enabledTools,
   ];
 
@@ -17,6 +19,8 @@ class NovaTools {
     sendSms,
     openSettings,
     takeScreenshot,
+    openAppInfo,
+    openBatterySettings,
     createTask,
     listTasks,
     completeTask,
@@ -40,11 +44,15 @@ class NovaTools {
   static final Tool setAlarm = Tool(
     name: 'set_alarm',
     description:
-        'Set a device alarm. Call immediately when the user gives a time — '
-        'do not ask again for information already in the message. '
-        'Convert 12-hour times to 24-hour: 7 AM → hour=7, 7 PM → hour=19, '
-        'noon → 12, midnight → 0. If minutes are omitted, use minute=0. '
-        'Example: "set alarm for 7pm" → set_alarm(hour=19, minute=0).',
+        'Set a device alarm or timer. Call immediately when the user gives a '
+        'time or duration — do not ask again for information already in the '
+        'message. Absolute times: convert 12-hour to 24-hour '
+        '(7 AM → hour=7, 7 PM → hour=19, noon → 12, midnight → 0); '
+        'omit minutes → minute=0. Relative timers: for "timer for 10 minutes" '
+        '/ "Timer für 10 Minuten", pass duration_minutes=10 (hour/minute are '
+        'computed automatically). Prefer duration_minutes for relative timers. '
+        'Example: "set alarm for 7pm" → set_alarm(hour=19, minute=0). '
+        'Example: "timer for 10 minutes" → set_alarm(duration_minutes=10).',
     parameters: {
       'type': 'object',
       'properties': {
@@ -56,9 +64,15 @@ class NovaTools {
           'type': 'integer',
           'description': 'Minute (0-59). Default to 0 if the user did not specify minutes.',
         },
+        'duration_minutes': {
+          'type': 'integer',
+          'description':
+              'Relative timer length in minutes from now. Use instead of '
+              'hour/minute when the user asks for a timer/countdown.',
+        },
         'message': {'type': 'string', 'description': 'Alarm label/message'},
       },
-      'required': ['hour', 'minute'],
+      'required': <String>[],
     },
   );
 
@@ -183,6 +197,54 @@ class NovaTools {
         'or asks about "the picture", "the image", or "the screenshot" '
         'already shown in the chat — describe that attached image instead. '
         'This captures ONE static image, not a video or stream.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{},
+    },
+  );
+
+  static final Tool forceStopApp = Tool(
+    name: 'force_stop_app',
+    description:
+        'Force-stop another app to free RAM (requires Shizuku or root and '
+        'user confirmation). Use ONLY when the user explicitly asks to '
+        'force-stop, kill, or close a specific app by package name. '
+        'Never force-stop Nova itself.',
+    parameters: {
+      'type': 'object',
+      'properties': {
+        'package': {
+          'type': 'string',
+          'description': 'Exact Android package name to force-stop',
+        },
+      },
+      'required': ['package'],
+    },
+  );
+
+  static final Tool openAppInfo = Tool(
+    name: 'open_app_info',
+    description:
+        'Open the system App Info page for a package (Force stop / battery '
+        'usage without privileged APIs). Use when the user wants app details '
+        'or to manually force-stop an app.',
+    parameters: {
+      'type': 'object',
+      'properties': {
+        'package': {
+          'type': 'string',
+          'description': 'Exact Android package name',
+        },
+      },
+      'required': ['package'],
+    },
+  );
+
+  static final Tool openBatterySettings = Tool(
+    name: 'open_battery_settings',
+    description:
+        'Open the device battery / power usage settings. '
+        'Use when the user asks about battery usage or power settings.',
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},

@@ -16,7 +16,8 @@ import java.io.File
 
 /**
  * MainActivity — the primary Flutter activity for Nova.
- * Also handles launching from the assistant button via Intent extras.
+ * Also handles launching from the assistant button via Intent extras
+ * and receiving shared text/URLs via ACTION_SEND.
  */
 class MainActivity : FlutterActivity() {
 
@@ -26,11 +27,19 @@ class MainActivity : FlutterActivity() {
         private const val METHOD_CHANNEL = "dev.nova.assistant/main"
         private const val DIAGNOSTICS_CHANNEL = "dev.nova.assistant/diagnostics"
         private const val EVENT_CHANNEL = "dev.nova.assistant/main_events"
+        private const val SHARE_METHOD_CHANNEL = "dev.nova.assistant/share"
+        private const val SHARE_EVENT_CHANNEL = "dev.nova.assistant/share_events"
         private const val WIDGET_ACTION_KEY = "home_widget_action"
+        private const val SHARE_PREFS_NAME = "NovaSharePreferences"
+        private const val PENDING_SHARE_KEY = "nova_pending_share"
         const val WIDGET_PREFS_NAME = "HomeWidgetPreferences"
+
+        @Volatile
+        private var pendingShareText: String? = null
     }
 
     private var assistantRoleEventSink: EventChannel.EventSink? = null
+    private var shareEventSink: EventChannel.EventSink? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -75,7 +84,7 @@ class MainActivity : FlutterActivity() {
             this
         )
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.nova.assistant/share")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARE_METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "shareText" -> {
@@ -90,9 +99,24 @@ class MainActivity : FlutterActivity() {
                         startActivity(Intent.createChooser(intent, subject))
                         result.success(true)
                     }
+                    "getPendingShare" -> {
+                        val pending = consumePendingShare()
+                        result.success(pending)
+                    }
                     else -> result.notImplemented()
                 }
             }
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, SHARE_EVENT_CHANNEL)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    shareEventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    shareEventSink = null
+                }
+            })
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DIAGNOSTICS_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -179,7 +203,14 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun handleIntent(intent: Intent) {
+    private fun handleIntent(intent: Intent?) {
+        if (intent == null) return
+
+        if (intent.action == Intent.ACTION_SEND) {
+            handleShareIntent(intent)
+            return
+        }
+
         val dataString = intent.dataString ?: return
         if (dataString.startsWith("nova://widget/")) {
             val action = dataString.removePrefix("nova://widget/")
@@ -191,8 +222,63 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun handleShareIntent(intent: Intent) {
+        val type = intent.type ?: ""
+        if (!type.startsWith("text/")) {
+            Log.d("NovaMain", "Ignoring non-text share type: $type")
+            return
+        }
+
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+        val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT)?.trim().orEmpty()
+        val combined = when {
+            text.isEmpty() && subject.isEmpty() -> return
+            text.isEmpty() -> subject
+            subject.isEmpty() || text.contains(subject) -> text
+            else -> "$subject\n$text"
+        }
+
+        if (combined.isBlank()) return
+
+        Log.d("NovaMain", "Share received (${combined.length} chars)")
+        storePendingShare(combined)
+        val sink = shareEventSink
+        if (sink != null) {
+            sink.success(combined)
+            // Delivered live — clear so a later cold start does not re-apply.
+            clearPendingShare()
+        }
+    }
+
+    private fun storePendingShare(text: String) {
+        pendingShareText = text
+        getSharedPreferences(SHARE_PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putString(PENDING_SHARE_KEY, text)
+            .apply()
+    }
+
+    private fun clearPendingShare() {
+        pendingShareText = null
+        getSharedPreferences(SHARE_PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .remove(PENDING_SHARE_KEY)
+            .apply()
+    }
+
+    private fun consumePendingShare(): String? {
+        val fromMemory = pendingShareText
+        val prefs = getSharedPreferences(SHARE_PREFS_NAME, MODE_PRIVATE)
+        val fromPrefs = prefs.getString(PENDING_SHARE_KEY, null)
+        clearPendingShare()
+        val result = fromMemory?.takeIf { it.isNotBlank() }
+            ?: fromPrefs?.takeIf { it.isNotBlank() }
+        return result
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
     }
 

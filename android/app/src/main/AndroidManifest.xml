@@ -95,6 +95,12 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="nova" />
             </intent-filter>
+            <!-- Receive text / URL shares from other apps -->
+            <intent-filter android:label="Nova">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
         <!-- Assistant Activity — triggered by system assistant button -->

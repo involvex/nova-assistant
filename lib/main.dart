@@ -25,6 +25,7 @@ import 'package:nova_assistant/services/model_update_service.dart';
 import 'package:nova_assistant/services/parallel_session_manager.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/widget_service.dart';
+import 'package:nova_assistant/services/share_intent_service.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
@@ -162,10 +163,13 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<String>? _widgetActionSub;
   StreamSubscription<String>? _notificationActionSub;
+  StreamSubscription<String>? _shareIntentSub;
 
   String? _lastWidgetAction;
   DateTime? _lastWidgetActionTime;
   static const _widgetActionDebounceMs = 1000;
+
+  String? _pendingShareText;
 
   @override
   void initState() {
@@ -173,6 +177,7 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _setupWidgetNavigation();
     _setupNotificationNavigation();
+    _setupShareIntentNavigation();
   }
 
   void _setupWidgetNavigation() {
@@ -194,6 +199,47 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
       onError: (Object error) {
         debugPrint('Notification navigation error: $error');
       },
+    );
+  }
+
+  void _setupShareIntentNavigation() {
+    _shareIntentSub = ShareIntentService.instance.shareStream.listen(
+      (String text) {
+        _openChatWithSharedText(text);
+      },
+      onError: (Object error) {
+        debugPrint('Share intent navigation error: $error');
+      },
+    );
+    // Listen first so cold-start getPendingShare is not missed.
+    unawaited(ShareIntentService.instance.initialize());
+  }
+
+  void _openChatWithSharedText(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) {
+      _pendingShareText = trimmed;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final pending = _pendingShareText;
+        if (pending == null) return;
+        _pendingShareText = null;
+        _openChatWithSharedText(pending);
+      });
+
+      return;
+    }
+
+    navigator.pushAndRemoveUntil<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => AssistantScreen(
+          initialPrompt: trimmed,
+          autoSendInitialPrompt: false,
+        ),
+      ),
+      (route) => route.isFirst,
     );
   }
 
@@ -305,8 +351,14 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('Error disposing WidgetService: $e');
     }
+    try {
+      ShareIntentService.instance.dispose();
+    } catch (e) {
+      debugPrint('Error disposing ShareIntentService: $e');
+    }
     _widgetActionSub?.cancel();
     _notificationActionSub?.cancel();
+    _shareIntentSub?.cancel();
   }
 
   @override

@@ -552,6 +552,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: sections.length,
+      itemExtent: 88,
       itemBuilder: (context, index) {
         final group = sections[index];
         final conversations = groups[group]!;

@@ -191,7 +191,9 @@ class _AssistantScreenState extends State<AssistantScreen>
     _statusSub?.cancel();
     _statusSub = ModelOrchestrator.instance.statusStream.listen((status) {
       if (!mounted) return;
-      setState(() => _status = status);
+      if (status != _status) {
+        setState(() => _status = status);
+      }
       _checkModelAvailability();
       if (status.startsWith('NEED_DOWNLOAD_CONSENT:')) {
         final modelName = status.substring('NEED_DOWNLOAD_CONSENT:'.length);
@@ -1501,56 +1503,58 @@ class _AssistantScreenState extends State<AssistantScreen>
                           itemBuilder: (context, index) {
                             final msg = _messages[index];
 
-                            return ChatBubble(
-                              message: msg,
-                              onScreenshotTap: msg.imageData != null
-                                  ? () => _showFullScreenshot(msg.imageData!)
-                                  : null,
-                              onRetry: msg.isError && !msg.isUser
-                                  ? () => _retryFromError(index)
-                                  : null,
-                              onSettingsTap: msg.isError && !msg.isUser
-                                  ? () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute<void>(
-                                          builder: (context) =>
-                                              const SettingsScreen(),
-                                        ),
-                                      );
-                                    }
-                                  : null,
-                              onCopy: () {
-                                Clipboard.setData(
-                                  ClipboardData(text: msg.text),
-                                );
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Copied to clipboard'),
-                                    duration: Duration(seconds: 2),
-                                  ),
-                                );
-                              },
-                              onReactionRequest: () =>
-                                  _showReactionPicker(index),
-                              onReactionChipTap: (emoji) =>
-                                  _toggleReaction(index, emoji),
-                              onRegenerate:
-                                  !msg.isUser &&
-                                      !msg.isError &&
-                                      !msg.isStreaming
-                                  ? () => _regenerateResponse(index)
-                                  : null,
-                              onSpeak:
-                                  !msg.isUser &&
-                                      !msg.isError &&
-                                      !msg.isStreaming &&
-                                      TtsService.instance.isEnabled
-                                  ? () => _speakMessage(msg.text)
-                                  : null,
-                              onEdit: msg.isUser && !_isGenerating
-                                  ? () => _editUserMessage(index)
-                                  : null,
+                            return RepaintBoundary(
+                              child: ChatBubble(
+                                message: msg,
+                                onScreenshotTap: msg.imageData != null
+                                    ? () => _showFullScreenshot(msg.imageData!)
+                                    : null,
+                                onRetry: msg.isError && !msg.isUser
+                                    ? () => _retryFromError(index)
+                                    : null,
+                                onSettingsTap: msg.isError && !msg.isUser
+                                    ? () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute<void>(
+                                            builder: (context) =>
+                                                const SettingsScreen(),
+                                          ),
+                                        );
+                                      }
+                                    : null,
+                                onCopy: () {
+                                  Clipboard.setData(
+                                    ClipboardData(text: msg.text),
+                                  );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Copied to clipboard'),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                },
+                                onReactionRequest: () =>
+                                    _showReactionPicker(index),
+                                onReactionChipTap: (emoji) =>
+                                    _toggleReaction(index, emoji),
+                                onRegenerate:
+                                    !msg.isUser &&
+                                        !msg.isError &&
+                                        !msg.isStreaming
+                                    ? () => _regenerateResponse(index)
+                                    : null,
+                                onSpeak:
+                                    !msg.isUser &&
+                                        !msg.isError &&
+                                        !msg.isStreaming &&
+                                        TtsService.instance.isEnabled
+                                    ? () => _speakMessage(msg.text)
+                                    : null,
+                                onEdit: msg.isUser && !_isGenerating
+                                    ? () => _editUserMessage(index)
+                                    : null,
+                              ),
                             );
                           },
                         ),

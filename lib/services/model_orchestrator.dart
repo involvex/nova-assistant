@@ -2643,10 +2643,7 @@ class ModelOrchestrator {
                   'status': 'done',
                 });
                 await _activeChat!.addQuery(
-                  Message.toolResponse(
-                    toolName: toolName,
-                    response: dupResult,
-                  ),
+                  Message.toolResponse(toolName: toolName, response: dupResult),
                 );
                 hasPendingToolCalls = false;
                 continue;
@@ -2900,13 +2897,14 @@ class ModelOrchestrator {
         'args': toolArgs,
       });
       final resolvedName = normalized['name'] as String;
-      final resolvedArgs = Map<String, dynamic>.from(
-        normalized['args'] as Map,
-      );
+      final resolvedArgs = Map<String, dynamic>.from(normalized['args'] as Map);
 
       if (dartTools.contains(resolvedName)) {
-        if (['create_task', 'list_tasks', 'complete_task']
-            .contains(resolvedName)) {
+        if ([
+          'create_task',
+          'list_tasks',
+          'complete_task',
+        ].contains(resolvedName)) {
           toolResult = await TaskService.instance.executeTool(
             resolvedName,
             resolvedArgs,
@@ -2958,10 +2956,7 @@ class ModelOrchestrator {
     );
 
     await _sendToolResponse(
-      ToolCallParser.normalizeCall({
-            'name': toolName,
-            'args': toolArgs,
-          })['name']
+      ToolCallParser.normalizeCall({'name': toolName, 'args': toolArgs})['name']
           as String,
       toolResult,
     );

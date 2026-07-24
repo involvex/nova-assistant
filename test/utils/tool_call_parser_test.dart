@@ -116,13 +116,10 @@ void main() {
 
     test('maps duration_minutes to wall-clock hour/minute', () {
       final fixed = DateTime(2026, 7, 19, 16, 30);
-      final call = ToolCallParser.normalizeCall(
-        {
-          'name': 'set_alarm',
-          'args': {'duration_minutes': 10},
-        },
-        now: fixed,
-      );
+      final call = ToolCallParser.normalizeCall({
+        'name': 'set_alarm',
+        'args': {'duration_minutes': 10},
+      }, now: fixed);
       final args = call['args'] as Map<String, dynamic>;
 
       expect(args['hour'], 16);
@@ -132,8 +129,7 @@ void main() {
     });
 
     test('parses ChatML set_alarm with unquoted duration_minutes', () {
-      const raw =
-          '<|tool_call>call:set_alarm{duration_minutes:10}<tool_call|>';
+      const raw = '<|tool_call>call:set_alarm{duration_minutes:10}<tool_call|>';
       final calls = ToolCallParser.parse(raw);
       expect(calls, isNotNull);
       expect(calls!.single['name'], 'set_alarm');

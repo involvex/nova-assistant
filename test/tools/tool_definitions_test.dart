@@ -77,10 +77,7 @@ void main() {
       });
 
       test('description mentions relative timers', () {
-        expect(
-          NovaTools.setAlarm.description,
-          contains('duration_minutes'),
-        );
+        expect(NovaTools.setAlarm.description, contains('duration_minutes'));
       });
     });
 

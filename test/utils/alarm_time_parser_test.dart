@@ -79,10 +79,7 @@ void main() {
 
     test('parses in N Minuten relative timer', () {
       final fixed = DateTime(2026, 7, 19, 12, 0);
-      final result = AlarmTimeParser.tryParseTimer(
-        'in 15 Minuten',
-        now: fixed,
-      );
+      final result = AlarmTimeParser.tryParseTimer('in 15 Minuten', now: fixed);
       expect(result, isNotNull);
       expect(result!.durationMinutes, 15);
       expect(result.hour, 12);

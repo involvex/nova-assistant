@@ -47,7 +47,8 @@ dart_code_linter:
     - prefer-trailing-comma: false
     - prefer-conditional-expressions: false
     - no-equal-then-else: false
-    - prefer-moving-to-variable: true
+    # Noisy across UI/services (Theme.of/MediaQuery/getters); style debt, not defects.
+    - prefer-moving-to-variable: false
     - prefer-match-file-name: false
 
 linter:

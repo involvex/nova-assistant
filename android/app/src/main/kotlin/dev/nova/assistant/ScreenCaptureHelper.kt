@@ -228,8 +228,9 @@ object ScreenCaptureHelper {
                 captureWidth = metrics.widthPixels.coerceAtLeast(1)
                 captureHeight = metrics.heightPixels.coerceAtLeast(1)
             }
-            // Cap very large displays to keep PNG size reasonable
-            val maxDim = 1920
+            // Cap displays for vision KV budget (full 1080×2400 + tools
+            // overflows Gemma 4 @ 4096 tokens on the first message).
+            val maxDim = 896
             if (captureWidth > maxDim || captureHeight > maxDim) {
                 val scale = maxDim.toFloat() / maxOf(captureWidth, captureHeight)
                 captureWidth = (captureWidth * scale).toInt().coerceAtLeast(1)

@@ -37,6 +37,7 @@ import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/utils/open_app_intent_parser.dart';
 import 'package:nova_assistant/utils/search_web_intent_parser.dart';
 import 'package:nova_assistant/utils/tool_call_parser.dart';
+import 'package:nova_assistant/utils/vision_image_prep.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/session_history_reinjection.dart';
 
@@ -1539,16 +1540,27 @@ class ModelOrchestrator {
     if (screenshot != null &&
         screenshot.isNotEmpty &&
         _activeModelSupportsImage) {
+      final visionBytes = await VisionImagePrep.prepareForInference(screenshot);
       message = Message.withImage(
         text: query,
-        imageBytes: screenshot,
+        imageBytes: visionBytes,
         isUser: true,
       );
     } else {
       message = Message.text(text: query, isUser: true);
     }
 
-    await chat.addQuery(message);
+    try {
+      await chat.addQuery(message);
+    } catch (e) {
+      yield InferenceResult(
+        text: '⚠️ Could not start inference with this image.\n\n$e',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+      );
+
+      return;
+    }
 
     // Generate response
     String fullResponse = '';
@@ -1793,7 +1805,6 @@ class ModelOrchestrator {
   }
 
   static const _contextBudgetRatio = 0.6;
-  static const _imageTokenEstimate = 500;
   static const _maxContextInjectionChars = 3000;
 
   String _capContextInjection(String context) {
@@ -1808,8 +1819,10 @@ class ModelOrchestrator {
     NovaModel? model,
     bool isCustomModel = false,
     bool hasAttachments = false,
+    bool hasVisionImage = false,
     int historyTokenEstimate = 0,
     int ragTokenEstimate = 0,
+    int systemPromptTokenEstimate = 0,
   }) {
     if (model == null || isCustomModel) {
       return MessageLimits.validateLength(
@@ -1825,7 +1838,9 @@ class ModelOrchestrator {
       effectiveModel: model,
       historyTokenEstimate: historyTokenEstimate,
       ragTokenEstimate: ragTokenEstimate,
+      systemPromptTokenEstimate: systemPromptTokenEstimate,
       hasAttachments: hasAttachments,
+      hasVisionImage: hasVisionImage,
       highContext: _highContextEnabled,
     );
   }
@@ -1879,7 +1894,7 @@ class ModelOrchestrator {
   }
 
   int _estimateTokens(Message message) {
-    if (message.hasImage) return _imageTokenEstimate;
+    if (message.hasImage) return MessageLimits.visionImageTokenEstimate;
     return (message.text.length / 4).round();
   }
 
@@ -2273,7 +2288,15 @@ class ModelOrchestrator {
         _modelOverrideDirty = false;
       }
 
-      final chatTools = _toolsForCreateChat(model, tools);
+      // Vision + full native tool schemas + screenshot often exceeds KV
+      // (e.g. 4609 >= 4096). Keep tools as text capability only on image turns.
+      final visionInput = (screenshot != null && screenshot.isNotEmpty)
+          ? screenshot
+          : null;
+      final hasVisionImage = visionInput != null && model.hasVision;
+      final chatTools = hasVisionImage
+          ? const <Tool>[]
+          : _toolsForCreateChat(model, tools);
       // SmolLM has no FC and cannot absorb tool essays in a tiny KV window.
       final textToolPrompt =
           model != NovaModel.smollm && chatTools.isEmpty && tools.isNotEmpty;
@@ -2397,6 +2420,9 @@ class ModelOrchestrator {
         0,
         (sum, msg) => sum + _estimateTokens(msg),
       );
+      final systemPromptTokenEstimate = MessageLimits.estimateTokens(
+        systemInstruction,
+      );
 
       await _truncateContext(_activeChat!, model);
 
@@ -2404,8 +2430,10 @@ class ModelOrchestrator {
         query: query,
         model: model,
         hasAttachments: hasExtraContext,
+        hasVisionImage: hasVisionImage,
         historyTokenEstimate: historyTokenEstimate,
         ragTokenEstimate: ragTokenEstimate,
+        systemPromptTokenEstimate: systemPromptTokenEstimate,
       );
       if (queryError != null) {
         _statusController.add('Message too long');
@@ -2419,19 +2447,41 @@ class ModelOrchestrator {
       }
 
       final Message message;
-      if (screenshot != null &&
-          screenshot.isNotEmpty &&
-          _activeModelSupportsImage) {
+      if (visionInput != null && hasVisionImage && _activeModelSupportsImage) {
+        final visionBytes = await VisionImagePrep.prepareForInference(
+          visionInput,
+        );
         message = Message.withImage(
           text: query,
-          imageBytes: screenshot,
+          imageBytes: visionBytes,
           isUser: true,
         );
       } else {
         message = Message.text(text: query, isUser: true);
       }
 
-      await _activeChat!.addQuery(message);
+      try {
+        await _activeChat!.addQuery(message);
+      } catch (e) {
+        _activeChat = null;
+        _lastChatSessionKey = null;
+        final err = e.toString();
+        final isTokenOverflow =
+            err.contains('too long') ||
+            err.contains('INVALID_ARGUMENT') ||
+            err.contains('Exceeding the maximum');
+        yield InferenceResult(
+          text: isTokenOverflow
+              ? '⚠️ This screenshot plus the system context is too large '
+                    'for the model\'s context window. Try a shorter question, '
+                    'turn off High context in Settings, or reset inference.'
+              : '⚠️ Could not start inference.\n\n$e',
+          model: model,
+          isStreaming: false,
+        );
+
+        return;
+      }
 
       String fullResponse = '';
       String? currentThinking;
@@ -2744,8 +2794,14 @@ class ModelOrchestrator {
         _activeChat = null;
         inferenceStopwatch.stop();
         final hint =
-            streamError.toString().contains('prefill') ||
-                streamError.toString().contains('Session')
+            streamError.toString().contains('too long') ||
+                streamError.toString().contains('INVALID_ARGUMENT') ||
+                streamError.toString().contains('Exceeding the maximum')
+            ? 'The prompt (screenshot + tools/context) exceeded the model '
+                  'context window. Try a shorter question, disable High '
+                  'context in Settings, or Settings → Reset inference.'
+            : streamError.toString().contains('prefill') ||
+                  streamError.toString().contains('Session')
             ? 'The model session broke (often after edit/regenerate). '
                   'Retry the message — a fresh session will be created.'
             : 'Try again. If it keeps failing: Settings → Reset inference.';
@@ -3011,9 +3067,12 @@ class ModelOrchestrator {
       if (imageBytes != null &&
           imageBytes.isNotEmpty &&
           _activeModelSupportsImage) {
+        final visionBytes = await VisionImagePrep.prepareForInference(
+          imageBytes,
+        );
         final imageMessage = Message.withImage(
           text: '[Screenshot captured]',
-          imageBytes: imageBytes,
+          imageBytes: visionBytes,
           isUser: true,
         );
         await _activeChat!.addQuery(imageMessage);
@@ -3022,7 +3081,7 @@ class ModelOrchestrator {
           hypothesisId: 'H8',
           location: 'model_orchestrator.dart:_sendToolResponse',
           message: 'vision image attached to chat',
-          data: {'imageBytes': imageBytes.length},
+          data: {'imageBytes': visionBytes.length},
           runId: 'post-fix',
         );
         // #endregion

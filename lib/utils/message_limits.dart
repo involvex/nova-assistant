@@ -12,10 +12,16 @@ class MessageLimits {
   static const highContextBudgetRatio = 0.7;
 
   /// Fixed token overhead baked into Gemma 4 sessions (jinja FC template, etc.).
-  static const gemma4JinjaOverheadTokens = 350;
+  static const gemma4JinjaOverheadTokens = 400;
 
   /// Typical system prompt + role + identity overhead.
   static const systemPromptOverheadTokens = 220;
+
+  /// Conservative vision-image token estimate (phone screenshot tiles).
+  static const visionImageTokenEstimate = 1024;
+
+  /// Leave headroom so native prefill never sits on the KV ceiling.
+  static const kvSafetyMarginTokens = 128;
 
   static const exhaustedBudgetFloorChars = 400;
 
@@ -108,19 +114,27 @@ class MessageLimits {
     required NovaModel effectiveModel,
     int historyTokenEstimate = 0,
     int ragTokenEstimate = 0,
+    int systemPromptTokenEstimate = 0,
     bool hasAttachments = false,
     bool highContext = false,
+    bool hasVisionImage = false,
   }) {
     final kvLimit = kvTokenLimitFor(effectiveModel, highContext: highContext);
     final ratio = highContext ? highContextBudgetRatio : contextBudgetRatio;
-    final usableBudget = (kvLimit * ratio).round();
+    final usableBudget = (kvLimit * ratio).round() - kvSafetyMarginTokens;
 
-    var reserved = systemPromptOverheadTokens + historyTokenEstimate;
+    var reserved = historyTokenEstimate + ragTokenEstimate;
+    reserved += systemPromptTokenEstimate > 0
+        ? systemPromptTokenEstimate
+        : systemPromptOverheadTokens;
     if (effectiveModel == NovaModel.gemma4E2b) {
       reserved += gemma4JinjaOverheadTokens;
     }
-    reserved += ragTokenEstimate;
-    if (hasAttachments) reserved += 200;
+    if (hasVisionImage) {
+      reserved += visionImageTokenEstimate;
+    } else if (hasAttachments) {
+      reserved += 200;
+    }
 
     final remainingTokens = usableBudget - reserved;
     if (remainingTokens <= 0) return exhaustedBudgetFloorChars;
@@ -138,15 +152,19 @@ class MessageLimits {
     required NovaModel effectiveModel,
     int historyTokenEstimate = 0,
     int ragTokenEstimate = 0,
+    int systemPromptTokenEstimate = 0,
     bool hasAttachments = false,
     bool highContext = false,
+    bool hasVisionImage = false,
   }) {
     final hard = maxUserCharsForInference(
       effectiveModel: effectiveModel,
       historyTokenEstimate: historyTokenEstimate,
       ragTokenEstimate: ragTokenEstimate,
+      systemPromptTokenEstimate: systemPromptTokenEstimate,
       hasAttachments: hasAttachments,
       highContext: highContext,
+      hasVisionImage: hasVisionImage,
     );
 
     return (hard * 0.65).round();
@@ -182,15 +200,19 @@ class MessageLimits {
     required NovaModel effectiveModel,
     int historyTokenEstimate = 0,
     int ragTokenEstimate = 0,
+    int systemPromptTokenEstimate = 0,
     bool hasAttachments = false,
     bool highContext = false,
+    bool hasVisionImage = false,
   }) {
     final maxChars = maxUserCharsForInference(
       effectiveModel: effectiveModel,
       historyTokenEstimate: historyTokenEstimate,
       ragTokenEstimate: ragTokenEstimate,
+      systemPromptTokenEstimate: systemPromptTokenEstimate,
       hasAttachments: hasAttachments,
       highContext: highContext,
+      hasVisionImage: hasVisionImage,
     );
     if (text.length <= maxChars) return null;
 
@@ -211,7 +233,9 @@ class MessageLimits {
     NovaModel? effectiveModel,
     int historyTokenEstimate = 0,
     int ragTokenEstimate = 0,
+    int systemPromptTokenEstimate = 0,
     bool highContext = false,
+    bool hasVisionImage = false,
   }) {
     final resolved = effectiveModel ?? model;
     if (resolved != null) {
@@ -219,8 +243,10 @@ class MessageLimits {
         effectiveModel: resolved,
         historyTokenEstimate: historyTokenEstimate,
         ragTokenEstimate: ragTokenEstimate,
+        systemPromptTokenEstimate: systemPromptTokenEstimate,
         hasAttachments: hasAttachments,
         highContext: highContext,
+        hasVisionImage: hasVisionImage,
       );
 
       return text.length > soft;

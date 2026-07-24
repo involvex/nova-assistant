@@ -98,6 +98,32 @@ void main() {
       expect(maxChars, greaterThanOrEqualTo(4000));
     });
 
+    test('vision image reserves more budget than text-only', () {
+      final without = MessageLimits.maxUserCharsForInference(
+        effectiveModel: NovaModel.gemma4E2b,
+        highContext: true,
+      );
+      final withVision = MessageLimits.maxUserCharsForInference(
+        effectiveModel: NovaModel.gemma4E2b,
+        highContext: true,
+        hasVisionImage: true,
+      );
+      expect(withVision, lessThan(without));
+    });
+
+    test('large system prompt reduces user char budget', () {
+      final tight = MessageLimits.maxUserCharsForInference(
+        effectiveModel: NovaModel.gemma4E2b,
+        highContext: true,
+        systemPromptTokenEstimate: 1500,
+        hasVisionImage: true,
+      );
+      expect(
+        tight,
+        lessThanOrEqualTo(MessageLimits.exhaustedBudgetFloorChars * 4),
+      );
+    });
+
     test('low context still protects mid-range RAM', () {
       final maxChars = MessageLimits.maxUserCharsForInference(
         effectiveModel: NovaModel.gemma4E2b,

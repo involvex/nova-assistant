@@ -1,10 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:nova_assistant/models/note.dart';
+
+List<Note> _parseNotesFromJson(String json) {
+  final list = jsonDecode(json) as List<dynamic>;
+  return list.map((e) => Note.fromJson(e as Map<String, dynamic>)).toList();
+}
 
 class NoteService {
   static NoteService? _instance;
@@ -32,10 +38,7 @@ class NoteService {
     final json = prefs.getString(_prefsKey);
     if (json != null && json.isNotEmpty) {
       try {
-        final list = jsonDecode(json) as List<dynamic>;
-        _notes = list
-            .map((e) => Note.fromJson(e as Map<String, dynamic>))
-            .toList();
+        _notes = await compute(_parseNotesFromJson, json);
       } catch (_) {
         _notes = [];
       }

@@ -60,17 +60,19 @@ void main() async {
 
     await _repairModels();
 
-    await MemoryService.initialize();
+    // Parallel init: independent services that don't depend on each other.
+    await Future.wait([
+      MemoryService.initialize(),
+      TaskService.instance.initialize(),
+      NoteService.instance.initialize(),
+      NotificationService.instance.initialize(),
+      TtsService.instance.initialize(),
+      PromptPresetsService.instance.initialize(),
+      McpService.instance.initialize(),
+    ]);
 
-    await TaskService.instance.initialize();
-    await NoteService.instance.initialize();
-    await WidgetService.instance.initialize();
-
-    await NotificationService.instance.initialize();
     await NotificationService.instance.requestPermission();
-    await TtsService.instance.initialize();
-    await PromptPresetsService.instance.initialize();
-    await McpService.instance.initialize();
+    await WidgetService.instance.initialize();
 
     await ModelOrchestrator.instance.applyRamAwareModelDefaults();
     _prefetchModels();

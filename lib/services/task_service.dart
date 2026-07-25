@@ -8,6 +8,11 @@ import 'package:uuid/uuid.dart';
 import 'package:nova_assistant/models/task.dart';
 import 'package:nova_assistant/services/notification_service.dart';
 
+List<Task> _parseTasksFromJson(String json) {
+  final list = jsonDecode(json) as List<dynamic>;
+  return list.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
+}
+
 class TaskService {
   static TaskService? _instance;
   static TaskService get instance => _instance ??= TaskService._();
@@ -39,10 +44,7 @@ class TaskService {
     final json = prefs.getString(_prefsKey);
     if (json != null && json.isNotEmpty) {
       try {
-        final list = jsonDecode(json) as List<dynamic>;
-        _tasks = list
-            .map((e) => Task.fromJson(e as Map<String, dynamic>))
-            .toList();
+        _tasks = await compute(_parseTasksFromJson, json);
       } catch (_) {
         _tasks = [];
       }

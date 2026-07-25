@@ -208,34 +208,21 @@ class MemoryService {
     String query, {
     String? conversationSummary,
   }) async {
-    final buffer = StringBuffer();
+    final parts = <String>[];
 
     if (conversationSummary != null && conversationSummary.isNotEmpty) {
-      buffer.writeln('Conversation summary:');
-      buffer.writeln(conversationSummary);
+      parts.add('Conversation summary:\n$conversationSummary');
     }
 
-    final kbContext = await KnowledgeBaseService.instance.retrieveContext(
-      query,
-    );
-    if (kbContext != null) {
-      if (buffer.isNotEmpty) buffer.writeln();
-      buffer.write(kbContext);
-    }
+    final results = await Future.wait([
+      KnowledgeBaseService.instance.retrieveContext(query),
+      retrieveCustomMemoriesContext(query),
+      _retrieveConversationContext(query),
+    ]);
 
-    final customContext = await retrieveCustomMemoriesContext(query);
-    if (customContext != null) {
-      if (buffer.isNotEmpty) buffer.writeln();
-      buffer.write(customContext);
-    }
+    parts.addAll(results.whereType<String>());
 
-    final conversationContext = await _retrieveConversationContext(query);
-    if (conversationContext != null) {
-      if (buffer.isNotEmpty) buffer.writeln();
-      buffer.write(conversationContext);
-    }
-
-    return buffer.isEmpty ? null : buffer.toString();
+    return parts.isEmpty ? null : parts.join('\n\n');
   }
 
   static Future<String?> retrieveCustomMemoriesContext(String query) async {

@@ -137,13 +137,8 @@ class ChatHistoryService {
     await ensureMigrated();
     try {
       final file = await _conversationsFile();
-      if (!await file.exists()) {
-        _cachedConversations = [];
-
-        return [];
-      }
-
-      final length = await file.length();
+      final json = await file.readAsString();
+      final length = json.length;
       if (length == 0) {
         _cachedConversations = [];
 
@@ -161,7 +156,6 @@ class ChatHistoryService {
         return [];
       }
 
-      final json = await file.readAsString();
       final list = jsonDecode(json) as List<dynamic>;
       var conversations = list
           .map((e) => Conversation.fromJson(e as Map<String, dynamic>))

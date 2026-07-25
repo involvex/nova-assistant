@@ -24,6 +24,7 @@ class WidgetService {
 
   StreamSubscription<List<Task>>? _tasksSubscription;
   StreamSubscription<List<Note>>? _notesSubscription;
+  Timer? _widgetActionTimer;
 
   final _widgetActionController = StreamController<String>.broadcast();
   Stream<String> get widgetActionStream => _widgetActionController.stream;
@@ -59,7 +60,9 @@ class WidgetService {
   }
 
   void _listenForWidgetActions() {
-    Timer.periodic(const Duration(milliseconds: 500), (timer) async {
+    _widgetActionTimer = Timer.periodic(const Duration(milliseconds: 500), (
+      _,
+    ) async {
       try {
         final action = await HomeWidget.getWidgetData<String>(_widgetActionKey);
         if (action != null && action.isNotEmpty && !_isSystemAction(action)) {
@@ -152,15 +155,16 @@ class WidgetService {
 
   Future<void> _saveWidgetData(Map<String, int> data) async {
     try {
-      await Future.forEach(data.entries, (entry) async {
-        await HomeWidget.saveWidgetData<int>(entry.key, entry.value);
-      });
+      await Future.wait(
+        data.entries.map((e) => HomeWidget.saveWidgetData<int>(e.key, e.value)),
+      );
     } catch (e) {
       debugPrint('WidgetService._saveWidgetData error: $e');
     }
   }
 
   void dispose() {
+    _widgetActionTimer?.cancel();
     _tasksSubscription?.cancel();
     _notesSubscription?.cancel();
     _widgetActionController.close();

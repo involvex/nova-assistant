@@ -169,19 +169,23 @@ class SemanticSearch {
   ///
   /// Each entry in [documents] is a list of tokens representing one document.
   /// Returns indices sorted by descending score, along with their scores.
+  ///
+  /// If [idf] is provided, it will be used instead of computing it fresh,
+  /// which is useful when searching the same corpus multiple times.
   static List<ScoredEntry> search({
     required List<String> queryTokens,
     required List<List<String>> documents,
     int topK = 5,
     double minScore = 0,
+    Map<String, double>? idf,
   }) {
     if (queryTokens.isEmpty || documents.isEmpty) return [];
 
-    final idf = inverseDocumentFrequency(documents);
+    final actualIdf = idf ?? inverseDocumentFrequency(documents);
 
     final scored = <ScoredEntry>[];
     for (var i = 0; i < documents.length; i++) {
-      final s = scoreDocument(queryTokens, documents[i], idf);
+      final s = scoreDocument(queryTokens, documents[i], actualIdf);
       if (s > minScore) {
         scored.add(ScoredEntry(index: i, score: s));
       }

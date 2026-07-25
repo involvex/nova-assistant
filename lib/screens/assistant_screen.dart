@@ -80,6 +80,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _debugMode = false;
   int? _debugMemoryMb;
   Timer? _memoryPollTimer;
+  Completer<void>? _screenshotLoadedCompleter;
 
   @override
   void initState() {
@@ -583,6 +584,11 @@ class _AssistantScreenState extends State<AssistantScreen>
     _historyClearedSub?.cancel();
     _statusSub?.cancel();
     _memoryPollTimer?.cancel();
+    if (_screenshotLoadedCompleter != null &&
+        !_screenshotLoadedCompleter!.isCompleted) {
+      _screenshotLoadedCompleter!.complete();
+    }
+    _screenshotLoadedCompleter = null;
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();
@@ -637,6 +643,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _loadInitialScreenshot() async {
+    _screenshotLoadedCompleter = Completer<void>();
     _isLoadingInitialScreenshot = true;
     try {
       final screenshot = await ScreenshotService.instance.getLatestScreenshot();
@@ -650,6 +657,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       if (mounted) {
         setState(() => _isLoadingInitialScreenshot = false);
       }
+      _screenshotLoadedCompleter?.complete();
     }
   }
 
@@ -925,9 +933,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     // This ensures screenshot is captured before model selection happens
     if (_isLoadingInitialScreenshot && _currentScreenshot == null) {
       debugPrint('Waiting for initial screenshot to load...');
-      while (_isLoadingInitialScreenshot && _currentScreenshot == null) {
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      }
+      await _screenshotLoadedCompleter?.future;
       debugPrint('Screenshot loaded: ${_currentScreenshot != null}');
     }
 

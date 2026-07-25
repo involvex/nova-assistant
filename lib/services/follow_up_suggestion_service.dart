@@ -45,21 +45,26 @@ class FollowUpSuggestionService {
     String? lastAssistantMessage,
     bool different = false,
   }) async {
-    if ((lastUserMessage == null || lastUserMessage.isEmpty) &&
-        (lastAssistantMessage == null || lastAssistantMessage.isEmpty)) {
+    try {
+      if ((lastUserMessage == null || lastUserMessage.isEmpty) &&
+          (lastAssistantMessage == null || lastAssistantMessage.isEmpty)) {
+        return List<String>.from(starterSuggestions);
+      }
+
+      final user = lastUserMessage ?? '';
+      final assistant = lastAssistantMessage ?? '';
+      final heuristic = _heuristicSuggestions(
+        user: user,
+        assistant: assistant,
+        different: different,
+      );
+      if (heuristic.isNotEmpty) return heuristic;
+
+      return _genericSuggestions(different: different);
+    } catch (e) {
+      debugPrint('FollowUpSuggestionService.suggest error: $e');
       return List<String>.from(starterSuggestions);
     }
-
-    final user = lastUserMessage ?? '';
-    final assistant = lastAssistantMessage ?? '';
-    final heuristic = _heuristicSuggestions(
-      user: user,
-      assistant: assistant,
-      different: different,
-    );
-    if (heuristic.isNotEmpty) return heuristic;
-
-    return _genericSuggestions(different: different);
   }
 
   List<String> _heuristicSuggestions({

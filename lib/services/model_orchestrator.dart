@@ -910,6 +910,7 @@ class ModelOrchestrator {
             }
             // File exists and has content - assume valid until flutter_gemma says otherwise
             _statusController.add('Model ${model.displayName} verified');
+            ModelManager.instance.cacheModelPath(fileName, foundFile.path);
           } catch (e) {
             // Model health check failed - remove from installed and delete file
             debugPrint('Model health check failed for $fileName: $e');

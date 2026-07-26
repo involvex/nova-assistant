@@ -92,12 +92,15 @@ class SemanticSearch {
     'only',
   };
 
+  static final _alphanumericPattern = RegExp(r'[^a-z0-9\s]');
+  static final _whitespacePattern = RegExp(r'\s+');
+
   /// Tokenize text into lowercase words, stripping non-alphanumeric chars.
   static List<String> tokenize(String text) {
     return text
         .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
-        .split(RegExp(r'\s+'))
+        .replaceAll(_alphanumericPattern, ' ')
+        .split(_whitespacePattern)
         .where((w) => w.isNotEmpty && !_stopWords.contains(w))
         .toList();
   }
@@ -165,6 +168,9 @@ class SemanticSearch {
     return score;
   }
 
+  /// Cached IDF corpus — reused across searches with same document set.
+  static _CachedCorpus? _corpusCache;
+
   /// Rank documents by relevance to the query.
   ///
   /// Each entry in [documents] is a list of tokens representing one document.
@@ -181,7 +187,30 @@ class SemanticSearch {
   }) {
     if (queryTokens.isEmpty || documents.isEmpty) return [];
 
-    final actualIdf = idf ?? inverseDocumentFrequency(documents);
+    Map<String, double> actualIdf;
+    if (idf != null) {
+      actualIdf = idf;
+    } else {
+      final docCount = documents.length;
+      if (_corpusCache != null && _corpusCache!.documents.length == docCount) {
+        bool match = true;
+        for (var i = 0; i < docCount; i++) {
+          if (_corpusCache!.documents[i].length != documents[i].length) {
+            match = false;
+            break;
+          }
+        }
+        if (match) {
+          actualIdf = _corpusCache!.idf;
+        } else {
+          actualIdf = inverseDocumentFrequency(documents);
+          _corpusCache = _CachedCorpus(documents: documents, idf: actualIdf);
+        }
+      } else {
+        actualIdf = inverseDocumentFrequency(documents);
+        _corpusCache = _CachedCorpus(documents: documents, idf: actualIdf);
+      }
+    }
 
     final scored = <ScoredEntry>[];
     for (var i = 0; i < documents.length; i++) {
@@ -206,4 +235,12 @@ class ScoredEntry {
   @override
   String toString() =>
       'ScoredEntry(index: $index, score: ${score.toStringAsFixed(3)})';
+}
+
+/// Cached IDF corpus for semantic search with stale detection.
+class _CachedCorpus {
+  final List<List<String>> documents;
+  final Map<String, double> idf;
+
+  _CachedCorpus({required this.documents, required this.idf});
 }

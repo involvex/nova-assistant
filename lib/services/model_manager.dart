@@ -58,6 +58,11 @@ class ModelManager {
   static const _hfTokenKey = 'hf_token';
   final List<InstalledModel> _installedModels = [];
   final List<CustomModel> _customModels = [];
+  final Map<String, String> _pathCache = {};
+
+  static final HttpClient _singletonHttpClient = HttpClient()
+    ..maxConnectionsPerHost = 5
+    ..connectionTimeout = const Duration(seconds: 30);
 
   final _statusController = StreamController<String>.broadcast();
   Stream<String> get statusStream => _statusController.stream;
@@ -252,7 +257,7 @@ class ModelManager {
       );
 
       final hfToken = await getHuggingFaceToken();
-      final client = HttpClient();
+      final client = _singletonHttpClient;
       try {
         final request = await client.getUrl(uri);
         if (hfToken != null && hfToken.isNotEmpty) {
@@ -339,7 +344,7 @@ class ModelManager {
           return null;
         }
       } finally {
-        client.close();
+        // Connection pooling: do not close the client
       }
 
       onProgress?.call(92);
@@ -407,13 +412,21 @@ class ModelManager {
   /// Find a model file on disk using consistent basename matching.
   /// Returns the full path if found, null otherwise.
   Future<String?> _findModelFile(String fileName) async {
+    if (_pathCache.containsKey(fileName)) {
+      final cached = _pathCache[fileName]!;
+      return cached.isEmpty ? null : cached;
+    }
+
+    String? result;
     try {
       final dir = await getApplicationDocumentsDirectory();
 
       // Check direct path first
       final directFile = File('${dir.path}/$fileName');
       if (await directFile.exists()) {
-        return directFile.path;
+        result = directFile.path;
+        _pathCache[fileName] = result;
+        return result;
       }
 
       // Check models subdirectory with single-pass matching
@@ -434,7 +447,8 @@ class ModelManager {
                 .replaceAll('.gguf', '');
             // Exact match on base name (after removing extensions)
             if (entityBaseName == baseName) {
-              return entity.path;
+              partialMatch = entity.path;
+              break;
             }
             // Track first partial match for fallback
             if (partialMatch == null &&
@@ -444,15 +458,14 @@ class ModelManager {
             }
           }
         }
-        // Return partial match if no exact match found
-        if (partialMatch != null) {
-          return partialMatch;
-        }
+        result = partialMatch;
       }
     } catch (e) {
       debugPrint('ModelManager._findModelFile error: $e');
     }
-    return null;
+
+    _pathCache[fileName] = result ?? '';
+    return result;
   }
 
   /// Find all model files on disk matching the given pattern.
@@ -629,6 +642,7 @@ class ModelManager {
               m.fileName == fileName,
         );
         _installedModels.add(model);
+        _pathCache.remove(canonicalName);
         await _saveToPrefs();
         _statusController.add('Model installed: $canonicalName');
         return model;
@@ -812,8 +826,13 @@ class ModelManager {
 
   Future<bool> uninstallModel(String modelId) async {
     try {
+      final model = _installedModels.firstWhere(
+        (m) => m.id == modelId,
+        orElse: () => throw Exception('Model not found'),
+      );
       await FlutterGemma.uninstallModel(modelId);
       _installedModels.removeWhere((m) => m.id == modelId);
+      _pathCache.remove(model.fileName);
       await _saveToPrefs();
       _statusController.add('Model removed: $modelId');
       return true;
@@ -853,6 +872,12 @@ class ModelManager {
 
   /// Public path lookup for models already on disk.
   Future<String?> findModelPath(String fileName) => _findModelFile(fileName);
+
+  /// Explicitly cache a known model path (e.g., after _registerInstalledModels finds it).
+  /// Avoids redundant disk I/O when the path is already known.
+  void cacheModelPath(String fileName, String path) {
+    _pathCache[fileName] = path;
+  }
 
   bool isCustomModelInstalled(String fileName) {
     return _customModels.any((m) => m.fileName == fileName);

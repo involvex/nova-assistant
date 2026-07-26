@@ -80,6 +80,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _debugMode = false;
   int? _debugMemoryMb;
   Timer? _memoryPollTimer;
+  Timer? _saveDebounceTimer;
   Completer<void>? _screenshotLoadedCompleter;
 
   @override
@@ -140,6 +141,13 @@ class _AssistantScreenState extends State<AssistantScreen>
         ModelOrchestrator.instance.setPendingReplayMessages(const []);
       }
     }
+  }
+
+  void _scheduleSave() {
+    _saveDebounceTimer?.cancel();
+    _saveDebounceTimer = Timer(const Duration(milliseconds: 500), () {
+      unawaited(_saveMessages());
+    });
   }
 
   Future<void> _saveMessages() async {
@@ -584,6 +592,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     _historyClearedSub?.cancel();
     _statusSub?.cancel();
     _memoryPollTimer?.cancel();
+    _saveDebounceTimer?.cancel();
     if (_screenshotLoadedCompleter != null &&
         !_screenshotLoadedCompleter!.isCompleted) {
       _screenshotLoadedCompleter!.complete();
@@ -962,7 +971,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       await TtsService.instance.stop();
     }
 
-    _saveMessages();
+    _scheduleSave();
 
     _scrollToBottom();
 
@@ -1078,7 +1087,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         _isGenerating = false;
         _shouldPreserveScreenshot = false;
       }
-      await _saveMessages();
+      _scheduleSave();
       _attachmentManager.clear();
     }
   }
@@ -2424,7 +2433,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       }
       _messages[messageIndex] = msg.copyWith(reactions: newReactions);
     });
-    _saveMessages();
+    _scheduleSave();
   }
 
   void _showFullScreenshot(Uint8List data) {

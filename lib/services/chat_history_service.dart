@@ -7,6 +7,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/conversation.dart';
 
+List<Conversation> _parseConversationsJson(String json) {
+  final list = jsonDecode(json) as List<dynamic>;
+  return list
+      .map((e) => Conversation.fromJson(e as Map<String, dynamic>))
+      .toList();
+}
+
 /// Persists conversations as a JSON file — never in SharedPreferences.
 ///
 /// Storing chat (especially base64 screenshots) in prefs OOMs Android when
@@ -156,14 +163,15 @@ class ChatHistoryService {
         return [];
       }
 
-      final list = jsonDecode(json) as List<dynamic>;
-      var conversations = list
-          .map((e) => Conversation.fromJson(e as Map<String, dynamic>))
-          .toList();
+      List<Conversation> conversations;
+      if (length > 500 * 1024) {
+        conversations = await compute(_parseConversationsJson, json);
+      } else {
+        conversations = _parseConversationsJson(json);
+      }
       conversations = _capConversations(conversations);
       _cachedConversations = conversations;
 
-      // Rewrite stripped/capped form so the blob shrinks on disk.
       if (length > _maxFileBytes) {
         await _saveConversationsInternal(conversations);
       }

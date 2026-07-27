@@ -39,6 +39,9 @@ dependencies:
   path: ^1.9.0
   crypto: ^3.0.6
 
+  # Screen wakelock
+  wakelock_plus: ^1.2.0
+
   # UI
   flutter_markdown: ^0.7.6
   cupertino_icons: ^1.0.8

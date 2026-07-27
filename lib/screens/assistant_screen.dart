@@ -36,6 +36,7 @@ import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/widgets/suggestion_chip.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 class AssistantScreen extends StatefulWidget {
   final String? conversationId;
@@ -593,6 +594,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     _statusSub?.cancel();
     _memoryPollTimer?.cancel();
     _saveDebounceTimer?.cancel();
+    WakelockPlus.disable();
     if (_screenshotLoadedCompleter != null &&
         !_screenshotLoadedCompleter!.isCompleted) {
       _screenshotLoadedCompleter!.complete();
@@ -855,6 +857,7 @@ class _AssistantScreenState extends State<AssistantScreen>
 
   Future<void> _stopGeneration() async {
     await ModelOrchestrator.instance.stopGeneration();
+    WakelockPlus.disable();
     // Avoid reusing a half-written MediaPipe session after cancel.
     ModelOrchestrator.instance.invalidateSessionForReplay(
       List<ChatMessage>.from(_messages),
@@ -988,6 +991,12 @@ class _AssistantScreenState extends State<AssistantScreen>
 
     setState(() => _messages.add(assistantMsg));
 
+    // Enable wakelock during streaming if setting is on
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('settings_screen_timeout_stream') ?? true) {
+      WakelockPlus.enable();
+    }
+
     try {
       String accumulated = '';
 
@@ -1089,6 +1098,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       }
       _scheduleSave();
       _attachmentManager.clear();
+      WakelockPlus.disable();
     }
   }
 

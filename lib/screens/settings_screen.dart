@@ -58,6 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoCompact = true;
   bool _adultMode = false;
   bool _isAssistantRoleHeld = false;
+  bool _screenTimeoutStream = true;
   bool _debugMode = false;
   String _debugMemoryLabel = 'Tap to refresh';
   bool _shizukuAdvanced = false;
@@ -124,6 +125,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _autoCompact = prefs.getBool('settings_auto_compact') ?? true;
         _adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
         _debugMode = prefs.getBool('settings_debug_mode') ?? false;
+        _screenTimeoutStream =
+            prefs.getBool('settings_screen_timeout_stream') ?? true;
         _shizukuAdvanced = prefs.getBool('settings_shizuku_advanced') ?? false;
         _shizukuAllowForceStop =
             prefs.getBool('settings_shizuku_allow_force_stop') ?? false;
@@ -780,6 +783,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         },
       ),
       _sectionHeader('Performance'),
+      _toggleTile(
+        icon: Icons.screen_lock_portrait_outlined,
+        title: 'Keep screen on during streaming',
+        subtitle: 'Prevent screen timeout while assistant is responding',
+        value: _screenTimeoutStream,
+        onChanged: (v) {
+          setState(() => _screenTimeoutStream = v);
+          _saveSetting('settings_screen_timeout_stream', v);
+        },
+      ),
       _toggleTile(
         icon: Icons.battery_charging_full_outlined,
         title: 'Battery optimization',

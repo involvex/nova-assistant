@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:nova_assistant/models/chat_bubble_theme.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
@@ -15,6 +16,7 @@ class ChatBubble extends StatelessWidget {
   final VoidCallback? onRegenerate;
   final VoidCallback? onSpeak;
   final VoidCallback? onEdit;
+  final ChatBubbleTheme? theme;
 
   const ChatBubble({
     super.key,
@@ -28,6 +30,7 @@ class ChatBubble extends StatelessWidget {
     this.onRegenerate,
     this.onSpeak,
     this.onEdit,
+    this.theme,
   });
 
   @override
@@ -102,8 +105,8 @@ class ChatBubble extends StatelessWidget {
                 ),
                 decoration: BoxDecoration(
                   color: isUser
-                      ? const Color(0xFF6C63FF)
-                      : const Color(0xFF1A1A2E),
+                      ? theme?.userBubbleColor ?? const Color(0xFF6C63FF)
+                      : theme?.assistantBubbleColor ?? const Color(0xFF1A1A2E),
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(18),
                     topRight: const Radius.circular(18),
@@ -136,8 +139,9 @@ class ChatBubble extends StatelessWidget {
                             : '…',
                         style: TextStyle(
                           color: isUser
-                              ? Colors.white
-                              : Colors.white.withValues(alpha: 0.5),
+                              ? theme?.userTextColor ?? Colors.white
+                              : theme?.assistantTextColor ??
+                                    Colors.white.withValues(alpha: 0.5),
                           fontSize: 15,
                         ),
                       )
@@ -159,8 +163,9 @@ class ChatBubble extends StatelessWidget {
                             styleSheet: MarkdownStyleSheet(
                               p: TextStyle(
                                 color: isUser
-                                    ? Colors.white
-                                    : Colors.white.withValues(alpha: 0.92),
+                                    ? theme?.userTextColor ?? Colors.white
+                                    : theme?.assistantTextColor ??
+                                          Colors.white.withValues(alpha: 0.92),
                                 fontSize: 15,
                                 height: 1.5,
                               ),

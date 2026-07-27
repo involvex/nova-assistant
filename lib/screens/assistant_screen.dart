@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/chat_message.dart';
+import 'package:nova_assistant/models/chat_bubble_theme.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
@@ -88,6 +89,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   int _searchMatchCount = 0;
   int _currentSearchMatch = 0;
   List<int> _searchMatchIndices = [];
+  ChatBubbleTheme _chatTheme = ChatBubbleTheme.defaultTheme;
 
   @override
   void initState() {
@@ -100,6 +102,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
     _loadThinkingMode();
     _loadDebugMode();
+    _loadBubbleTheme();
     _loadInitialScreenshot();
     _loadHistory();
     _requestPermissions();
@@ -237,6 +240,19 @@ class _AssistantScreenState extends State<AssistantScreen>
     if (!mounted) return;
     setState(() => _debugMode = enabled);
     _configureMemoryPolling(enabled);
+  }
+
+  Future<void> _loadBubbleTheme() async {
+    final prefs = await SharedPreferences.getInstance();
+    final themeName =
+        prefs.getString('settings_bubble_theme') ?? 'defaultTheme';
+    final type = ChatBubbleThemeType.values.firstWhere(
+      (t) => t.name == themeName,
+      orElse: () => ChatBubbleThemeType.defaultTheme,
+    );
+    if (mounted) {
+      setState(() => _chatTheme = ChatBubbleTheme.fromType(type));
+    }
   }
 
   void _configureMemoryPolling(bool enabled) {
@@ -1548,7 +1564,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     final isLoadingModel = ModelOrchestrator.instance.isLoadingModel;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D0D1A),
+      backgroundColor: _chatTheme.backgroundColor,
       body: SafeArea(
         child: Stack(
           children: [
@@ -1572,6 +1588,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                             return RepaintBoundary(
                               child: ChatBubble(
                                 message: msg,
+                                theme: _chatTheme,
                                 onScreenshotTap: msg.imageData != null
                                     ? () => _showFullScreenshot(msg.imageData!)
                                     : null,

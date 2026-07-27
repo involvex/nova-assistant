@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:nova_assistant/models/chat_message.dart';
+import 'package:nova_assistant/models/chat_bubble_theme.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/assistant_language.dart';
@@ -73,6 +74,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _fontScale = 1.0;
   StreamSubscription<Map<String, dynamic>>? _assistantRoleSub;
   StreamSubscription<String>? _modelStatusSub;
+  ChatBubbleThemeType _selectedBubbleTheme = ChatBubbleThemeType.defaultTheme;
 
   @override
   void initState() {
@@ -139,6 +141,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _hfTokenStatus = _resolveHfTokenStatus(prefs.getString('hf_token'));
         _themeMode = loadedThemeMode;
         _fontScale = loadedFontScale;
+        final themeName =
+            prefs.getString('settings_bubble_theme') ?? 'defaultTheme';
+        _selectedBubbleTheme = ChatBubbleThemeType.values.firstWhere(
+          (t) => t.name == themeName,
+          orElse: () => ChatBubbleThemeType.defaultTheme,
+        );
       });
       if (_debugMode) {
         unawaited(_refreshDebugMemory());
@@ -794,6 +802,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _saveFontScale();
         },
       ),
+      _sectionHeader('CHAT BUBBLE THEME'),
+      RadioGroup<ChatBubbleThemeType>(
+        groupValue: _selectedBubbleTheme,
+        onChanged: (type) {
+          if (type == null) return;
+          setState(() => _selectedBubbleTheme = type);
+          _saveBubbleTheme(type);
+        },
+        child: Column(
+          children: ChatBubbleTheme.values
+              .map(
+                (theme) => RadioListTile<ChatBubbleThemeType>(
+                  title: Text(
+                    theme.name,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  subtitle: Container(
+                    height: 24,
+                    margin: const EdgeInsets.only(top: 4),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(4),
+                      gradient: LinearGradient(
+                        colors: [
+                          theme.userBubbleColor,
+                          theme.assistantBubbleColor,
+                        ],
+                      ),
+                    ),
+                  ),
+                  value: theme.type,
+                  activeColor: theme.accentColor,
+                ),
+              )
+              .toList(),
+        ),
+      ),
     ];
   }
 
@@ -803,6 +847,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveFontScale() async {
     await UserPreferencesService.instance.setFontScale(_fontScale);
+  }
+
+  Future<void> _saveBubbleTheme(ChatBubbleThemeType type) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('settings_bubble_theme', type.name);
   }
 
   List<Widget> _appDataHubChildren(BuildContext context) {

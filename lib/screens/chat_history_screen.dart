@@ -659,23 +659,27 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     final orderedGroups = ['Today', 'Yesterday', 'This Week', 'Earlier'];
     final sections = orderedGroups.where((g) => groups.containsKey(g)).toList();
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: sections.length,
-      itemExtent: 88,
-      itemBuilder: (context, index) {
-        final group = sections[index];
-        final conversations = groups[group]!;
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (index > 0) const SizedBox(height: 16),
-            _buildSectionHeader(group),
-            ...conversations.map(_buildConversationTile),
-          ],
-        );
+    return RefreshIndicator(
+      onRefresh: () async {
+        await _loadConversations();
       },
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        itemCount: sections.length,
+        itemBuilder: (context, index) {
+          final group = sections[index];
+          final conversations = groups[group]!;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (index > 0) const SizedBox(height: 16),
+              _buildSectionHeader(group),
+              ...conversations.map(_buildConversationTile),
+            ],
+          );
+        },
+      ),
     );
   }
 }

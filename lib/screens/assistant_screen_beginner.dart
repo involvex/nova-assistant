@@ -417,7 +417,10 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
         return ChatBubble(
           message: msg,
           onCopy: () {
-            Clipboard.setData(ClipboardData(text: msg.text));
+            final attribution = msg.isUser
+                ? ''
+                : '\n\n— ${msg.modelName ?? "Nova"} · ${_formatTimestamp(msg.timestamp)}';
+            Clipboard.setData(ClipboardData(text: '${msg.text}$attribution'));
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Copied to clipboard'),
@@ -522,5 +525,15 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
         ],
       ),
     );
+  }
+
+  String _formatTimestamp(DateTime? timestamp) {
+    if (timestamp == null) return '';
+    final now = DateTime.now();
+    final diff = now.difference(timestamp);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    return '${timestamp.month}/${timestamp.day}/${timestamp.year}';
   }
 }

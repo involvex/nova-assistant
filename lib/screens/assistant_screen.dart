@@ -1539,8 +1539,13 @@ class _AssistantScreenState extends State<AssistantScreen>
                                       }
                                     : null,
                                 onCopy: () {
+                                  final attribution = msg.isUser
+                                      ? ''
+                                      : '\n\n— ${msg.modelName ?? "Nova"} · ${_formatTimestamp(msg.timestamp)}';
                                   Clipboard.setData(
-                                    ClipboardData(text: msg.text),
+                                    ClipboardData(
+                                      text: '${msg.text}$attribution',
+                                    ),
                                   );
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
@@ -2468,7 +2473,10 @@ class _AssistantScreenState extends State<AssistantScreen>
           title: const Text('Copy', style: TextStyle(color: Colors.white)),
           onTap: () {
             Navigator.pop(context);
-            Clipboard.setData(ClipboardData(text: msg.text));
+            final attribution = msg.isUser
+                ? ''
+                : '\n\n— ${msg.modelName ?? "Nova"} · ${_formatTimestamp(msg.timestamp)}';
+            Clipboard.setData(ClipboardData(text: '${msg.text}$attribution'));
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Copied to clipboard'),
@@ -2590,5 +2598,15 @@ class _AssistantScreenState extends State<AssistantScreen>
         ),
       ),
     );
+  }
+
+  String _formatTimestamp(DateTime? timestamp) {
+    if (timestamp == null) return '';
+    final now = DateTime.now();
+    final diff = now.difference(timestamp);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    return '${timestamp.month}/${timestamp.day}/${timestamp.year}';
   }
 }

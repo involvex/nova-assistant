@@ -738,15 +738,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveThemeMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('settings_theme_mode', _themeMode.name);
-    await prefs.reload();
+    await UserPreferencesService.instance.setThemeMode(_themeMode);
   }
 
   Future<void> _saveFontScale() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('settings_font_scale', _fontScale);
-    await prefs.reload();
+    await UserPreferencesService.instance.setFontScale(_fontScale);
   }
 
   List<Widget> _appDataHubChildren(BuildContext context) {

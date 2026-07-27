@@ -76,6 +76,26 @@ class UserPreferencesService {
     );
   }
 
+  Future<ThemeModeSetting> getThemeMode() async {
+    final prefs = await getPreferences();
+    return prefs.themeMode;
+  }
+
+  Future<void> setThemeMode(ThemeModeSetting themeMode) async {
+    final current = await getPreferences();
+    await savePreferences(current.copyWith(themeMode: themeMode));
+  }
+
+  Future<double> getFontScale() async {
+    final prefs = await getPreferences();
+    return prefs.fontScale;
+  }
+
+  Future<void> setFontScale(double fontScale) async {
+    final current = await getPreferences();
+    await savePreferences(current.copyWith(fontScale: fontScale));
+  }
+
   Future<bool> isFirstLaunch() async {
     final prefs = await getPreferences();
     return !prefs.onboardingComplete;

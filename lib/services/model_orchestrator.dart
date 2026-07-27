@@ -172,6 +172,11 @@ class ModelOrchestrator {
   bool _isReleasing = false; // Guard against concurrent release operations
   Completer<void>? _releaseCompleter; // Signals when release is complete
   Timer? _idleTimer;
+  bool _batteryAwareSwitching = true;
+  NovaModel? _previousModelBeforeBattery;
+  Timer? _batteryCheckTimer;
+  static const _lowBatteryThreshold = 20;
+
   bool _isStreaming = false;
   bool _isLoadingModel = false;
   Completer<void>? _streamingCompleter;
@@ -317,6 +322,61 @@ class ModelOrchestrator {
     } else {
       _resetIdleTimer();
     }
+  }
+
+  void setBatteryAwareSwitching(bool enabled) {
+    _batteryAwareSwitching = enabled;
+    if (enabled) {
+      _startBatteryCheck();
+    } else {
+      _stopBatteryCheck();
+    }
+  }
+
+  bool get batteryAwareSwitching => _batteryAwareSwitching;
+
+  Future<void> checkBatteryAndSwitch() async {
+    if (!_batteryAwareSwitching) return;
+    if (_isStreaming || _isLoadingModel) return;
+
+    try {
+      final batteryLevel = await PlatformAdaptationService.instance
+          .getBatteryLevel();
+      if (batteryLevel <= _lowBatteryThreshold) {
+        final currentModel = _activeModelType;
+        if (currentModel == NovaModel.gemma4E2b) {
+          final fallback = await _pickRamFallback(currentModel!);
+          if (fallback != null) {
+            _statusController.add(
+              'Low battery ($batteryLevel%) — switching to ${fallback.displayName}',
+            );
+            _previousModelBeforeBattery = currentModel;
+            preferredModelType = fallback;
+          }
+        }
+      } else if (_previousModelBeforeBattery != null &&
+          batteryLevel > _lowBatteryThreshold + 10) {
+        _statusController.add(
+          'Battery recovered ($batteryLevel%) — restoring ${_previousModelBeforeBattery!.displayName}',
+        );
+        preferredModelType = _previousModelBeforeBattery;
+        _previousModelBeforeBattery = null;
+      }
+    } catch (e) {
+      debugPrint('Battery check error: $e');
+    }
+  }
+
+  void _startBatteryCheck() {
+    _batteryCheckTimer?.cancel();
+    _batteryCheckTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      checkBatteryAndSwitch();
+    });
+  }
+
+  void _stopBatteryCheck() {
+    _batteryCheckTimer?.cancel();
+    _batteryCheckTimer = null;
   }
 
   void setDebugMode(bool enabled) {
@@ -473,6 +533,8 @@ class ModelOrchestrator {
     }
     _inferenceBackend = RemoteInferenceConfig.backendFromPrefs(prefs);
     _remoteConfig = RemoteInferenceConfig.fromPrefs(prefs);
+    _batteryAwareSwitching =
+        prefs.getBool('settings_battery_aware_switching') ?? true;
   }
 
   void clearModelOverride() {
@@ -809,6 +871,8 @@ class ModelOrchestrator {
   Future<void> resetInferenceSession() async {
     _idleTimer?.cancel();
     _idleTimer = null;
+    _stopBatteryCheck();
+    _previousModelBeforeBattery = null;
     await _tryStopGeneration();
     try {
       await _activeChat?.close();
@@ -3403,6 +3467,7 @@ class ModelOrchestrator {
     await _loadPreferredModel();
     await _loadRuntimeSettings();
     await _loadIdentity();
+    _startBatteryCheck();
     // NOTE: We deliberately do NOT load a model here.
     // Loading a 2.4GB model at startup causes memory/CPU exhaustion
     // on some devices, leading to crashes. Models are loaded lazily

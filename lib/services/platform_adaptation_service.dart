@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
@@ -115,8 +116,19 @@ class PlatformAdaptationService {
       _instance ??= PlatformAdaptationService._();
   PlatformAdaptationService._();
 
+  static const _batteryChannel = MethodChannel('dev.nova.assistant/battery');
+
   final PlatformCapabilities _capabilities = PlatformCapabilities.current;
   PlatformCapabilities get capabilities => _capabilities;
+
+  Future<int> getBatteryLevel() async {
+    try {
+      final level = await _batteryChannel.invokeMethod<int>('getBatteryLevel');
+      return level ?? 100;
+    } catch (e) {
+      return 100;
+    }
+  }
 
   /// Get web-specific adaptations for a model
   List<WebAdaptation> getWebAdaptations(NovaModel model) {

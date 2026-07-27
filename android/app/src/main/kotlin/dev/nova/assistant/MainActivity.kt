@@ -162,6 +162,16 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.nova.assistant/battery")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "getBatteryLevel") {
+                    val batteryLevel = getBatteryLevel()
+                    result.success(batteryLevel)
+                } else {
+                    result.notImplemented()
+                }
+            }
+
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -182,6 +192,11 @@ class MainActivity : FlutterActivity() {
             } catch (_: Exception) {}
         }
         return false
+    }
+
+    private fun getBatteryLevel(): Int {
+        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+        return batteryManager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
     }
 
     private fun requestAssistantRole() {

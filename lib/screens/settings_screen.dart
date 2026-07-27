@@ -55,6 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _ragMemory = false;
   bool _batteryOptimization = true;
   bool _keepModelWarm = true;
+  bool _batteryAwareSwitching = true;
   bool _highContext = false;
   bool _autoCompact = true;
   bool _adultMode = false;
@@ -121,6 +122,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _batteryOptimization =
             prefs.getBool('settings_battery_optimization') ?? true;
         _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
+        _batteryAwareSwitching =
+            prefs.getBool('settings_battery_aware_switching') ?? true;
         _highContext =
             prefs.getBool('settings_high_context') ??
             (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
@@ -907,6 +910,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
           setState(() => _batteryOptimization = v);
           _saveSetting('settings_battery_optimization', v);
           ModelOrchestrator.instance.setBatteryOptimization(v);
+        },
+      ),
+      _toggleTile(
+        icon: Icons.battery_saver_outlined,
+        title: 'Battery-aware model switching',
+        subtitle: 'Switch to lighter model when battery is low',
+        value: _batteryAwareSwitching,
+        onChanged: (v) {
+          setState(() => _batteryAwareSwitching = v);
+          _saveSetting('settings_battery_aware_switching', v);
+          ModelOrchestrator.instance.setBatteryAwareSwitching(v);
         },
       ),
       _toggleTile(

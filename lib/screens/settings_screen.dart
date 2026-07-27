@@ -104,6 +104,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final loadedThemeMode = await UserPreferencesService.instance
+        .getThemeMode();
+    final loadedFontScale = await UserPreferencesService.instance
+        .getFontScale();
     if (mounted) {
       setState(() {
         _autoCapture = prefs.getBool('settings_auto_capture') ?? true;
@@ -130,11 +134,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getString(AssistantLanguage.prefsKey),
         );
         _hfTokenStatus = _resolveHfTokenStatus(prefs.getString('hf_token'));
-        _themeMode = ThemeModeSetting.values.firstWhere(
-          (e) => e.name == prefs.getString('settings_theme_mode'),
-          orElse: () => ThemeModeSetting.system,
-        );
-        _fontScale = prefs.getDouble('settings_font_scale') ?? 1.0;
+        _themeMode = loadedThemeMode;
+        _fontScale = loadedFontScale;
       });
       if (_debugMode) {
         unawaited(_refreshDebugMemory());

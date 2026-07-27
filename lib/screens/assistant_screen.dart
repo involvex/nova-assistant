@@ -23,6 +23,7 @@ import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
 import 'package:nova_assistant/widgets/chat_bubble.dart';
+import 'package:nova_assistant/widgets/in_chat_search_bar.dart';
 import 'package:nova_assistant/widgets/voice_input.dart';
 import 'package:nova_assistant/screens/chat_history_screen.dart';
 import 'package:nova_assistant/screens/settings_screen.dart';
@@ -83,6 +84,10 @@ class _AssistantScreenState extends State<AssistantScreen>
   Timer? _memoryPollTimer;
   Timer? _saveDebounceTimer;
   Completer<void>? _screenshotLoadedCompleter;
+  bool _showSearch = false;
+  int _searchMatchCount = 0;
+  int _currentSearchMatch = 0;
+  List<int> _searchMatchIndices = [];
 
   @override
   void initState() {
@@ -408,6 +413,42 @@ class _AssistantScreenState extends State<AssistantScreen>
     setState(() {
       _followUpSuggestions = [];
       _isLoadingSuggestions = false;
+    });
+  }
+
+  void _filterMessages(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _searchMatchIndices = [];
+        _searchMatchCount = 0;
+        _currentSearchMatch = 0;
+        return;
+      }
+      final lower = query.toLowerCase();
+      _searchMatchIndices = _messages
+          .asMap()
+          .entries
+          .where((e) => e.value.text.toLowerCase().contains(lower))
+          .map((e) => e.key)
+          .toList();
+      _searchMatchCount = _searchMatchIndices.length;
+      _currentSearchMatch = _searchMatchCount > 0 ? 1 : 0;
+    });
+  }
+
+  void _nextSearchMatch() {
+    if (_searchMatchIndices.isEmpty) return;
+    setState(() {
+      _currentSearchMatch = _currentSearchMatch % _searchMatchCount + 1;
+    });
+  }
+
+  void _previousSearchMatch() {
+    if (_searchMatchIndices.isEmpty) return;
+    setState(() {
+      _currentSearchMatch = _currentSearchMatch <= 1
+          ? _searchMatchCount
+          : _currentSearchMatch - 1;
     });
   }
 
@@ -1595,6 +1636,20 @@ class _AssistantScreenState extends State<AssistantScreen>
             ),
             if (_debugMode) _buildDebugBanner(),
             if (isLoadingModel) _buildModelLoadingOverlay(),
+            if (_showSearch)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: InChatSearchBar(
+                  onSearch: _filterMessages,
+                  onClose: () => setState(() => _showSearch = false),
+                  matchCount: _searchMatchCount,
+                  currentMatch: _currentSearchMatch,
+                  onNext: _nextSearchMatch,
+                  onPrevious: _previousSearchMatch,
+                ),
+              ),
           ],
         ),
       ),
@@ -1889,6 +1944,9 @@ class _AssistantScreenState extends State<AssistantScreen>
                   _loadHistory();
                 case 'compact':
                   if (!_isGenerating) await _manualCompact();
+                case 'search':
+                  setState(() => _showSearch = true);
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -1917,6 +1975,19 @@ class _AssistantScreenState extends State<AssistantScreen>
               const PopupMenuItem<String>(
                 value: 'compact',
                 child: Text('Compact context'),
+              ),
+              PopupMenuItem<String>(
+                value: 'search',
+                child: Row(
+                  children: [
+                    Icon(Icons.search, color: Colors.white70, size: 20),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Search in chat',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ],
+                ),
               ),
             ],
             child: const Icon(Icons.more_vert, color: Colors.grey),

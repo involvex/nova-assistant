@@ -157,6 +157,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  Future<Map<String, dynamic>> _loadStorageBreakdown() async {
+    try {
+      final models = ModelManager.instance.installedModels;
+      final List<Map<String, dynamic>> modelList = [];
+      for (final model in models) {
+        modelList.add({'name': model.fileName, 'sizeMB': model.fileSizeMB});
+      }
+      final totalMB = modelList.fold<double>(
+        0,
+        (sum, m) => sum + (m['sizeMB'] as double),
+      );
+      return {'models': modelList, 'totalMB': totalMB};
+    } catch (e) {
+      return {'models': <Map<String, dynamic>>[], 'totalMB': 0.0};
+    }
+  }
+
   Future<void> _confirmResetInference() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -526,6 +543,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             );
           }
+        },
+      ),
+      _sectionHeader('STORAGE BREAKDOWN'),
+      FutureBuilder<Map<String, dynamic>>(
+        future: _loadStorageBreakdown(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final breakdown = snapshot.data!;
+          final models = breakdown['models'] as List<Map<String, dynamic>>?;
+          if (models == null || models.isEmpty) {
+            return _infoTile(
+              icon: Icons.storage_outlined,
+              title: 'No models installed',
+              subtitle: '',
+            );
+          }
+          return Column(
+            children: [
+              _infoTile(
+                icon: Icons.storage_outlined,
+                title:
+                    'Total: ${breakdown['totalMB']?.toStringAsFixed(1) ?? '?'} MB',
+                subtitle: '${models.length} model(s) installed',
+              ),
+              ...models.map(
+                (m) => _infoTile(
+                  icon: Icons.memory,
+                  title: (m['name'] as String?) ?? 'Unknown',
+                  subtitle:
+                      '${(m['sizeMB'] as double?)?.toStringAsFixed(1) ?? '?'} MB',
+                ),
+              ),
+            ],
+          );
         },
       ),
     ];

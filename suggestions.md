@@ -7,71 +7,15 @@
 
 ## P0 — High Impact, Low Effort
 
-### 1. Dark / Light Theme Toggle
+### ✅ All P0 Items Implemented
 
-**Why:** The app is currently hardcoded to a dark theme (`Color(0xFF0D0D1A)`). A light theme improves readability in bright environments and accessibility.
-
-**Approach:**
-- Add `settings_theme_mode` to SharedPreferences (`light`, `dark`, `system`)
-- Wrap the top-level `MaterialApp` with a `ThemeData` that switches
-- Use `platformBrightness` to detect system theme when set to `system`
-- Add a theme toggle in Settings screen
-
-**Files to modify:** `lib/main.dart`, `lib/screens/settings_screen.dart`, `lib/services/user_preferences_service.dart`
-
----
-
-### 2. Font Size / Display Size Setting
-
-**Why:** Some users struggle with small text in chat bubbles. A font size preference improves accessibility.
-
-**Approach:**
-- Add `settings_font_scale` to SharedPreferences (small / medium / large / extra-large)
-- Apply `MediaQuery.textScaleFactor` override in the chat list
-- Add slider or segmented control in Settings
-
-**Files to modify:** `lib/screens/assistant_screen.dart`, `lib/screens/settings_screen.dart`
-
----
-
-### 3. Pin Important Chat Messages
-
-**Why:** Users often want to flag key messages for quick reference without saving the whole conversation.
-
-**Approach:**
-- Add `isPinned` field to `ChatMessage` model
-- Add a pin button on message long-press context menu
-- Create a "Pinned Messages" section in the chat or a dedicated screen
-- Persist pin state in the conversation JSON
-
-**Files to modify:** `lib/models/chat_message.dart`, `lib/widgets/chat_bubble.dart`, `lib/screens/assistant_screen.dart`, `lib/services/chat_history_service.dart`
-
----
-
-### 4. Markdown Export for Individual Conversations
-
-**Why:** The app exports as plain text and JSON, but not as Markdown (`.md`) — which is the native format for a Markdown rendering assistant.
-
-**Approach:**
-- Add `exportConversationAsMarkdown()` to `ChatHistoryService`
-- Format user/assistant turns with Markdown headings and code blocks
-- Add "Export as Markdown" option in the conversation menu
-
-**Files to modify:** `lib/services/chat_history_service.dart`, `lib/screens/assistant_screen.dart`
-
----
-
-### 5. Conversation Fork (Duplicate + Edit)
-
-**Why:** Users sometimes want to explore a different direction from a specific point in a conversation without starting from scratch.
-
-**Approach:**
-- Add a "Fork from here" option in message long-press menu
-- Truncate conversation at selected message index
-- Create a new conversation with that prefix
-- Allow normal editing and continued generation on the fork
-
-**Files to modify:** `lib/screens/assistant_screen.dart`, `lib/services/chat_history_service.dart`, `lib/models/conversation.dart`
+| # | Feature | Status | Implementation |
+|---|---------|--------|----------------|
+| 1 | Dark/Light Theme Toggle | ✅ Done | `ThemeModeSetting` in `main.dart`, settings UI |
+| 2 | Font Size / Display Size | ✅ Done | `fontScale` in `UserPreferencesService` |
+| 3 | Pin Important Messages | ✅ Done | `isPinned` on `ChatMessage`, pin/unpin in context menu |
+| 4 | Markdown Export | ✅ Done | `exportConversationAsMarkdown` in `ChatHistoryService` |
+| 5 | Conversation Fork | ✅ Done | `forkConversation` in `ChatHistoryService` |
 
 ---
 
@@ -112,27 +56,29 @@
 - On long-press of the input bar, offer "Paste & Send" or "Analyze clipboard"
 - Read clipboard content via `Clipboard.getData(Clipboard.kTextPlain)`
 - Optionally auto-send if user has a "paste-and-go" preference
+- Add clipboard content preview in the input bar
 
 **Files to modify:** `lib/screens/assistant_screen.dart`
 
 ---
 
-### 9. Conversation Templates / Presets
+### 9. Conversation Templates / Presets (Empty-State Carousel)
 
-**Why:** New users may not know what to ask. Pre-built conversation templates (e.g., "Summarize this article", "Help me plan a trip", "Debug this code") lower the barrier to entry.
+**Why:** New users may not know what to ask. Pre-built conversation templates on the empty state screen lower the barrier to entry. (Note: Prompt presets exist but the empty-state carousel does not.)
 
 **Approach:**
-- Add a `prompt_presets` category for "Conversation Starters" (distinct from existing prompt presets which are system prompts)
-- Show a template carousel or grid on the empty state screen
+- Add a template carousel or grid on the empty state screen
 - Each template pre-fills the input bar with a ready-to-send prompt
+- Include categories: "Summarize", "Plan", "Debug", "Learn", "Create"
+- Show only when conversation is empty
 
 **Files to modify:** `lib/screens/assistant_screen.dart`, `lib/models/prompt_preset.dart`, `lib/services/prompt_presets_service.dart`
 
 ---
 
-### 10. Message Search Within Conversation
+### 10. In-Chat Message Search
 
-**Why:** The app has a conversation search screen (`conversation_search_screen.dart`) but no in-chat search for quick lookup within the current thread.
+**Why:** The app has inter-conversation search (`conversation_search_screen.dart`) but no in-chat search for quick lookup within the current thread.
 
 **Approach:**
 - Add a search bar overlay in the chat message list
@@ -144,14 +90,15 @@
 
 ---
 
-### 11. Battery-Aware Model Degradation
+### 11. Battery-Aware Model Switching
 
-**Why:** The app already has idle unload and RAM gate, but no battery-level awareness. On low battery, the model could auto-switch to a lighter model or disable heavy features.
+**Why:** The app has idle-release battery optimization, but no battery-level awareness. On low battery, the model could auto-switch to a lighter model or disable heavy features. (Note: This is distinct from the existing battery optimization which controls idle release.)
 
 **Approach:**
-- Monitor battery level via `BatteryManager` on Android / ` UIDevice` on iOS
+- Monitor battery level via `BatteryManager` on Android
 - When battery < 20% and model is Gemma 4 E2B, prompt or auto-switch to Gemma 3 1B or SmolLM
 - Add a battery indicator in the status bar or model picker
+- Respect user preference (auto vs manual)
 
 **Files to modify:** `lib/screens/assistant_screen.dart`, `lib/services/platform_adaptation_service.dart`, `lib/services/model_orchestrator.dart`
 
@@ -162,9 +109,10 @@
 **Why:** Personalization increases engagement. A subtle background pattern or custom bubble color scheme would differentiate Nova from other chat apps.
 
 **Approach:**
-- Add `settings_bubble_theme` preference (default, ocean, forest, neon)
+- Add `settings_bubble_theme` preference (default, ocean, forest, neon, custom)
 - Apply color overrides to `ChatBubble` and `AssistantScreen` background
 - Keep default theme as the safe option
+- Allow custom colors via color picker
 
 **Files to modify:** `lib/screens/assistant_screen.dart`, `lib/widgets/chat_bubble.dart`, `lib/screens/settings_screen.dart`
 
@@ -220,6 +168,7 @@
 - Enhance the Markdown renderer with custom `table` and `task_list` widget builders
 - Render tables as Flutter `DataTable` widgets
 - Render task lists as interactive checkboxes that toggle on tap
+- Persist checkbox state to the task service
 
 **Files to modify:** `lib/widgets/chat_bubble.dart` (MarkdownBody builder), or a custom Markdown widget wrapper
 
@@ -279,9 +228,49 @@
 
 ---
 
+### 21. Context Window Usage Visualization
+
+**Why:** The high-context toggle exists but users can't see how much of their context window is used. A visual indicator would help them understand when compaction is needed.
+
+**Approach:**
+- Add a context usage bar (like a progress bar) above the message list
+- Show tokens used vs. model limit
+- Color-code: green (healthy), yellow (approaching limit), red (over limit)
+- Tap to open compaction dialog
+
+**Files to modify:** `lib/screens/assistant_screen.dart`, `lib/utils/message_limits.dart`
+
+---
+
+### 22. Model Benchmarking / Comparison Tool
+
+**Why:** Users with multiple models installed may want to compare model quality, speed, and resource usage for the same query.
+
+**Approach:**
+- Add a "Benchmark" mode that sends the same query to multiple models in parallel
+- Display response quality metrics (words/second, tokens/second, memory usage)
+- Show a comparison table or card view
+
+**Files to modify:** New `lib/screens/model_benchmark_screen.dart`, `lib/services/model_orchestrator.dart`
+
+---
+
+### 23. Smart Quick Actions
+
+**Why:** The follow-up suggestion system exists but could be smarter — offering contextual quick actions like "Translate this", "Make this a task", "Email this to..." that perform the operation directly.
+
+**Approach:**
+- Enhance `FollowUpSuggestionService` to detect intent patterns (e.g., "translate", "task", "email")
+- Show action chips that perform the operation directly rather than just sending a follow-up query
+- Add a "Quick Actions" section below the input bar
+
+**Files to modify:** `lib/services/follow_up_suggestion_service.dart`, `lib/screens/assistant_screen.dart`
+
+---
+
 ## P3 — Lower Impact, Complex Implementation
 
-### 21. Plugin System / Extension Points
+### 24. Plugin System / Extension Points
 
 **Why:** A plugin system would let third parties add custom tools, models, or UI extensions without modifying the core app.
 
@@ -294,7 +283,7 @@
 
 ---
 
-### 22. Encrypted Cloud Sync (Optional)
+### 25. Encrypted Cloud Sync (Optional)
 
 **Why:** Currently data stays local. An opt-in encrypted sync would allow users to back up conversations and settings across devices.
 
@@ -307,7 +296,7 @@
 
 ---
 
-### 23. Real-Time Translation
+### 26. Real-Time Translation
 
 **Why:** The assistant has a language awareness setting but no real-time translation. Users could chat in one language and get responses in another.
 
@@ -321,7 +310,7 @@
 
 ---
 
-### 24. Multi-User / Family Profiles
+### 27. Multi-User / Family Profiles
 
 **Why:** On shared devices, different family members might want separate conversations, identity settings, and tool preferences.
 
@@ -334,7 +323,7 @@
 
 ---
 
-### 25. Voice-Controlled Navigation
+### 28. Voice-Controlled Navigation
 
 **Why:** The app has voice input for chat but not voice commands for navigation (e.g., "go to settings", "new chat", "stop").
 
@@ -347,7 +336,7 @@
 
 ---
 
-### 26. Custom CSS/Theme Builder
+### 29. Custom CSS/Theme Builder
 
 **Why:** Power users and accessibility users may want fine-grained control over the visual appearance beyond just light/dark mode.
 
@@ -360,7 +349,7 @@
 
 ---
 
-### 27. Automated Backup with Scheduling
+### 30. Automated Backup with Scheduling
 
 **Why:** Settings backup exists but is manual. An automated backup scheduler would ensure users don't lose data.
 
@@ -373,62 +362,46 @@
 
 ---
 
-### 28. Model Benchmarking / Comparison Tool
-
-**Why:** Users with multiple models installed may want to compare model quality, speed, and resource usage for the same query.
-
-**Approach:**
-- Add a "Benchmark" mode that sends the same query to multiple models in parallel
-- Display response quality metrics (words/second, tokens/second, memory usage)
-- Show a comparison table or card view
-
-**Files to modify:** New `lib/screens/model_benchmark_screen.dart`, `lib/services/model_orchestrator.dart`
-
----
-
-### 29. Context Window Visualization
-
-**Why:** The high-context toggle exists but users can't see how much of their context window is used. A visual indicator would help them understand when compaction is needed.
-
-**Approach:**
-- Add a context usage bar (like a progress bar) above the message list
-- Show tokens used vs. model limit
-- Color-code: green (healthy), yellow (approaching limit), red (over limit)
-- Tap to open compaction dialog
-
-**Files to modify:** `lib/screens/assistant_screen.dart`, `lib/services/message_limits.dart`
-
----
-
-### 30. Smart Reply Suggestions (Quick Actions)
-
-**Why:** The follow-up suggestion system exists but could be smarter — offering contextual quick actions like "Translate this", "Make this a task", "Email this to...".
-
-**Approach:**
-- Enhance `FollowUpSuggestionService` to detect intent patterns (e.g., "translate", "task", "email")
-- Show action chips that perform the operation directly rather than just sending a follow-up query
-- Add a "Quick Actions" section below the input bar
-
-**Files to modify:** `lib/services/follow_up_suggestion_service.dart`, `lib/screens/assistant_screen.dart`
-
----
-
 ## Quick Wins (Low Effort)
 
 These are small, high-value additions that can be implemented quickly:
 
-| # | Feature | Effort | Impact |
-|---|---------|--------|--------|
-| 31 | **Unread message indicator** — badge on chat history icon when new messages arrive | Low | Medium |
-| 32 | **Message copy with attribution** — copy includes model name and timestamp | Low | Low |
-| 33 | **Pull-to-refresh conversation list** | Low | Low |
-| 34 | **Swipe to archive/conversation** | Medium | Medium |
-| 35 | **Gesture-based screenshot** — three-finger swipe to capture screen | Medium | Medium |
-| 36 | **Screen timeout control** — keep screen on during streaming | Low | Medium |
-| 37 | **Vibration feedback** on send / tool execution | Low | Low |
-| 38 | **Haptic feedback** toggle in settings | Low | Low |
-| 39 | **Animated theme transitions** | Low | Low |
-| 40 | **Model storage breakdown** in settings (MB per model) | Low | Medium |
+| # | Feature | Effort | Impact | Status |
+|---|---------|--------|--------|--------|
+| 31 | **Unread message indicator** — badge on chat history icon when new messages arrive | Low | Medium | Open |
+| 32 | **Message copy with attribution** — copy includes model name and timestamp | Low | Low | Open |
+| 33 | **Pull-to-refresh conversation list** | Low | Low | Open |
+| 34 | **Swipe to archive/conversation** | Medium | Medium | Open |
+| 35 | **Gesture-based screenshot** — three-finger swipe to capture screen | Medium | Medium | Open |
+| 36 | **Screen timeout control** — keep screen on during streaming | Low | Medium | Open |
+| 37 | **Vibration feedback** on send / tool execution | Low | Low | Open |
+| 38 | **Haptic feedback** toggle in settings | Low | Low | Open |
+| 39 | **Animated theme transitions** | Low | Low | Open |
+| 40 | **Model storage breakdown** in settings (MB per model) | Low | Medium | Open |
+
+---
+
+## Recently Implemented (Not Previously in Suggestions)
+
+These features were implemented but were not in the original suggestions list:
+
+| Feature | Description |
+|---------|-------------|
+| Remote Inference | OpenAI-compatible LAN client for using remote models |
+| Share Intent | Android share sheet integration to open chat from other apps |
+| Adult Mode | Optional adult content mode with confirmation dialog |
+| Task Management | Create, list, complete to-dos via AI tools |
+| Note Management | Create, search, list notes via AI tools |
+| Shizuku/Root Tools | Force-stop apps, app info, battery settings (power users) |
+| Custom Prompt Presets | Full CRUD for user-defined system prompts |
+| Session History Reinject | Reinject chat context on send for continuity |
+| High-Context Auto-Compact | Automatic context compaction for long conversations |
+| Keep-Warm Policy | Prevent idle model unload when conversation is active |
+| Model Release Policy | Battery/RAM-aware model release logic |
+| Memory Diagnostics | Diagnostic service for memory system health |
+| Settings Backup | Export/import settings as JSON |
+| Inference Backend Selection | Toggle between LiteRT, MediaPipe, and Remote backends |
+| Model Capability Badges | Visual badges showing model capabilities |
 
 ---
 

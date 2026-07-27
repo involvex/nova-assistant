@@ -5,7 +5,7 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 
 ---
 
-## Current Status (v0.3.0)
+## Current Status (v0.4.4)
 
 - [x] Basic chat interface with streaming responses
 - [x] Multiple AI model support (SmolLM, FastVLM, Gemma 3, Gemma 4)
@@ -13,7 +13,7 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 - [x] Voice input via speech-to-text
 - [x] **TTS speak response** on assistant bubbles
 - [x] Screen capture and image attachment (on-demand MediaProjection)
-- [x] Tool execution (alarms, apps, web search, weather, SMS)
+- [x] Tool execution (alarms, apps, web search, weather, SMS, tasks, notes)
 - [x] Tool visualization + streaming progress (EventChannel)
 - [x] RAG memory + custom memories
 - [x] **Memory overview** (stored vs derived, promote, ask-about-me)
@@ -37,6 +37,29 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 - [x] **Stability:** vision engines always load with `supportImage`
 - [x] **Stability:** screenshot bytes via dedicated channel; capture not continuous
 - [x] Agent skill [`.cursor/skills/nova-dev`](.cursor/skills/nova-dev/SKILL.md)
+
+### v0.4.x additions
+
+- [x] Remote inference (OpenAI-compatible LAN client + settings screen)
+- [x] Share intent (Android share sheet → open chat with shared text)
+- [x] Adult mode (confirmation dialog + system prompt injection)
+- [x] Task management tools (create, list, complete to-dos via AI)
+- [x] Note management tools (create, search, list notes via AI)
+- [x] Shizuku/root power-user tools (force-stop, app info, battery settings)
+- [x] Custom prompt presets (full CRUD)
+- [x] Session history reinjection (reinject chat context on send)
+- [x] High-context KV budget + auto-compact
+- [x] Keep-warm policy (prevent idle unload when active)
+- [x] Model release policy (battery/RAM-aware release logic)
+- [x] Memory diagnostics service
+- [x] Settings backup/restore
+- [x] Inference backend selection (LiteRT / MediaPipe / Remote)
+- [x] Model capability badges on model cards
+- [x] Theme toggle (dark/light/system) — suggestion P0 #1
+- [x] Font scale setting — suggestion P0 #2
+- [x] Pin important messages — suggestion P0 #3
+- [x] Markdown export for conversations — suggestion P0 #4
+- [x] Conversation fork (duplicate + edit from any point) — suggestion P0 #5
 
 ---
 
@@ -73,6 +96,7 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 - [x] Model performance metrics
 - [x] MCP-like tool schemas + auto-model selection
 - [x] **MCP Streamable HTTP + OAuth**
+- [x] Remote inference (OpenAI-compatible LAN)
 
 ### Medium Priority
 
@@ -83,10 +107,12 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 - [x] Code syntax highlighting (Markdown)
 - [x] Document extract/chunk + Knowledge base UI + PDF extract
 - [x] Prompt presets
-- [ ] Conversation branching
+- [x] Conversation branching (fork from any message) — suggestion P0 #5
 - [x] Response regeneration (reroll)
 - [x] Parallel session management
 - [x] Platform adaptation helpers
+- [ ] In-chat message search (filter within current thread)
+- [ ] Battery-aware model switching (auto-downgrade on low battery)
 
 ---
 
@@ -105,6 +131,7 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 - [x] Voice synthesis (TTS)
 - [ ] Wake word detection
 - [ ] Real-time translation
+- [x] Share intent (Android share sheet)
 
 ---
 
@@ -121,8 +148,11 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 ### Medium Priority
 
 - [ ] Collaboration
-- [ ] Learning mode
+- [x] Learning mode (student assistant role exists; spaced-repetition drill TBD)
 - [ ] Custom tool creation UI
+- [ ] Structured data rendering (interactive tables + checklists in chat)
+- [ ] Model benchmarking / comparison tool
+- [ ] Context window usage visualization
 
 ---
 
@@ -142,15 +172,28 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 
 ---
 
-## Suggested v0.3.x / v0.4 follow-ons
+## Suggested v0.4.x / v0.5 follow-ons
 
-| Feature | Notes |
-|---------|-------|
-| Conversation branching | Non-linear history model |
-| Share message sheet | Export exists; bubble share does not |
-| Continuous dictation | `record` package unused beyond STT |
-| Free-RAM gate before Gemma 4 | Soft warning exists |
-| Strip `AGENT_DBG` | Hygiene after soak |
-| Desktop (Windows) scaffold | Large platform lift |
-| Wake word | Battery/privacy cost |
-| Custom tool creator UI | After MCP HTTP soak |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Conversation branching | ✅ Done | `forkConversation` in ChatHistoryService |
+| Share message sheet | ✅ Done | Android share intent integration |
+| In-chat message search | Open | Filter within current thread (not inter-conversation) |
+| Battery-aware model switching | Open | Auto-downgrade to lighter model on low battery |
+| Chat wallpaper / bubble theme | Open | Personalization beyond light/dark mode |
+| Context window visualization | Open | Progress bar showing tokens used vs limit |
+| Model benchmarking tool | Open | Compare response quality/speed across models |
+| Structured data rendering | Open | Interactive tables and checklists in chat |
+| Smart quick actions | Open | Context-aware action chips (translate, task, email) |
+| In-chat code execution | Open | Sandboxed run_code tool for code snippets |
+| Calendar/event tools | Open | Create/list events via CalendarContract |
+| Pull-to-refresh conversation list | Open | Standard UX pattern |
+| Model storage breakdown | Open | Show MB per model in settings |
+| Screen timeout during streaming | Open | Keep awake during generation |
+| Continuous dictation | Open | `record` package unused beyond STT |
+| Free-RAM gate before Gemma 4 | Open | Soft warning exists |
+| Strip `AGENT_DBG` | Open | Hygiene after soak |
+| Desktop (Windows) scaffold | Open | Large platform lift |
+| Wake word | Open | Battery/privacy cost |
+| Custom tool creator UI | Open | After MCP HTTP soak |
+| Clipboard-aware analysis | Open | "Analyze clipboard" quick action |

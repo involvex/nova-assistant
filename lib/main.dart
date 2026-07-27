@@ -172,6 +172,8 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
   static const _widgetActionDebounceMs = 1000;
 
   String? _pendingShareText;
+  ThemeModeSetting _themeMode = ThemeModeSetting.system;
+  double _fontScale = 1.0;
 
   @override
   void initState() {
@@ -180,6 +182,96 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     _setupWidgetNavigation();
     _setupNotificationNavigation();
     _setupShareIntentNavigation();
+    _loadThemeMode();
+  }
+
+  Future<void> _loadThemeMode() async {
+    final prefs = await UserPreferencesService.instance.getPreferences();
+    if (mounted) {
+      setState(() {
+        _themeMode = prefs.themeMode;
+        _fontScale = prefs.fontScale;
+      });
+    }
+  }
+
+  ThemeMode _materialThemeMode() => switch (_themeMode) {
+    ThemeModeSetting.system => ThemeMode.system,
+    ThemeModeSetting.dark => ThemeMode.dark,
+    ThemeModeSetting.light => ThemeMode.light,
+  };
+
+  ThemeData _lightTheme() {
+    final seed = const Color(0xFF6C63FF);
+    return ThemeData(
+      brightness: Brightness.light,
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: seed,
+        brightness: Brightness.light,
+      ),
+      fontFamily: 'Roboto',
+      scaffoldBackgroundColor: const Color(0xFFF7F7FF),
+      appBarTheme: AppBarTheme(
+        backgroundColor: const Color(0xFFF7F7FF),
+        elevation: 0,
+        centerTitle: true,
+        foregroundColor: const Color(0xFF1A1A2E),
+      ),
+      cardTheme: CardThemeData(
+        color: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(24),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 16,
+        ),
+      ),
+    );
+  }
+
+  ThemeData _darkTheme() {
+    final seed = const Color(0xFF6C63FF);
+    return ThemeData(
+      brightness: Brightness.dark,
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: seed,
+        brightness: Brightness.dark,
+      ),
+      fontFamily: 'Roboto',
+      scaffoldBackgroundColor: const Color(0xFF0D0D1A),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xFF0D0D1A),
+        elevation: 0,
+        centerTitle: true,
+      ),
+      cardTheme: CardThemeData(
+        color: const Color(0xFF1A1A2E),
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0xFF1A1A2E),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(24),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 16,
+        ),
+      ),
+    );
   }
 
   void _setupWidgetNavigation() {
@@ -365,46 +457,18 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Nova',
-      debugShowCheckedModeBanner: false,
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6C63FF),
-          brightness: Brightness.dark,
-        ),
-        fontFamily: 'Roboto',
-        scaffoldBackgroundColor: const Color(0xFF0D0D1A),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0D0D1A),
-          elevation: 0,
-          centerTitle: true,
-        ),
-        cardTheme: CardThemeData(
-          color: const Color(0xFF1A1A2E),
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF1A1A2E),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(24),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 16,
-          ),
-        ),
+    return MediaQuery(
+      data: MediaQuery.of(context)
+          .copyWith(textScaler: TextScaler.linear(_fontScale)),
+      child: MaterialApp(
+        title: 'Nova',
+        debugShowCheckedModeBanner: false,
+        theme: _lightTheme(),
+        darkTheme: _darkTheme(),
+        themeMode: _materialThemeMode(),
+        navigatorKey: _navigatorKey,
+        home: const AppLoader(),
       ),
-      themeMode: ThemeMode.dark,
-      navigatorKey: _navigatorKey,
-      home: const AppLoader(),
     );
   }
 }

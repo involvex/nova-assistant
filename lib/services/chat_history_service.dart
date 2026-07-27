@@ -69,6 +69,7 @@ class ChatHistoryService {
         toolCalls: m.toolCalls,
         inferenceTimeMs: m.inferenceTimeMs,
         reactions: m.reactions,
+        isPinned: m.isPinned,
       );
     }).toList();
     final trimmed = messages.length > _maxMessagesPerConversation
@@ -411,5 +412,96 @@ class ChatHistoryService {
       buffer.writeln('[Thinking: ${msg.thinking}]');
     }
     buffer.writeln();
+  }
+
+  /// Builds a Markdown export of one conversation (no file write).
+  static Future<String?> exportConversationAsMarkdown(
+    String conversationId,
+  ) async {
+    try {
+      final convo = await getConversation(conversationId);
+      if (convo == null || convo.messages.isEmpty) return null;
+
+      final buffer = StringBuffer();
+      final title = convo.previewTitle;
+      buffer.writeln('# $title');
+      buffer.writeln();
+      buffer.writeln('*Exported: ${DateTime.now().toLocal()}*  ');
+      buffer.writeln('*Messages: ${convo.messages.length}*');
+      buffer.writeln();
+      buffer.writeln('---');
+      buffer.writeln();
+
+      for (final msg in convo.messages) {
+        if (msg.isUser) {
+          buffer.writeln('## User');
+        } else {
+          buffer.writeln('## Assistant');
+        }
+        buffer.writeln();
+        buffer.writeln(msg.text);
+        buffer.writeln();
+        if (msg.thinking != null && msg.thinking!.isNotEmpty) {
+          buffer.writeln('**Thinking:**');
+          buffer.writeln(msg.thinking!);
+          buffer.writeln();
+        }
+        if (msg.toolCalls != null && msg.toolCalls!.isNotEmpty) {
+          buffer.writeln('**Tool Calls:**');
+          buffer.writeln('```json');
+          buffer.writeln(msg.toolCalls!);
+          buffer.writeln('```');
+          buffer.writeln();
+        }
+        buffer.writeln('---');
+        buffer.writeln();
+      }
+
+      return buffer.toString();
+    } on Exception {
+      return null;
+    }
+  }
+
+  /// Creates a new conversation forked from [splitAtIndex] (inclusive).
+  /// Messages before that index stay in the original conversation.
+  static Future<Conversation?> forkConversation(
+    String conversationId,
+    int splitAtIndex,
+  ) async {
+    try {
+      final convo = await getConversation(conversationId);
+      if (convo == null) return null;
+      if (splitAtIndex < 0 || splitAtIndex >= convo.messages.length) {
+        return null;
+      }
+
+      final forkedMessages = convo.messages.sublist(splitAtIndex);
+      final forkedConv = Conversation(
+        title: '${convo.previewTitle} (fork)',
+        messages: forkedMessages,
+      );
+
+      // Truncate the original conversation to messages before split point.
+      final originalMessages = convo.messages.sublist(0, splitAtIndex);
+      final updatedOriginal = convo.copyWith(
+        messages: originalMessages,
+        updatedAt: DateTime.now(),
+      );
+
+      final conversations = await loadConversations();
+      final index = conversations.indexWhere((c) => c.id == conversationId);
+      final updated = List<Conversation>.from(conversations);
+      if (index != -1) {
+        updated[index] = updatedOriginal;
+      }
+      updated.insert(0, forkedConv);
+      await _saveConversationsInternal(updated);
+
+      return forkedConv;
+    } on Exception catch (e) {
+      debugPrint('ChatHistoryService.forkConversation error: $e');
+      return null;
+    }
   }
 }

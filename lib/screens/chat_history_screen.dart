@@ -258,6 +258,88 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     }
   }
 
+  Future<void> _exportConversationMarkdown(Conversation conversation) async {
+    final content = await ChatHistoryService.exportConversationAsMarkdown(
+      conversation.id,
+    );
+    if (!mounted) return;
+    if (content == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Export failed')));
+      return;
+    }
+    await ExportService.instance.shareText(
+      content,
+      'nova_chat_${conversation.id}.md',
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Share sheet opened')));
+    }
+  }
+
+  Future<void> _forkConversation(Conversation conversation) async {
+    final messages = conversation.messages;
+    if (messages.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Nothing to fork')));
+      }
+      return;
+    }
+
+    final index = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text(
+          'Fork conversation',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'Fork from message 1 of ${messages.length} (index 0 = from start, '
+          '${messages.length - 1} = from last message)?',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 0),
+            child: const Text('From start'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, messages.length - 1),
+            child: const Text('From last'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (index == null) return;
+
+    final forked = await ChatHistoryService.forkConversation(
+      conversation.id,
+      index,
+    );
+    if (!mounted) return;
+    if (forked == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Fork failed')));
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Forked: ${forked.previewTitle}'),
+        backgroundColor: const Color(0xFF6C63FF),
+      ),
+    );
+    _loadConversations();
+  }
+
   void _showConversationMenu(Conversation conversation) {
     showModalBottomSheet<void>(
       context: context,
@@ -298,6 +380,34 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
               onTap: () {
                 Navigator.pop(ctx);
                 _exportConversation(conversation);
+              },
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.text_snippet_outlined,
+                color: Colors.grey,
+              ),
+              title: const Text(
+                'Export as Markdown',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _exportConversationMarkdown(conversation);
+              },
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.filter_list_outlined,
+                color: Colors.grey,
+              ),
+              title: const Text(
+                'Fork from here',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _forkConversation(conversation);
               },
             ),
             ListTile(

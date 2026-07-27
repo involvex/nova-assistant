@@ -18,6 +18,7 @@ class ChatMessage {
   final String? toolCalls;
   final int? inferenceTimeMs;
   final Map<String, int> reactions;
+  final bool isPinned;
 
   ChatMessage({
     required this.id,
@@ -33,6 +34,7 @@ class ChatMessage {
     this.toolCalls,
     this.inferenceTimeMs,
     this.reactions = const {},
+    this.isPinned = false,
   });
 
   ChatMessage copyWith({
@@ -49,6 +51,7 @@ class ChatMessage {
     String? toolCalls,
     int? inferenceTimeMs,
     Map<String, int>? reactions,
+    bool? isPinned,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -64,6 +67,7 @@ class ChatMessage {
       toolCalls: toolCalls ?? this.toolCalls,
       inferenceTimeMs: inferenceTimeMs ?? this.inferenceTimeMs,
       reactions: reactions ?? this.reactions,
+      isPinned: isPinned ?? this.isPinned,
     );
   }
 
@@ -81,6 +85,7 @@ class ChatMessage {
     'toolCalls': toolCalls,
     'inferenceTimeMs': inferenceTimeMs,
     'reactions': reactions,
+    'isPinned': isPinned,
   };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -101,5 +106,6 @@ class ChatMessage {
     reactions: json['reactions'] != null
         ? Map<String, int>.from(json['reactions'] as Map)
         : const {},
+    isPinned: json['isPinned'] as bool? ?? false,
   );
 }

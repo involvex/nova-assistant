@@ -37,7 +37,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 // ignore_for_file: use_build_context_synchronously
 
-enum _SettingsHub { models, assistant, memory, appData, advanced }
+enum _SettingsHub { models, assistant, memory, appData, appearance, advanced }
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -68,6 +68,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _installStatus = '';
   String _appVersion = '0.1.0';
   String _hfTokenStatus = 'Not configured';
+  ThemeModeSetting _themeMode = ThemeModeSetting.system;
+  double _fontScale = 1.0;
   StreamSubscription<Map<String, dynamic>>? _assistantRoleSub;
   StreamSubscription<String>? _modelStatusSub;
 
@@ -128,6 +130,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getString(AssistantLanguage.prefsKey),
         );
         _hfTokenStatus = _resolveHfTokenStatus(prefs.getString('hf_token'));
+        _themeMode = ThemeModeSetting.values.firstWhere(
+          (e) => e.name == prefs.getString('settings_theme_mode'),
+          orElse: () => ThemeModeSetting.system,
+        );
+        _fontScale = prefs.getDouble('settings_font_scale') ?? 1.0;
       });
       if (_debugMode) {
         unawaited(_refreshDebugMemory());
@@ -299,6 +306,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _SettingsHub.assistant => 'Assistant',
     _SettingsHub.memory => 'Memory & knowledge',
     _SettingsHub.appData => 'App & data',
+    _SettingsHub.appearance => 'Appearance',
     _SettingsHub.advanced => 'Advanced (Shizuku)',
   };
 
@@ -326,6 +334,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _SettingsHub.assistant => _assistantHubChildren(context),
                 _SettingsHub.memory => _memoryHubChildren(context),
                 _SettingsHub.appData => _appDataHubChildren(context),
+                _SettingsHub.appearance => _appearanceHubChildren(context),
                 _SettingsHub.advanced => _advancedHubChildren(context),
               },
             ),
@@ -359,6 +368,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: 'App & data',
           subtitle: 'Voice, tools, backup, about',
           onTap: () => setState(() => _hub = _SettingsHub.appData),
+        ),
+        _hubTile(
+          icon: Icons.palette_outlined,
+          title: 'Appearance',
+          subtitle: 'Theme mode and text size',
+          onTap: () => setState(() => _hub = _SettingsHub.appearance),
         ),
         _hubTile(
           icon: Icons.security_outlined,
@@ -672,6 +687,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
         },
       ),
     ];
+  }
+
+  List<Widget> _appearanceHubChildren(BuildContext context) {
+    return [
+      _sectionHeader('Theme mode'),
+      _toggleTile(
+        icon: Icons.light_mode_outlined,
+        title: 'Light theme',
+        subtitle: 'Use light color scheme',
+        value: _themeMode == ThemeModeSetting.light,
+        onChanged: (v) {
+          setState(() => _themeMode = ThemeModeSetting.light);
+          _saveThemeMode();
+        },
+      ),
+      _toggleTile(
+        icon: Icons.dark_mode_outlined,
+        title: 'Dark theme',
+        subtitle: 'Use dark color scheme',
+        value: _themeMode == ThemeModeSetting.dark,
+        onChanged: (v) {
+          setState(() => _themeMode = ThemeModeSetting.dark);
+          _saveThemeMode();
+        },
+      ),
+      _toggleTile(
+        icon: Icons.settings_system_daydream_outlined,
+        title: 'System default',
+        subtitle: 'Follow device theme setting',
+        value: _themeMode == ThemeModeSetting.system,
+        onChanged: (v) {
+          setState(() => _themeMode = ThemeModeSetting.system);
+          _saveThemeMode();
+        },
+      ),
+      _sectionHeader('Text size'),
+      Slider(
+        value: _fontScale.clamp(0.8, 1.6),
+        min: 0.8,
+        max: 1.6,
+        divisions: 8,
+        label: '${(_fontScale * 100).round()}%',
+        onChanged: (v) {
+          setState(() => _fontScale = v);
+          _saveFontScale();
+        },
+      ),
+    ];
+  }
+
+  Future<void> _saveThemeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('settings_theme_mode', _themeMode.name);
+    await prefs.reload();
+  }
+
+  Future<void> _saveFontScale() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('settings_font_scale', _fontScale);
+    await prefs.reload();
   }
 
   List<Widget> _appDataHubChildren(BuildContext context) {

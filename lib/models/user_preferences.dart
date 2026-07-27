@@ -8,17 +8,23 @@ enum UserMode {
   const UserMode(this.displayName, this.description);
 }
 
+enum ThemeModeSetting { system, dark, light }
+
 class UserPreferences {
   final UserMode mode;
   final String userName;
   final bool onboardingComplete;
   final bool beginnerHasSeenSimplifiedPrompt;
+  final ThemeModeSetting themeMode;
+  final double fontScale;
 
   const UserPreferences({
     this.mode = UserMode.expert,
     this.userName = '',
     this.onboardingComplete = false,
     this.beginnerHasSeenSimplifiedPrompt = false,
+    this.themeMode = ThemeModeSetting.system,
+    this.fontScale = 1.0,
   });
 
   UserPreferences copyWith({
@@ -26,6 +32,8 @@ class UserPreferences {
     String? userName,
     bool? onboardingComplete,
     bool? beginnerHasSeenSimplifiedPrompt,
+    ThemeModeSetting? themeMode,
+    double? fontScale,
   }) {
     return UserPreferences(
       mode: mode ?? this.mode,
@@ -34,6 +42,8 @@ class UserPreferences {
       beginnerHasSeenSimplifiedPrompt:
           beginnerHasSeenSimplifiedPrompt ??
           this.beginnerHasSeenSimplifiedPrompt,
+      themeMode: themeMode ?? this.themeMode,
+      fontScale: fontScale ?? this.fontScale,
     );
   }
 
@@ -42,6 +52,8 @@ class UserPreferences {
     'userName': userName,
     'onboardingComplete': onboardingComplete,
     'beginnerHasSeenSimplifiedPrompt': beginnerHasSeenSimplifiedPrompt,
+    'themeMode': themeMode.name,
+    'fontScale': fontScale,
   };
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) =>
@@ -54,5 +66,12 @@ class UserPreferences {
         onboardingComplete: json['onboardingComplete'] as bool? ?? false,
         beginnerHasSeenSimplifiedPrompt:
             json['beginnerHasSeenSimplifiedPrompt'] as bool? ?? false,
+        themeMode: json['themeMode'] != null
+            ? ThemeModeSetting.values.firstWhere(
+                (e) => e.name == json['themeMode'],
+                orElse: () => ThemeModeSetting.system,
+              )
+            : ThemeModeSetting.system,
+        fontScale: (json['fontScale'] as num?)?.toDouble() ?? 1.0,
       );
 }

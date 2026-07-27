@@ -289,6 +289,9 @@ class ChatBubble extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (message.isPinned)
+                      const Icon(Icons.push_pin, size: 10, color: Colors.amber),
+                    if (message.isPinned) const SizedBox(width: 2),
                     Text(
                       _formatTime(message.timestamp),
                       style: TextStyle(fontSize: 10, color: Colors.grey[600]),

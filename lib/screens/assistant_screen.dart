@@ -1770,6 +1770,108 @@ class _AssistantScreenState extends State<AssistantScreen>
                       ),
                     );
                   }
+                case 'export_markdown':
+                  final convId = widget.conversationId;
+                  if (convId == null) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('No active conversation')),
+                      );
+                    }
+                    return;
+                  }
+                  final mdContent =
+                      await ChatHistoryService.exportConversationAsMarkdown(
+                        convId,
+                      );
+                  if (!mounted) return;
+                  if (mdContent == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Export failed')),
+                    );
+                    return;
+                  }
+                  await ExportService.instance.shareText(
+                    mdContent,
+                    'nova_chat_${convId.substring(0, 8)}.md',
+                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Share sheet opened'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                case 'fork':
+                  final convId = widget.conversationId;
+                  if (convId == null) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('No active conversation')),
+                      );
+                    }
+                    return;
+                  }
+                  final messages = _messages;
+                  if (messages.isEmpty) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Nothing to fork')),
+                      );
+                    }
+                    return;
+                  }
+                  final idx = await showDialog<int>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      backgroundColor: const Color(0xFF1A1A2E),
+                      title: const Text(
+                        'Fork conversation',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      content: Text(
+                        'Fork from message 1 of ${messages.length} '
+                        '(0 = from start, ${messages.length - 1} = from '
+                        'last)?',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, 0),
+                          child: const Text('From start'),
+                        ),
+                        TextButton(
+                          onPressed: () =>
+                              Navigator.pop(ctx, messages.length - 1),
+                          child: const Text('From last'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, null),
+                          child: const Text('Cancel'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (idx == null) return;
+                  final forked = await ChatHistoryService.forkConversation(
+                    convId,
+                    idx,
+                  );
+                  if (!mounted) return;
+                  if (forked == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Fork failed')),
+                    );
+                    return;
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Forked: ${forked.previewTitle}'),
+                      backgroundColor: const Color(0xFF6C63FF),
+                    ),
+                  );
+                  _loadHistory();
                 case 'compact':
                   if (!_isGenerating) await _manualCompact();
               }
@@ -1783,11 +1885,19 @@ class _AssistantScreenState extends State<AssistantScreen>
               ),
               const PopupMenuItem<String>(
                 value: 'export_text',
-                child: Text('Export as Text'),
+                child: Text('Export all as Text'),
               ),
               const PopupMenuItem<String>(
                 value: 'export_json',
-                child: Text('Export as JSON'),
+                child: Text('Export all as JSON'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'export_markdown',
+                child: Text('Export current as Markdown'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'fork',
+                child: Text('Fork conversation from here'),
               ),
               const PopupMenuItem<String>(
                 value: 'compact',
@@ -2371,6 +2481,26 @@ class _AssistantScreenState extends State<AssistantScreen>
       items.add(const Divider(color: Colors.white10, height: 1));
     }
 
+    items.add(
+      ListTile(
+        leading: Icon(
+          msg.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+          color: msg.isPinned ? Colors.amber : Colors.white70,
+          size: 20,
+        ),
+        title: Text(
+          msg.isPinned ? 'Unpin' : 'Pin',
+          style: const TextStyle(color: Colors.white),
+        ),
+        onTap: () {
+          Navigator.pop(context);
+          _togglePin(messageIndex);
+        },
+      ),
+    );
+
+    items.add(const Divider(color: Colors.white10, height: 1));
+
     items.addAll(
       _reactionEmojis.map((emoji) {
         final count = msg.reactions[emoji] ?? 0;
@@ -2432,6 +2562,14 @@ class _AssistantScreenState extends State<AssistantScreen>
         newReactions[emoji] = 1;
       }
       _messages[messageIndex] = msg.copyWith(reactions: newReactions);
+    });
+    _scheduleSave();
+  }
+
+  void _togglePin(int messageIndex) {
+    setState(() {
+      final msg = _messages[messageIndex];
+      _messages[messageIndex] = msg.copyWith(isPinned: !msg.isPinned);
     });
     _scheduleSave();
   }

@@ -11,6 +11,19 @@ class MessageLimits {
   static const contextBudgetRatio = 0.6;
   static const highContextBudgetRatio = 0.7;
 
+  /// Edge Gallery / LiteRT-LM native ceiling for Gemma 4 E2B/E4B.
+  static const gemma4NativeMaxContext = 32000;
+
+  /// Cached device RAM (MB) from [MemoryDiagnosticsService].
+  ///
+  /// Used by [recommendedGemma4Kv] when callers do not pass [totalMemMb].
+  static int? deviceTotalMemMb;
+
+  /// Updates the process-wide RAM cache used for KV recommendations.
+  static void setDeviceTotalMemMb(int? mb) {
+    deviceTotalMemMb = mb;
+  }
+
   /// Fixed token overhead baked into Gemma 4 sessions (jinja FC template, etc.).
   static const gemma4JinjaOverheadTokens = 400;
 
@@ -168,9 +181,46 @@ class MessageLimits {
     return overhead;
   }
 
+  /// RAM-aware KV for Gemma 4 (Edge Gallery uses up to 32K on capable devices).
+  ///
+  /// Tiers follow Gallery-style memory gating so 12 GB phones are not stuck on
+  /// the old 2048 Android default.
+  static int recommendedGemma4Kv({bool highContext = false, int? totalMemMb}) {
+    final mem = totalMemMb ?? deviceTotalMemMb;
+    if (mem != null) {
+      if (mem < 6000) return highContext ? 4096 : 2048;
+      if (mem < 8000) return highContext ? 8192 : 4096;
+      if (mem < 12000) return highContext ? 16384 : 8192;
+
+      return highContext ? gemma4NativeMaxContext : 16384;
+    }
+
+    // Unknown RAM: still far above the historical 2048 Android trap.
+    return highContext ? 8192 : 4096;
+  }
+
+  /// Allowed presets for custom-model import (Edge Gallery style).
+  static const customContextPresets = <int>[
+    1024,
+    2048,
+    4096,
+    8192,
+    16384,
+    gemma4NativeMaxContext,
+  ];
+
+  /// Clamps a user-entered custom context to a safe LiteRT range.
+  static int clampCustomContextTokens(int value) {
+    if (value < 512) return 512;
+    if (value > gemma4NativeMaxContext) return gemma4NativeMaxContext;
+
+    return value;
+  }
+
   static MessageLimitTier tierFor({
     NovaModel? model,
     bool isCustomModel = false,
+    bool highContext = false,
   }) {
     if (isCustomModel) return MessageLimitTier.large;
     if (model == null || model == NovaModel.smollm) {
@@ -179,10 +229,13 @@ class MessageLimits {
     if (model == NovaModel.fastvlm || model == NovaModel.gemma3_1b) {
       return MessageLimitTier.medium;
     }
-    if (model == NovaModel.gemma4E2b &&
-        !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android) {
-      return MessageLimitTier.medium;
+    if (model == NovaModel.gemma4E2b) {
+      // Large user-message caps once KV is in Edge Gallery territory.
+      final kv = recommendedGemma4Kv(highContext: highContext);
+      if (kv >= 8192 || highContext) return MessageLimitTier.large;
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        return MessageLimitTier.medium;
+      }
     }
 
     return MessageLimitTier.large;
@@ -194,20 +247,33 @@ class MessageLimits {
     bool isAutoMode = false,
     bool isCustomModel = false,
     NovaModel? effectiveModel,
+    bool highContext = false,
   }) {
     if (isCustomModel) return MessageLimitTier.large;
     final resolved = effectiveModel ?? selectedModel;
     if (resolved != null) {
-      return tierFor(model: resolved, isCustomModel: false);
+      return tierFor(
+        model: resolved,
+        isCustomModel: false,
+        highContext: highContext,
+      );
     }
     if (isAutoMode) {
-      return tierFor(model: NovaModel.gemma4E2b, isCustomModel: false);
+      return tierFor(
+        model: NovaModel.gemma4E2b,
+        isCustomModel: false,
+        highContext: highContext,
+      );
     }
 
     return MessageLimitTier.fast;
   }
 
-  static int kvTokenLimitFor(NovaModel model, {bool highContext = false}) {
+  static int kvTokenLimitFor(
+    NovaModel model, {
+    bool highContext = false,
+    int? totalMemMb,
+  }) {
     switch (model) {
       case NovaModel.smollm:
         // Match ekv1280 asset headroom; 512 starved system+history → OUT_OF_RANGE.
@@ -217,12 +283,10 @@ class MessageLimits {
       case NovaModel.gemma3_1b:
         return 2048;
       case NovaModel.gemma4E2b:
-        if (highContext) return 4096;
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-          return 2048;
-        }
-
-        return 4096;
+        return recommendedGemma4Kv(
+          highContext: highContext,
+          totalMemMb: totalMemMb,
+        );
     }
   }
 
@@ -230,7 +294,7 @@ class MessageLimits {
     final base = switch (tier) {
       MessageLimitTier.fast => 800,
       MessageLimitTier.medium => 2000,
-      MessageLimitTier.large => 4000,
+      MessageLimitTier.large => 12000,
     };
     if (hasAttachments) return (base * 0.5).round();
 
@@ -241,7 +305,7 @@ class MessageLimits {
     final base = switch (tier) {
       MessageLimitTier.fast => 1500,
       MessageLimitTier.medium => 4000,
-      MessageLimitTier.large => 8000,
+      MessageLimitTier.large => 24000,
     };
     if (hasAttachments) return (base * 0.5).round();
 
@@ -284,9 +348,7 @@ class MessageLimits {
     if (remainingTokens <= 0) return exhaustedBudgetFloorChars;
 
     final charCap = charsFromTokens(remainingTokens);
-    final tier = highContext && effectiveModel == NovaModel.gemma4E2b
-        ? MessageLimitTier.large
-        : tierFor(model: effectiveModel);
+    final tier = tierFor(model: effectiveModel, highContext: highContext);
     final tierCap = hardLimit(tier, hasAttachments: hasAttachments);
 
     return charCap < tierCap ? charCap : tierCap;

@@ -677,6 +677,7 @@ class ModelManager {
     bool hasThinking = false,
     bool supportsFunctionCalling = true,
     bool isGguf = false,
+    int maxContextTokens = 4096,
     void Function(int progress)? onProgress,
   }) async {
     try {
@@ -727,6 +728,7 @@ class ModelManager {
         supportsFunctionCalling: supportsFunctionCalling,
         fileSizeBytes: installed.fileSizeBytes,
         installedAt: DateTime.now(),
+        maxContextTokens: maxContextTokens,
       );
 
       _customModels.removeWhere(

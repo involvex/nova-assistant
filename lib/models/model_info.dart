@@ -233,6 +233,9 @@ class CustomModel {
   final DateTime installedAt;
   final bool isGguf;
 
+  /// LiteRT `maxTokens` (input + output KV window), Edge Gallery style.
+  final int maxContextTokens;
+
   const CustomModel({
     required this.id,
     required this.displayName,
@@ -245,6 +248,7 @@ class CustomModel {
     required this.fileSizeBytes,
     required this.installedAt,
     this.isGguf = false,
+    this.maxContextTokens = 4096,
   });
 
   double get fileSizeMB => fileSizeBytes / (1024 * 1024);
@@ -256,12 +260,13 @@ class CustomModel {
     if (hasVision) caps.add('Vision');
     if (hasThinking) caps.add('Thinking');
     if (isGguf) caps.add('GGUF');
+    caps.add('$maxContextTokens ctx');
 
-    return caps.isEmpty ? 'Text only' : caps.join(' + ');
+    return caps.join(' + ');
   }
 
   List<String> get capabilityList {
-    final list = <String>['Function Calling'];
+    final list = <String>['Function Calling', '$maxContextTokens context'];
     if (hasVision) list.insert(0, 'Vision');
     if (hasThinking) list.insert(0, 'Thinking');
     if (isGguf) list.insert(0, 'GGUF');
@@ -281,10 +286,15 @@ class CustomModel {
     'fileSizeBytes': fileSizeBytes,
     'installedAt': installedAt.toIso8601String(),
     'isGguf': isGguf,
+    'maxContextTokens': maxContextTokens,
   };
 
   factory CustomModel.fromJson(Map<String, dynamic> json) {
     final isGguf = json['isGguf'] as bool? ?? false;
+    final rawCtx = json['maxContextTokens'];
+    final maxContextTokens = rawCtx is int
+        ? rawCtx
+        : (rawCtx is num ? rawCtx.round() : 4096);
 
     return CustomModel(
       id: json['id'] as String,
@@ -309,6 +319,7 @@ class CustomModel {
       fileSizeBytes: json['fileSizeBytes'] as int,
       installedAt: DateTime.parse(json['installedAt'] as String),
       isGguf: isGguf,
+      maxContextTokens: maxContextTokens,
     );
   }
 }

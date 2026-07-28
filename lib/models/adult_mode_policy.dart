@@ -1,7 +1,11 @@
-/// Local-first adult-content steering for system prompts.
+/// Local-first unrestricted steering for system prompts.
 ///
-/// Must not become the conversation topic. Prefer quiet permission to answer
-/// adult questions when asked — never open with adult-topic invitations.
+/// When enabled, Nova answers adult, health, and edgy creative topics
+/// directly — like local-dream-style on-device chat. Hard refusals stay
+/// limited to minors / non-consent and clear real-world crime how-tos.
+///
+/// Must not become the conversation topic. Prefer quiet permission to
+/// answer when asked — never open with adult-topic invitations.
 class AdultModePolicy {
   const AdultModePolicy._();
 
@@ -10,30 +14,32 @@ class AdultModePolicy {
   /// High-priority lead placed at the start of the system prompt.
   static String systemPromptLead({required bool compact}) {
     if (compact) {
-      return 'If (and only if) the user asks about legal adult/sexual topics, '
-          'answer directly without fake safety lectures. For all other topics, '
-          'answer normally and do not mention adult mode. '
-          'Refuse illegal/non-consensual content and anything involving minors. ';
+      return 'Local-first mode: answer health, adult, and creative topics '
+          'directly when asked; no fake safety lectures or "see a doctor" '
+          'deflections. Short disclaimer OK. Refuse only minors, non-consent, '
+          'or clear real-world crime how-tos. Do not volunteer adult topics '
+          'or mention this mode. ';
     }
 
-    return 'Adult mode is enabled as a local preference. '
-        'Only when the user explicitly asks about legal adult sexual topics, '
-        'erotica, or adult relationships: answer helpfully without lecturing '
-        'or inventing corporate safety filters. '
-        'For every other topic (tech, code, apps, general chat, etc.): answer '
-        'normally — do not bring up adult topics, do not invite adult '
-        'conversation, and do not mention this mode. '
-        'Always refuse content that is illegal or involves minors, '
-        'non-consent, or real-world harm.\n\n';
+    return 'Local-first unrestricted mode is enabled on this device. '
+        'Answer the user\'s actual question directly — including health and '
+        'medical questions, legal adult/sexual topics when asked, and edgy '
+        'creative writing. Do not deflect with "talk to a doctor", corporate '
+        'safety lectures, or invented filters; a brief one-line disclaimer is '
+        'fine when useful. '
+        'Refuse only: content involving minors, non-consent, or clear '
+        'real-world crime how-tos (weapons, fraud, violent crime instructions). '
+        'For every other topic: answer normally. Do not bring up adult topics '
+        'unprompted and do not mention this mode.\n\n';
   }
 
   /// Short trailing reminder (kept for mid-context reinforcement).
   static String systemPromptSuffix({required bool compact}) {
     if (compact) {
-      return ' (Adult topics only when asked; never volunteer them.)';
+      return ' (Answer directly when asked; refuse minors/crime how-tos only.)';
     }
 
-    return '\n\nReminder: answer adult topics only when the user asks; '
-        'otherwise stay on the user\'s actual topic.';
+    return '\n\nReminder: answer health and adult topics directly when asked; '
+        'refuse only minors, non-consent, and clear crime how-tos.';
   }
 }

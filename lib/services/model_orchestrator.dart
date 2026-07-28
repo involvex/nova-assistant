@@ -636,9 +636,11 @@ class ModelOrchestrator {
   }) async {
     final prefs = await SharedPreferences.getInstance();
     _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
-    _highContextEnabled =
+    final nextHighContext =
         prefs.getBool('settings_high_context') ??
         (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
+    final highContextChanged = _highContextEnabled != nextHighContext;
+    _highContextEnabled = nextHighContext;
     _autoCompactEnabled = prefs.getBool('settings_auto_compact') ?? true;
     final adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
     if (invalidateChatOnAdultChange && _adultModeEnabled != adultMode) {
@@ -651,6 +653,24 @@ class ModelOrchestrator {
     _remoteConfig = RemoteInferenceConfig.fromPrefs(prefs);
     _batteryAwareSwitching =
         prefs.getBool('settings_battery_aware_switching') ?? true;
+
+    // Warm RAM cache so Gemma 4 KV follows Edge Gallery-style tiers.
+    final totalMem = await MemoryDiagnosticsService.instance.readTotalMemMb();
+    MessageLimits.setDeviceTotalMemMb(totalMem);
+
+    // maxTokens is baked into the loaded LiteRT engine — reload when KV tier
+    // changes (high-context toggle or RAM cache becoming available).
+    if (highContextChanged && _isInitialized) {
+      _activeChat = null;
+      _lastChatSessionKey = null;
+      try {
+        await _activeModel?.close();
+      } catch (_) {}
+      _activeModel = null;
+      _activeModelType = null;
+      _isInitialized = false;
+      await _clearActiveInferenceIdentity();
+    }
   }
 
   void clearModelOverride() {
@@ -1694,7 +1714,9 @@ class ModelOrchestrator {
       );
       // #endregion
       inferenceModel = await _loadActiveModelWithTimeout(
-        maxTokens: 2048,
+        maxTokens: MessageLimits.clampCustomContextTokens(
+          customModel.maxContextTokens,
+        ),
         timeout: const Duration(seconds: 120),
         supportImage: needsImageSupport,
         preferredBackend: backend,
@@ -1728,8 +1750,12 @@ class ModelOrchestrator {
       return;
     }
 
-    // Create chat with system prompt
-    final buffer = StringBuffer(_getAssistantRole().systemPrompt);
+    // Create chat with system prompt (include adult/local-first lead).
+    final buffer = StringBuffer();
+    if (_adultModeEnabled) {
+      buffer.write(AdultModePolicy.systemPromptLead(compact: false));
+    }
+    buffer.write(_getAssistantRole().systemPrompt);
 
     if (customModel.hasThinking) {
       buffer.write(
@@ -1739,6 +1765,9 @@ class ModelOrchestrator {
     }
 
     buffer.write('\n\n${await _languageInstruction()}');
+    if (_adultModeEnabled) {
+      buffer.write(AdultModePolicy.systemPromptSuffix(compact: false));
+    }
 
     if (ragContext != null && ragContext.isNotEmpty) {
       buffer.write('\n\n${_capContextInjection(ragContext)}');

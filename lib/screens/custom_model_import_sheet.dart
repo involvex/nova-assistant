@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:path/path.dart' as p;
 
 class CustomModelImportSheet extends StatefulWidget {
@@ -26,6 +27,7 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
   bool _hasVision = false;
   bool _hasThinking = false;
   bool _supportsFunctionCalling = true;
+  int _maxContextTokens = 4096;
   bool _isInstalling = false;
   String _status = '';
 
@@ -149,6 +151,9 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
         hasThinking: _hasThinking,
         supportsFunctionCalling: _supportsFunctionCalling,
         isGguf: false,
+        maxContextTokens: MessageLimits.clampCustomContextTokens(
+          _maxContextTokens,
+        ),
         onProgress: (progress) {
           if (mounted) {
             setState(() => _status = 'Installing: $progress%');
@@ -366,7 +371,59 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
               ],
               onChanged: _isInstalling
                   ? null
-                  : (v) => setState(() => _modelType = v ?? 'general'),
+                  : (v) {
+                      final next = v ?? 'general';
+                      setState(() {
+                        _modelType = next;
+                        // Sensible Edge Gallery-style defaults per family.
+                        if (next == 'gemma4' && _maxContextTokens < 8192) {
+                          _maxContextTokens = 8192;
+                        } else if (next == 'gemmaIt' &&
+                            _maxContextTokens > 4096) {
+                          _maxContextTokens = 4096;
+                        } else if (next == 'general' &&
+                            _maxContextTokens > 2048) {
+                          _maxContextTokens = 2048;
+                        }
+                      });
+                    },
+            ),
+            const SizedBox(height: 16),
+
+            DropdownButtonFormField<int>(
+              key: ValueKey<int>(_maxContextTokens),
+              initialValue: _maxContextTokens,
+              decoration: InputDecoration(
+                labelText: 'Context size (max tokens)',
+                helperText:
+                    'KV window for this model. Higher uses more RAM — '
+                    'Gemma 4 supports up to 32K on capable devices.',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.grey.shade600),
+                ),
+              ),
+              items: [
+                for (final preset in MessageLimits.customContextPresets)
+                  DropdownMenuItem(
+                    value: preset,
+                    child: Text(
+                      preset >= 1000
+                          ? '${preset ~/ 1000}K ($preset)'
+                          : '$preset',
+                    ),
+                  ),
+              ],
+              onChanged: _isInstalling
+                  ? null
+                  : (v) {
+                      if (v != null) {
+                        setState(() => _maxContextTokens = v);
+                      }
+                    },
             ),
             const SizedBox(height: 20),
 

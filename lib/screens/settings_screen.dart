@@ -629,8 +629,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         icon: Icons.visibility_outlined,
         title: 'Adult mode',
         subtitle:
-            'Allow direct answers on legal adult topics. On-device only; '
-            'still refuses illegal content.',
+            'Local-first answers: health, adult, and creative topics '
+            'directly. Refuses minors, non-consent, and crime how-tos.',
         value: _adultMode,
         onChanged: (v) async {
           if (v) {
@@ -640,9 +640,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   builder: (ctx) => AlertDialog(
                     title: const Text('Enable adult mode?'),
                     content: const Text(
-                      'Nova will answer legal adult sexual topics more '
-                      'directly. Illegal content remains disallowed. This '
-                      'setting stays on your device.',
+                      'Nova will answer health, legal adult, and edgy '
+                      'creative topics directly on this device — without '
+                      '"see a doctor" deflections. '
+                      'It still refuses content involving minors, '
+                      'non-consent, and clear real-world crime how-tos.',
                     ),
                     actions: [
                       TextButton(
@@ -940,8 +942,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         icon: Icons.fit_screen,
         title: 'High context window',
         subtitle:
-            'Larger KV (4096) for longer messages. Uses more RAM — avoid '
-            'on ≤6 GB phones.',
+            'Unlocks larger Gemma 4 KV (up to 32K on ≥12 GB RAM). '
+            'Base size is already RAM-aware; this uses more memory.',
         value: _highContext,
         onChanged: (v) async {
           setState(() => _highContext = v);

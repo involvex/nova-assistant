@@ -463,6 +463,50 @@ class ChatHistoryService {
     }
   }
 
+  /// Non-destructive Gemini-style branch: copies messages
+  /// `[0 .. throughIndex]` (inclusive) into a **new** conversation.
+  ///
+  /// The source conversation is left unchanged. Prefer this over
+  /// [forkConversation] when the user wants a new session with shared
+  /// prefix context.
+  static Future<Conversation?> branchFromMessage(
+    String conversationId,
+    int throughIndex,
+  ) async {
+    try {
+      final convo = await getConversation(conversationId);
+      if (convo == null) return null;
+      if (throughIndex < 0 || throughIndex >= convo.messages.length) {
+        return null;
+      }
+
+      final prefix = convo.messages
+          .sublist(0, throughIndex + 1)
+          .map(_deepCopyMessage)
+          .toList();
+
+      final branched = Conversation(
+        title: '${convo.previewTitle} (branch)',
+        messages: prefix,
+      );
+
+      final conversations = await loadConversations();
+      final updated = List<Conversation>.from(conversations);
+      updated.insert(0, branched);
+      await _saveConversationsInternal(updated);
+
+      return branched;
+    } on Exception catch (e) {
+      debugPrint('ChatHistoryService.branchFromMessage error: $e');
+
+      return null;
+    }
+  }
+
+  static ChatMessage _deepCopyMessage(ChatMessage message) {
+    return ChatMessage.fromJson(Map<String, dynamic>.from(message.toJson()));
+  }
+
   /// Creates a new conversation forked from [splitAtIndex] (inclusive).
   /// Messages before that index stay in the original conversation.
   static Future<Conversation?> forkConversation(

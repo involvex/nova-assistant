@@ -16,6 +16,7 @@ class ChatBubble extends StatelessWidget {
   final VoidCallback? onRegenerate;
   final VoidCallback? onSpeak;
   final VoidCallback? onEdit;
+  final VoidCallback? onBranchFromHere;
   final ChatBubbleTheme? theme;
 
   const ChatBubble({
@@ -30,6 +31,7 @@ class ChatBubble extends StatelessWidget {
     this.onRegenerate,
     this.onSpeak,
     this.onEdit,
+    this.onBranchFromHere,
     this.theme,
   });
 
@@ -224,7 +226,7 @@ class ChatBubble extends StatelessWidget {
                 ),
               ),
 
-            // Regenerate / Speak / Edit actions
+            // Regenerate / Speak / Edit / Branch actions
             if (!message.isStreaming && !message.isError)
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 12),
@@ -251,6 +253,17 @@ class ChatBubble extends StatelessWidget {
                         label: 'Edit',
                         onTap: onEdit!,
                       ),
+                    if (onBranchFromHere != null) ...[
+                      if ((!isUser &&
+                              (onRegenerate != null || onSpeak != null)) ||
+                          (isUser && onEdit != null))
+                        const SizedBox(width: 12),
+                      _BubbleAction(
+                        icon: Icons.fork_right,
+                        label: 'New chat from here',
+                        onTap: onBranchFromHere!,
+                      ),
+                    ],
                   ],
                 ),
               ),

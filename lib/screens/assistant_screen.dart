@@ -890,6 +890,41 @@ class _AssistantScreenState extends State<AssistantScreen>
     unawaited(_sendMessage());
   }
 
+  /// Non-destructive Gemini-style branch: new chat with prefix through [index].
+  Future<void> _branchFromMessage(int index) async {
+    final convId = widget.conversationId;
+    if (convId == null ||
+        _isGenerating ||
+        index < 0 ||
+        index >= _messages.length) {
+      return;
+    }
+
+    await _saveMessages();
+    final branched = await ChatHistoryService.branchFromMessage(convId, index);
+    if (!mounted) return;
+    if (branched == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not start new chat from here')),
+      );
+
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Started new chat from here'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => AssistantScreen(conversationId: branched.id),
+      ),
+    );
+  }
+
   Future<void> _speakMessage(String text) async {
     await TtsService.instance.speak(text);
   }
@@ -1676,6 +1711,13 @@ class _AssistantScreenState extends State<AssistantScreen>
                                     : null,
                                 onEdit: msg.isUser && !_isGenerating
                                     ? () => _editUserMessage(index)
+                                    : null,
+                                onBranchFromHere:
+                                    widget.conversationId != null &&
+                                        !_isGenerating &&
+                                        !msg.isStreaming &&
+                                        !msg.isError
+                                    ? () => unawaited(_branchFromMessage(index))
                                     : null,
                               ),
                             );
@@ -2643,6 +2685,30 @@ class _AssistantScreenState extends State<AssistantScreen>
         },
       ),
     );
+
+    if (widget.conversationId != null &&
+        !_isGenerating &&
+        !msg.isStreaming &&
+        !msg.isError) {
+      items.add(const Divider(color: Colors.white10, height: 1));
+      items.add(
+        ListTile(
+          leading: const Icon(
+            Icons.fork_right,
+            color: Colors.white70,
+            size: 20,
+          ),
+          title: const Text(
+            'New chat from here',
+            style: TextStyle(color: Colors.white),
+          ),
+          onTap: () {
+            Navigator.pop(context);
+            unawaited(_branchFromMessage(messageIndex));
+          },
+        ),
+      );
+    }
 
     items.add(const Divider(color: Colors.white10, height: 1));
 

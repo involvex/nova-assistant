@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/chat_message.dart';
+import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
@@ -200,6 +201,48 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
     // Re-send the user message
     _inputController.text = userText;
     _sendMessage();
+  }
+
+  Future<void> _branchFromMessage(int index) async {
+    if (_isGenerating || index < 0 || index >= _messages.length) return;
+
+    await ChatHistoryService.save(_messages);
+    final conversations = await ChatHistoryService.loadConversations();
+    if (conversations.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not start new chat from here')),
+        );
+      }
+
+      return;
+    }
+
+    final branched = await ChatHistoryService.branchFromMessage(
+      conversations.first.id,
+      index,
+    );
+    if (!mounted) return;
+    if (branched == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not start new chat from here')),
+      );
+
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Started new chat from here'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => AssistantScreen(conversationId: branched.id),
+      ),
+    );
   }
 
   Future<void> _switchToExpertMode() async {
@@ -430,6 +473,9 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
           },
           onRegenerate: !msg.isUser && !msg.isError && !msg.isStreaming
               ? () => _regenerateResponse(index)
+              : null,
+          onBranchFromHere: !_isGenerating && !msg.isStreaming && !msg.isError
+              ? () => unawaited(_branchFromMessage(index))
               : null,
         );
       },

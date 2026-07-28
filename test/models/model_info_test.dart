@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nova_assistant/models/litert_model_catalog.dart';
 import 'package:nova_assistant/models/model_info.dart';
 
 void main() {
@@ -132,44 +133,37 @@ void main() {
   });
 
   group('ModelHuggingFaceURLs', () {
-    test('urlFor returns correct URL for each model', () {
-      expect(
-        ModelHuggingFaceURLs.urlFor(NovaModel.smollm),
-        ModelHuggingFaceURLs.smollm,
-      );
-      expect(
-        ModelHuggingFaceURLs.urlFor(NovaModel.fastvlm),
-        ModelHuggingFaceURLs.fastvlm,
-      );
-      expect(
-        ModelHuggingFaceURLs.urlFor(NovaModel.gemma3_1b),
-        ModelHuggingFaceURLs.gemma3_1b,
-      );
-      expect(
-        ModelHuggingFaceURLs.urlFor(NovaModel.gemma4E2b),
-        ModelHuggingFaceURLs.gemma4E2b,
-      );
+    test('urlFor returns catalog download URLs', () {
+      for (final entry in LiteRtModelCatalog.recommended) {
+        expect(
+          ModelHuggingFaceURLs.urlFor(entry.novaModel),
+          entry.downloadUrl,
+        );
+      }
     });
 
     test('URLs match their expected file extensions', () {
-      expect(ModelHuggingFaceURLs.smollm, endsWith('.task'));
-      expect(ModelHuggingFaceURLs.fastvlm, endsWith('.litertlm'));
-      expect(ModelHuggingFaceURLs.gemma3_1b, endsWith('.litertlm'));
-      expect(ModelHuggingFaceURLs.gemma4E2b, endsWith('.litertlm'));
+      expect(ModelHuggingFaceURLs.urlFor(NovaModel.smollm), endsWith('.task'));
+      expect(
+        ModelHuggingFaceURLs.urlFor(NovaModel.fastvlm),
+        endsWith('.litertlm'),
+      );
+      expect(
+        ModelHuggingFaceURLs.urlFor(NovaModel.gemma3_1b),
+        endsWith('.litertlm'),
+      );
+      expect(
+        ModelHuggingFaceURLs.urlFor(NovaModel.gemma4E2b),
+        endsWith('.litertlm'),
+      );
     });
 
-    test('all URLs use HTTPS', () {
-      expect(ModelHuggingFaceURLs.smollm, startsWith('https://'));
-      expect(ModelHuggingFaceURLs.fastvlm, startsWith('https://'));
-      expect(ModelHuggingFaceURLs.gemma3_1b, startsWith('https://'));
-      expect(ModelHuggingFaceURLs.gemma4E2b, startsWith('https://'));
-    });
-
-    test('all URLs point to huggingface.co', () {
-      expect(ModelHuggingFaceURLs.smollm, contains('huggingface.co'));
-      expect(ModelHuggingFaceURLs.fastvlm, contains('huggingface.co'));
-      expect(ModelHuggingFaceURLs.gemma3_1b, contains('huggingface.co'));
-      expect(ModelHuggingFaceURLs.gemma4E2b, contains('huggingface.co'));
+    test('all URLs use HTTPS huggingface.co', () {
+      for (final model in NovaModel.values) {
+        final url = ModelHuggingFaceURLs.urlFor(model);
+        expect(url, startsWith('https://'));
+        expect(url, contains('huggingface.co'));
+      }
     });
   });
 }

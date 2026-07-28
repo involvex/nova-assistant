@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nova_assistant/models/litert_model_catalog.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 
@@ -236,16 +237,7 @@ class ModelUpdateService {
 
   /// Get the HuggingFace repo for a model
   String _repoForModel(NovaModel model) {
-    switch (model) {
-      case NovaModel.smollm:
-        return 'litert-community/SmolLM-135M-Instruct';
-      case NovaModel.fastvlm:
-        return 'litert-community/FastVLM-0.5B';
-      case NovaModel.gemma3_1b:
-        return 'litert-community/Gemma3-1B-IT';
-      case NovaModel.gemma4E2b:
-        return 'litert-community/gemma-4-E2B-it-litert-lm';
-    }
+    return LiteRtModelCatalog.repoIdFor(model);
   }
 
   /// Load known model versions from preferences

@@ -1,4 +1,5 @@
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:nova_assistant/models/litert_model_catalog.dart';
 
 enum NovaModel {
   smollm(
@@ -107,38 +108,16 @@ class ModelHashes {
 }
 
 class ModelHuggingFaceURLs {
-  // SmolLM 135M — .task format (no .litertlm available)
-  static const smollm =
-      'https://huggingface.co/litert-community/SmolLM-135M-Instruct/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task';
-
-  // FastVLM 0.5B — fast vision model
-  static const fastvlm =
-      'https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm';
-
-  // Gemma 3 1B — balanced text
-  static const gemma3_1b =
-      'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.litertlm';
-
-  // Gemma 4 E2B — full power, vision + thinking + function calling
-  static const gemma4E2b =
-      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
-
   static String urlFor(NovaModel model) {
-    switch (model) {
-      case NovaModel.smollm:
-        return smollm;
-      case NovaModel.fastvlm:
-        return fastvlm;
-      case NovaModel.gemma3_1b:
-        return gemma3_1b;
-      case NovaModel.gemma4E2b:
-        return gemma4E2b;
-    }
+    final entry = LiteRtModelCatalog.forNovaModel(model);
+    if (entry != null) return entry.downloadUrl;
+
+    throw StateError('No catalog entry for $model');
   }
 
   /// Gemma repos are gated on HuggingFace and return 401 without a token.
   static bool requiresHuggingFaceAuth(NovaModel model) {
-    return model == NovaModel.gemma3_1b || model == NovaModel.gemma4E2b;
+    return LiteRtModelCatalog.forNovaModel(model)?.gated ?? false;
   }
 
   /// True when [url] points at a known gated Gemma asset.
@@ -152,23 +131,15 @@ class ModelHuggingFaceURLs {
   }
 
   static String fileNameFor(NovaModel model) {
-    switch (model) {
-      case NovaModel.smollm:
-        return 'SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task';
-      case NovaModel.fastvlm:
-        return 'FastVLM-0.5B.litertlm';
-      case NovaModel.gemma3_1b:
-        return 'gemma3-1b-it-int4.litertlm';
-      case NovaModel.gemma4E2b:
-        return 'gemma-4-E2B-it.litertlm';
-    }
+    return LiteRtModelCatalog.forNovaModel(model)?.fileName ?? model.name;
   }
 
   static NovaModel? modelFromUrl(String url) {
     final normalizedUrl = url.toLowerCase();
-    for (final model in NovaModel.values) {
-      if (normalizedUrl.contains(urlFor(model).toLowerCase())) {
-        return model;
+    for (final entry in LiteRtModelCatalog.recommended) {
+      if (normalizedUrl.contains(entry.downloadUrl.toLowerCase()) ||
+          normalizedUrl.contains(entry.fileName.toLowerCase())) {
+        return entry.novaModel;
       }
     }
 
@@ -176,16 +147,18 @@ class ModelHuggingFaceURLs {
   }
 
   static NovaModel? modelFromFileName(String fileName) {
+    return LiteRtModelCatalog.byFileName(fileName)?.novaModel ??
+        _fuzzyMatchFileName(fileName);
+  }
+
+  static NovaModel? _fuzzyMatchFileName(String fileName) {
     final normalizedName = fileName.toLowerCase();
-    for (final model in NovaModel.values) {
-      if (normalizedName.contains(
-        fileNameFor(model)
-            .toLowerCase()
-            .replaceAll('.litertlm', '')
-            .replaceAll('.task', ''),
-      )) {
-        return model;
-      }
+    for (final entry in LiteRtModelCatalog.recommended) {
+      final stem = entry.fileName
+          .toLowerCase()
+          .replaceAll('.litertlm', '')
+          .replaceAll('.task', '');
+      if (normalizedName.contains(stem)) return entry.novaModel;
     }
 
     return null;

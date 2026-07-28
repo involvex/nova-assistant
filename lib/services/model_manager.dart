@@ -746,6 +746,51 @@ class ModelManager {
     }
   }
 
+  /// Downloads a Hub LiteRT file and registers it as a [CustomModel]
+  /// with inferred capabilities (vision / thinking / context).
+  Future<CustomModel?> installHubCustomModel({
+    required String url,
+    required String displayName,
+    required ModelType modelType,
+    required ModelFileType fileType,
+    bool hasVision = false,
+    bool hasThinking = false,
+    bool supportsFunctionCalling = true,
+    int maxContextTokens = 4096,
+    void Function(int progress)? onProgress,
+  }) async {
+    final installed = await installFromNetwork(
+      url: url,
+      modelType: modelType,
+      fileType: fileType,
+      onProgress: onProgress,
+    );
+    if (installed == null) return null;
+
+    final customModel = CustomModel(
+      id: displayName,
+      displayName: displayName,
+      fileName: installed.fileName,
+      modelType: modelType,
+      fileType: fileType,
+      hasVision: hasVision,
+      hasThinking: hasThinking,
+      supportsFunctionCalling: supportsFunctionCalling,
+      fileSizeBytes: installed.fileSizeBytes,
+      installedAt: DateTime.now(),
+      maxContextTokens: maxContextTokens,
+    );
+
+    _customModels.removeWhere(
+      (m) => m.id == displayName || m.fileName == installed.fileName,
+    );
+    _customModels.add(customModel);
+    await _saveCustomModelsToPrefs();
+    _statusController.add('Custom model installed: $displayName');
+
+    return customModel;
+  }
+
   /// Replicates flutter_gemma's filename base-name extraction so we can
   /// compute the canonical install path BEFORE calling into flutter_gemma.
   /// This avoids a post-install rename that would invalidate flutter_gemma's

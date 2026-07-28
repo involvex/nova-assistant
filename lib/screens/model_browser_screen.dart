@@ -1,11 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:nova_assistant/models/litert_model_catalog.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
+import 'package:nova_assistant/services/huggingface_hub_service.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 
 class ModelBrowserScreen extends StatefulWidget {
@@ -19,71 +18,74 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
   String _status = '';
   bool _isLoading = false;
   final TextEditingController _searchController = TextEditingController();
-  List<Map<String, dynamic>> _results = [];
-  bool _hasSearched = false;
-
-  static const _defaultModels = <Map<String, dynamic>>[
-    {
-      'id': 'SmolLM-135M',
-      'modelId': 'SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task',
-      'author': 'litert-community',
-      'downloads': 45000,
-      'likes': 320,
-      'pipeline_tag': 'text-generation',
-      'tags': <String>['gemma', 'smollm', 'fast'],
-    },
-    {
-      'id': 'FastVLM-0.5B',
-      'modelId': 'FastVLM-0.5B.litertlm',
-      'author': 'litert-community',
-      'downloads': 38000,
-      'likes': 280,
-      'pipeline_tag': 'image-text-to-text',
-      'tags': <String>['fastvlm', 'vision', 'fast'],
-    },
-    {
-      'id': 'gemma-3-1b-it-int4',
-      'modelId': 'gemma3-1b-it-int4.litertlm',
-      'author': 'litert-community',
-      'downloads': 52000,
-      'likes': 410,
-      'pipeline_tag': 'text-generation',
-      'tags': <String>['gemma3', 'balanced'],
-    },
-    {
-      'id': 'gemma-4-E2B-it',
-      'modelId': 'gemma-4-E2B-it.litertlm',
-      'author': 'litert-community',
-      'downloads': 28000,
-      'likes': 190,
-      'pipeline_tag': 'image-text-to-text',
-      'tags': <String>['gemma4', 'vision', 'thinking', 'heavy'],
-    },
-  ];
+  Timer? _debounce;
+  List<HfModelHit> _communityResults = [];
+  bool _browseLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
+    unawaited(_loadCommunityBrowse());
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();
   }
 
   void _onSearchChanged() {
+    _debounce?.cancel();
     final query = _searchController.text.trim();
     if (query.isEmpty) {
-      setState(() {
-        _results = [];
-        _hasSearched = false;
-      });
+      unawaited(_loadCommunityBrowse());
+
       return;
     }
-    _searchModels(query);
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      unawaited(_searchModels(query));
+    });
+  }
+
+  Future<void> _loadCommunityBrowse() async {
+    if (_isLoading) return;
+    setState(() {
+      _isLoading = true;
+      _status = 'Loading litert-community models...';
+    });
+    try {
+      final hits = await HuggingfaceHubService.instance.searchModels(
+        author: HuggingfaceHubService.litertCommunityAuthor,
+        limit: 40,
+      );
+      if (!mounted) return;
+      setState(() {
+        _communityResults = hits;
+        _browseLoaded = true;
+        _status = hits.isEmpty
+            ? 'No community models found (check network / token)'
+            : '${hits.length} litert-community model(s)';
+      });
+    } on HfAuthException {
+      if (!mounted) return;
+      setState(() {
+        _communityResults = [];
+        _browseLoaded = true;
+        _status = 'Auth required. Add a HuggingFace token in Settings.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _communityResults = [];
+        _browseLoaded = true;
+        _status = 'Browse error: $e';
+      });
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _searchModels(String query) async {
@@ -92,92 +94,82 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
       _isLoading = true;
       _status = 'Searching HuggingFace...';
     });
-
     try {
-      final token = await ModelManager.getHuggingFaceToken();
-      final encoded = Uri.encodeComponent(query);
-      final url = 'https://huggingface.co/api/models?search=$encoded&limit=20';
-      final uri = Uri.parse(url);
-
-      final client = HttpClient();
-      try {
-        final request = await client.getUrl(uri);
-        if (token != null && token.isNotEmpty) {
-          request.headers.set('Authorization', 'Bearer $token');
-        }
-        final response = await request.close();
-
-        if (response.statusCode == 200) {
-          final body = await response.transform(utf8.decoder).join();
-          final List<dynamic> list = jsonDecode(body) as List<dynamic>;
-          setState(() {
-            _results = list.whereType<Map<String, dynamic>>().where((m) {
-              final tags = m['tags'] as List<dynamic>? ?? const [];
-              final pipeline = m['pipeline_tag'] as String? ?? '';
-              final text =
-                  '${m['id']} ${m['author'] ?? ''} $pipeline ${tags.join(' ')}';
-              final q = query.toLowerCase();
-              return text.toLowerCase().contains(q);
-            }).toList();
-            _hasSearched = true;
-            _status = _results.isEmpty
-                ? 'No results found for "$query"'
-                : '${_results.length} result(s)';
-          });
-        } else if (response.statusCode == 401) {
-          setState(() {
-            _results = [];
-            _hasSearched = true;
-            _status = 'Auth required. Add a HuggingFace token in Settings.';
-          });
-        } else {
-          setState(() {
-            _results = [];
-            _hasSearched = true;
-            _status = 'Search failed: HTTP ${response.statusCode}';
-          });
-        }
-      } finally {
-        client.close();
-      }
-    } catch (e) {
+      final hits = await HuggingfaceHubService.instance.searchModels(
+        query: query,
+        limit: 30,
+      );
+      if (!mounted) return;
       setState(() {
-        _results = [];
-        _hasSearched = true;
+        _communityResults = hits;
+        _browseLoaded = true;
+        _status = hits.isEmpty
+            ? 'No results for "$query"'
+            : '${hits.length} result(s)';
+      });
+    } on HfAuthException {
+      if (!mounted) return;
+      setState(() {
+        _communityResults = [];
+        _browseLoaded = true;
+        _status = 'Auth required. Add a HuggingFace token in Settings.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _communityResults = [];
+        _browseLoaded = true;
         _status = 'Search error: $e';
       });
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _downloadModel(Map<String, dynamic> model) async {
-    final modelIndex = NovaModel.values.indexWhere(
-      (m) => ModelHuggingFaceURLs.fileNameFor(m) == model['modelId'],
-    );
-    if (modelIndex == -1) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Model type not recognized. Use Settings > Install model from file for custom models.',
-            ),
-            backgroundColor: Colors.orange,
+  Future<bool> _ensureTokenIfNeeded({required bool gated}) async {
+    if (!gated) return true;
+    final has = await ModelManager.hasHuggingFaceToken();
+    if (has) return true;
+    if (!mounted) return false;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('HuggingFace token required'),
+        content: Text(
+          'This model is gated. Add a HuggingFace token in Settings '
+          'before downloading.',
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
           ),
-        );
-      }
-      return;
-    }
-    final novaModel = NovaModel.values[modelIndex];
-    final url = ModelHuggingFaceURLs.urlFor(novaModel);
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+
+    return go == true && await ModelManager.hasHuggingFaceToken();
+  }
+
+  Future<void> _downloadRecommended(RecommendedLiteRtModel entry) async {
+    if (!await _ensureTokenIfNeeded(gated: entry.gated)) return;
+    if (!mounted) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
-        title: Text('Download ${novaModel.displayName}?'),
+        title: Text('Download ${entry.displayName}?'),
         content: Text(
-          'Size: ~${novaModel.sizeMB}MB\nSource: ${Uri.parse(url).host}',
+          'Size: ~${entry.approxSizeMB}MB\n'
+          'Repo: ${entry.repoId}'
+          '${entry.gated ? '\nGated — HF token required' : ''}',
           style: TextStyle(color: Colors.grey[400]),
         ),
         actions: [
@@ -192,59 +184,253 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         ],
       ),
     );
+    if (confirmed != true || !mounted) return;
 
-    if (confirmed != true) return;
-
-    if (!mounted) return;
     setState(() {
-      _status = 'Downloading ${novaModel.displayName}...';
+      _status = 'Downloading ${entry.displayName}...';
       _isLoading = true;
+    });
+    try {
+      final installed = await ModelManager.instance.installFromNetwork(
+        url: entry.downloadUrl,
+        modelType: entry.modelType,
+        fileType: entry.fileType,
+        onProgress: (p) {
+          if (mounted) setState(() => _status = 'Downloading: $p%');
+        },
+      );
+      if (!mounted) return;
+      setState(() => _status = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            installed != null
+                ? 'Installed: ${installed.fileName}'
+                : 'Download failed. Check Settings > HuggingFace Token.',
+          ),
+          backgroundColor: installed != null ? Colors.green : Colors.red,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _openHubRepo(HfModelHit hit) async {
+    final known = LiteRtModelCatalog.byRepoId(hit.id);
+    if (known != null) {
+      await _downloadRecommended(known);
+
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _status = 'Listing LiteRT files in ${hit.id}...';
     });
 
     try {
-      final installed = await ModelManager.instance.installFromNetwork(
+      final files = await HuggingfaceHubService.instance.listLiteRtFiles(
+        hit.id,
+      );
+      if (!mounted) return;
+      if (files.isEmpty) {
+        setState(() => _status = 'No .litertlm / .task files in ${hit.id}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No LiteRT chat files (.litertlm / .task) found in this repo.',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+
+        return;
+      }
+
+      final selected = files.length == 1
+          ? files.first
+          : await _pickLiteRtFile(hit, files);
+      if (selected == null || !mounted) return;
+
+      await _installHubFile(hit, selected);
+    } on HfAuthException {
+      if (!mounted) return;
+      setState(() {
+        _status = 'Auth required. Add a HuggingFace token in Settings.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = 'List error: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<HfRepoFile?> _pickLiteRtFile(
+    HfModelHit hit,
+    List<HfRepoFile> files,
+  ) async {
+    return showModalBottomSheet<HfRepoFile>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'Choose LiteRT file — ${hit.shortName}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: files.length,
+                  itemBuilder: (context, index) {
+                    final f = files[index];
+                    final hints = HuggingfaceHubService.inferInstallHints(
+                      repoId: hit.id,
+                      filePath: f.path,
+                      tags: hit.tags,
+                    );
+                    final sizeLabel = f.size != null
+                        ? _formatBytes(f.size!)
+                        : 'size unknown';
+
+                    return ListTile(
+                      title: Text(
+                        f.fileName,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        '$sizeLabel · ${hints.modelType.name}'
+                        '${hints.hasVision ? ' · vision' : ''}'
+                        '${hints.hasThinking ? ' · thinking' : ''}'
+                        ' · ${hints.maxContextTokens} ctx',
+                        style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                      ),
+                      onTap: () => Navigator.pop(ctx, f),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _installHubFile(HfModelHit hit, HfRepoFile file) async {
+    final hints = HuggingfaceHubService.inferInstallHints(
+      repoId: hit.id,
+      filePath: file.path,
+      tags: hit.tags,
+    );
+    final gated =
+        hit.gated || ModelHuggingFaceURLs.urlRequiresHuggingFaceAuth(hit.id);
+    if (!await _ensureTokenIfNeeded(gated: gated)) return;
+    if (!mounted) return;
+
+    final url = HuggingfaceHubService.resolveDownloadUrl(
+      hit.id,
+      path: file.path,
+    );
+    final sizeLabel = file.size != null ? _formatBytes(file.size!) : 'unknown';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Text('Download ${file.fileName}?'),
+        content: Text(
+          'Repo: ${hit.id}\n'
+          'Size: $sizeLabel\n'
+          'Type: ${hints.modelType.name}\n'
+          'Context: ${hints.maxContextTokens}'
+          '${hints.hasVision ? '\nVision' : ''}'
+          '${hints.hasThinking ? '\nThinking' : ''}'
+          '${gated ? '\nGated — HF token required' : ''}',
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Download'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _status = 'Downloading ${file.fileName}...';
+      _isLoading = true;
+    });
+    try {
+      final custom = await ModelManager.instance.installHubCustomModel(
         url: url,
-        modelType: novaModel.modelType,
-        fileType: novaModel.fileType,
-        onProgress: (progress) {
-          if (mounted) {
-            setState(() => _status = 'Downloading: $progress%');
-          }
+        displayName: hints.displayName,
+        modelType: hints.modelType,
+        fileType: hints.fileType,
+        hasVision: hints.hasVision,
+        hasThinking: hints.hasThinking,
+        maxContextTokens: hints.maxContextTokens,
+        onProgress: (p) {
+          if (mounted) setState(() => _status = 'Downloading: $p%');
         },
       );
-
-      if (mounted) {
-        setState(() => _status = '');
-        if (installed != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Installed: ${installed.fileName}'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Download failed. Check Settings > HuggingFace Token or try Install from file.',
-              ),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
+      if (!mounted) return;
+      setState(() => _status = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            custom != null
+                ? 'Installed: ${custom.displayName}'
+                : 'Download failed. Check URL or HuggingFace token.',
+          ),
+          backgroundColor: custom != null ? Colors.green : Colors.red,
+        ),
+      );
     } catch (e) {
-      if (mounted) {
-        setState(() => _status = '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
+      if (!mounted) return;
+      setState(() => _status = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).round()} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
   @override
@@ -256,6 +442,16 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         backgroundColor: const Color(0xFF0D0D1A),
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh community list',
+            onPressed: _isLoading
+                ? null
+                : () {
+                    _searchController.clear();
+                    unawaited(_loadCommunityBrowse());
+                  },
+          ),
           IconButton(
             icon: const Icon(Icons.downloading),
             tooltip: 'Import from file',
@@ -309,56 +505,114 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
   }
 
   Widget _buildBody() {
-    if (_isLoading && _results.isEmpty) {
-      return const Center(
-        child: CircularProgressIndicator(color: Color(0xFF6C63FF)),
-      );
-    }
+    final queryEmpty = _searchController.text.trim().isEmpty;
 
-    if (!_hasSearched) {
-      return ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: [
-          ..._defaultModels.map((m) => _modelTile(m, isDefault: true)),
-        ],
-      );
-    }
-
-    if (_results.isEmpty && _hasSearched) {
-      return Center(
-        child: Text(
-          'No models found.\nTry a different search term.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.grey[500]),
-        ),
-      );
-    }
-
-    return ListView.builder(
+    return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: _results.length,
-      itemBuilder: (context, index) {
-        final model = _results[index];
-        final modelId = model['modelId'] as String? ?? model['id'] as String;
-        final isInstalled = ModelManager.instance.isModelInstalled(modelId);
-        return _modelTile(model, isInstalled: isInstalled);
-      },
+      children: [
+        if (queryEmpty) ...[
+          _sectionHeader('Recommended'),
+          ...LiteRtModelCatalog.recommended.map(_recommendedTile),
+          const SizedBox(height: 12),
+          _sectionHeader('litert-community'),
+        ],
+        if (_isLoading && _communityResults.isEmpty && !_browseLoaded)
+          const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(
+              child: CircularProgressIndicator(color: Color(0xFF6C63FF)),
+            ),
+          )
+        else if (_communityResults.isEmpty && _browseLoaded)
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              queryEmpty
+                  ? 'Could not load community models.'
+                  : 'No models found.\nTry a different search term.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[500]),
+            ),
+          )
+        else
+          ..._communityResults.map(_hubTile),
+        const SizedBox(height: 24),
+      ],
     );
   }
 
-  Widget _modelTile(
-    Map<String, dynamic> model, {
-    bool isDefault = false,
-    bool isInstalled = false,
+  Widget _sectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, top: 4),
+      child: Text(
+        title,
+        style: TextStyle(
+          color: Colors.grey[400],
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _recommendedTile(RecommendedLiteRtModel entry) {
+    final installed = ModelManager.instance.isModelInstalled(entry.fileName);
+
+    return _tileShell(
+      title: entry.displayName,
+      subtitle: entry.repoId,
+      meta:
+          '~${entry.approxSizeMB} MB · ${entry.pipelineTag}'
+          '${entry.gated ? ' · gated' : ''}',
+      hasVision: entry.hasVision,
+      hasThinking: entry.hasThinking,
+      gated: entry.gated,
+      installed: installed,
+      onDownload: _isLoading ? null : () => _downloadRecommended(entry),
+    );
+  }
+
+  Widget _hubTile(HfModelHit hit) {
+    final known = LiteRtModelCatalog.byRepoId(hit.id);
+    final installed = known != null
+        ? ModelManager.instance.isModelInstalled(known.fileName)
+        : ModelManager.instance.isCustomModelInstalled(hit.shortName) ||
+              ModelManager.instance.customModels.any(
+                (c) => hit.id.toLowerCase().contains(
+                  c.fileName.toLowerCase().replaceAll('.litertlm', ''),
+                ),
+              );
+    final hints = HuggingfaceHubService.inferInstallHints(
+      repoId: hit.id,
+      filePath: hit.shortName,
+      tags: hit.tags,
+    );
+
+    return _tileShell(
+      title: hit.id,
+      subtitle: 'by ${hit.author ?? 'unknown'}',
+      meta:
+          '${hit.downloads > 0 ? '${hit.downloads ~/ 1000}k dl · ' : ''}'
+          '${hit.pipelineTag ?? 'model'}'
+          '${hit.gated ? ' · gated' : ''}',
+      hasVision: hints.hasVision || known?.hasVision == true,
+      hasThinking: hints.hasThinking || known?.hasThinking == true,
+      gated: hit.gated || (known?.gated ?? false),
+      installed: installed,
+      onDownload: _isLoading ? null : () => unawaited(_openHubRepo(hit)),
+    );
+  }
+
+  Widget _tileShell({
+    required String title,
+    required String subtitle,
+    required String meta,
+    required bool hasVision,
+    required bool hasThinking,
+    required bool gated,
+    required bool installed,
+    required VoidCallback? onDownload,
   }) {
-    final modelId = model['modelId'] as String? ?? model['id'] as String;
-    final author = model['author'] as String? ?? 'unknown';
-    final downloads = (model['downloads'] as int?) ?? 0;
-    final likes = (model['likes'] as int?) ?? 0;
-    final pipeline = model['pipeline_tag'] as String? ?? '';
-
-    final novaModel = _findNovaModel(modelId);
-
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
@@ -366,7 +620,7 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         color: const Color(0xFF1A1A2E),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isInstalled
+          color: installed
               ? Colors.green.withValues(alpha: 0.3)
               : Colors.white.withValues(alpha: 0.06),
         ),
@@ -378,16 +632,14 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
             height: 40,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: novaModel?.hasVision == true
+                colors: hasVision
                     ? [const Color(0xFF6C63FF), const Color(0xFF9D4EDD)]
                     : [Colors.grey[700]!, Colors.grey[600]!],
               ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
-              novaModel?.hasVision == true
-                  ? Icons.image_outlined
-                  : Icons.text_fields,
+              hasVision ? Icons.image_outlined : Icons.text_fields,
               color: Colors.white,
               size: 20,
             ),
@@ -398,7 +650,7 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  modelId,
+                  title,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 13,
@@ -407,61 +659,36 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                Row(
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  meta,
+                  style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
                   children: [
-                    Text(
-                      'by $author',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-                    ),
-                    if (downloads > 0) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        '${downloads ~/ 1000}k downloads',
-                        style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                      ),
-                    ],
-                    if (likes > 0) ...[
-                      const SizedBox(width: 8),
-                      Icon(
-                        Icons.thumb_up_outlined,
-                        size: 10,
-                        color: Colors.grey[600],
-                      ),
-                      Text(
-                        '$likes',
-                        style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                      ),
-                    ],
+                    if (hasVision) _badge('Vision', Colors.purple),
+                    if (hasThinking) _badge('Thinking', Colors.orange),
+                    if (gated) _badge('Gated', Colors.amber),
                   ],
                 ),
-                if (pipeline.isNotEmpty)
-                  Text(
-                    pipeline,
-                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                  ),
               ],
             ),
           ),
           const SizedBox(width: 8),
-          isInstalled
+          installed
               ? Icon(Icons.check_circle, color: Colors.green[400], size: 20)
               : IconButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () {
-                          if (novaModel != null) {
-                            _downloadModel(model);
-                          } else {
-                            _showCustomDownloadDialog(model);
-                          }
-                        },
-                  icon: Icon(
-                    isDefault
-                        ? Icons.cloud_download_outlined
-                        : Icons.download_outlined,
-                    color: isDefault
-                        ? Colors.grey[600]
-                        : const Color(0xFF6C63FF),
+                  onPressed: onDownload,
+                  icon: const Icon(
+                    Icons.cloud_download_outlined,
+                    color: Color(0xFF6C63FF),
                     size: 20,
                   ),
                 ),
@@ -470,197 +697,19 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
     );
   }
 
-  NovaModel? _findNovaModel(String fileId) {
-    for (final model in NovaModel.values) {
-      if (ModelHuggingFaceURLs.fileNameFor(model) == fileId) {
-        return model;
-      }
-    }
-    return null;
-  }
-
-  Future<void> _showCustomDownloadDialog(Map<String, dynamic> model) async {
-    final urlController = TextEditingController();
-    final nameController = TextEditingController(
-      text: model['id'] as String? ?? '',
-    );
-    final typeController = TextEditingController();
-
-    if (!context.mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text(
-          'Download Custom Model',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'This model is not in the built-in list.',
-              style: TextStyle(color: Colors.grey[400], fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: urlController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Download URL',
-                labelStyle: TextStyle(color: Colors.grey[400]),
-                hintText: 'https://huggingface.co/...',
-                hintStyle: TextStyle(color: Colors.grey[600]),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey[700]!),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: nameController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'File name (with extension)',
-                labelStyle: TextStyle(color: Colors.grey[400]),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey[700]!),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            // ignore: deprecated_member_use
-            DropdownButtonFormField<String>(
-              dropdownColor: const Color(0xFF1A1A2E),
-              // ignore: deprecated_member_use
-              value: typeController.text.isEmpty ? null : typeController.text,
-              decoration: InputDecoration(
-                labelText: 'Model Type',
-                labelStyle: TextStyle(color: Colors.grey[400]),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey[700]!),
-                ),
-              ),
-              items: const [
-                DropdownMenuItem(
-                  value: 'general',
-                  child: Text('General (SmolLM, FastVLM)'),
-                ),
-                DropdownMenuItem(
-                  value: 'gemmaIt',
-                  child: Text('Gemma IT (Gemma 3)'),
-                ),
-                DropdownMenuItem(value: 'gemma4', child: Text('Gemma 4')),
-              ],
-              onChanged: (v) => typeController.text = v ?? '',
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: TextStyle(color: Colors.grey[400])),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final url = urlController.text.trim();
-              final name = nameController.text.trim();
-              final type = typeController.text.trim();
-              if (url.isEmpty || name.isEmpty || type.isEmpty) return;
-
-              Navigator.pop(ctx);
-              await _downloadCustomModel(url, name, type);
-            },
-            child: const Text('Download'),
-          ),
-        ],
+  Widget _badge(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.95)),
       ),
     );
-  }
-
-  Future<void> _downloadCustomModel(
-    String url,
-    String fileName,
-    String modelTypeStr,
-  ) async {
-    ModelType? modelType;
-    switch (modelTypeStr) {
-      case 'gemmaIt':
-        modelType = ModelType.gemmaIt;
-      case 'gemma4':
-        modelType = ModelType.gemma4;
-      default:
-        modelType = ModelType.general;
-    }
-
-    final ext = fileName.split('.').last.toLowerCase();
-    final fileType = switch (ext) {
-      'litertlm' => ModelFileType.litertlm,
-      _ => ModelFileType.task,
-    };
-
-    if (!mounted) return;
-    setState(() {
-      _status = 'Downloading $fileName...';
-      _isLoading = true;
-    });
-
-    try {
-      final installed = await ModelManager.instance.installFromNetwork(
-        url: url,
-        modelType: modelType,
-        fileType: fileType,
-        onProgress: (progress) {
-          if (mounted) {
-            setState(() => _status = 'Downloading: $progress%');
-          }
-        },
-      );
-
-      if (mounted) {
-        setState(() => _status = '');
-        if (installed != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Installed: ${installed.fileName}'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Download failed. Check URL or add a HuggingFace token in Settings.',
-              ),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _status = '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
   }
 
   Future<void> _showImportSheet() async {

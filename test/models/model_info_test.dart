@@ -135,10 +135,7 @@ void main() {
   group('ModelHuggingFaceURLs', () {
     test('urlFor returns catalog download URLs', () {
       for (final entry in LiteRtModelCatalog.recommended) {
-        expect(
-          ModelHuggingFaceURLs.urlFor(entry.novaModel),
-          entry.downloadUrl,
-        );
+        expect(ModelHuggingFaceURLs.urlFor(entry.novaModel), entry.downloadUrl);
       }
     });
 

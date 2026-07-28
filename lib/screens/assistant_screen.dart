@@ -33,6 +33,7 @@ import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
 import 'package:nova_assistant/services/follow_up_suggestion_service.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
+import 'package:nova_assistant/services/prompt_presets_service.dart';
 import 'package:nova_assistant/services/shizuku_service.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
@@ -168,7 +169,10 @@ class _AssistantScreenState extends State<AssistantScreen>
         widget.conversationId!,
       );
       if (conversation != null && mounted) {
-        setState(() => _messages.addAll(conversation.messages));
+        setState(() {
+          _messages.addAll(conversation.messages);
+          _refreshLocalContextBudget();
+        });
         ConversationSummaryService.instance.activeSummary =
             conversation.summary;
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
@@ -176,7 +180,10 @@ class _AssistantScreenState extends State<AssistantScreen>
     } else {
       final history = await ChatHistoryService.load();
       if (mounted && history.isNotEmpty) {
-        setState(() => _messages.addAll(history));
+        setState(() {
+          _messages.addAll(history);
+          _refreshLocalContextBudget();
+        });
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
       } else if (mounted) {
         // Empty main chat — drop any leftover summary from a prior session.
@@ -423,9 +430,223 @@ class _AssistantScreenState extends State<AssistantScreen>
       result.retainedMessages,
     );
     if (mounted) {
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(result.retainedMessages);
+        _refreshLocalContextBudget();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Context compacted to free space')),
       );
+    }
+  }
+
+  void _refreshLocalContextBudget() {
+    if (_messages.isEmpty) {
+      _contextBudget = null;
+      return;
+    }
+    final model =
+        _selectedModel ??
+        ModelOrchestrator.instance.preferredModelType ??
+        NovaModel.gemma4E2b;
+    final historyTokens = _messages.fold<int>(
+      0,
+      (sum, m) => sum + MessageLimits.estimateRealTokens(m.text, model: model),
+    );
+    final customKv = _selectedCustomModel?.maxContextTokens;
+    final estimate = MessageLimits.estimatePromptTokens(
+      model: model,
+      systemPrompt: '',
+      query: '',
+      historyTokenEstimate: historyTokens,
+      highContext: ModelOrchestrator.instance.highContextEnabled,
+    );
+    if (customKv != null && customKv > 0) {
+      final ratio = ModelOrchestrator.instance.highContextEnabled
+          ? MessageLimits.highContextBudgetRatio
+          : MessageLimits.contextBudgetRatio;
+      final ceiling = (customKv * ratio).round();
+      _contextBudget = ContextBudgetEstimate(
+        estimatedTokens: estimate.estimatedTokens,
+        kvLimit: customKv,
+        usableCeiling: ceiling,
+        systemPromptTokens: estimate.systemPromptTokens,
+        queryTokens: estimate.queryTokens,
+        historyTokens: historyTokens,
+        ragTokens: estimate.ragTokens,
+        attachmentTokens: estimate.attachmentTokens,
+        visionTokens: estimate.visionTokens,
+        overheadTokens: estimate.overheadTokens,
+      );
+    } else {
+      _contextBudget = estimate;
+    }
+  }
+
+  Future<void> _showContextBudgetSheet() async {
+    final budget = _contextBudget;
+    if (budget == null) return;
+    final percent = (budget.usageRatio * 100).clamp(0, 999).round();
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Context $percent%',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '${budget.estimatedTokens} / ${budget.usableCeiling} tokens '
+                '(KV ${budget.kvLimit})',
+                style: TextStyle(color: Colors.grey[400], fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.compress, color: Colors.white70),
+                title: const Text(
+                  'Compact history',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: Text(
+                  'Summarize older turns to free space',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                ),
+                onTap: () => Navigator.pop(ctx, 'compact'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.add_comment, color: Colors.white70),
+                title: const Text(
+                  'New chat',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: Text(
+                  'Start fresh with a clean context window',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                ),
+                onTap: () => Navigator.pop(ctx, 'new'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'compact') {
+      await _manualCompact();
+    } else if (action == 'new') {
+      await _startFreshChat();
+    }
+  }
+
+  Future<void> _startFreshChat() async {
+    await ModelOrchestrator.instance.clearHistory();
+    final conv = await ChatHistoryService.createConversation();
+    if (!mounted) return;
+    await Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => AssistantScreen(conversationId: conv.id),
+      ),
+    );
+  }
+
+  void _fillComposer(String text) {
+    _inputController.text = text;
+    _inputController.selection = TextSelection.collapsed(offset: text.length);
+    _inputFocus.requestFocus();
+  }
+
+  Future<void> _showClipboardActions() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final clip = data?.text?.trim() ?? '';
+    if (!mounted) return;
+    if (clip.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Clipboard is empty')));
+
+      return;
+    }
+
+    final preview = clip.length > 80 ? '${clip.substring(0, 80)}…' : clip;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Clipboard',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                preview,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.grey[400], fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.content_paste, color: Colors.white70),
+                title: const Text(
+                  'Paste',
+                  style: TextStyle(color: Colors.white),
+                ),
+                onTap: () => Navigator.pop(ctx, 'paste'),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.analytics_outlined,
+                  color: Colors.white70,
+                ),
+                title: const Text(
+                  'Analyze clipboard',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: Text(
+                  'Send with an analyze prompt',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                ),
+                onTap: () => Navigator.pop(ctx, 'analyze'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'paste') {
+      final current = _inputController.text;
+      final merged = current.isEmpty ? clip : '$current$clip';
+      _fillComposer(merged);
+    } else if (action == 'analyze') {
+      _applySuggestion('Analyze the following clipboard content:\n\n$clip');
     }
   }
 
@@ -2330,6 +2551,8 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Widget _buildEmptyState() {
+    final starters = PromptPresetsService.instance.emptyStateStarters;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         return SingleChildScrollView(
@@ -2372,6 +2595,35 @@ class _AssistantScreenState extends State<AssistantScreen>
                     style: TextStyle(color: Colors.grey[400], height: 1.5),
                   ),
                   const SizedBox(height: 24),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Try a prompt',
+                      style: TextStyle(
+                        color: Colors.grey[500],
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 40,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: starters.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final starter = starters[index];
+
+                        return SuggestionChip(
+                          label: starter.label,
+                          onTap: () => _fillComposer(starter.prompt),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -2385,10 +2637,6 @@ class _AssistantScreenState extends State<AssistantScreen>
                         label: 'Set an alarm for 7:00 PM',
                         onTap: () =>
                             _applySuggestion('Set an alarm for 7:00 PM'),
-                      ),
-                      SuggestionChip(
-                        label: 'Summarize this page',
-                        onTap: () => _applySuggestion('Summarize this page'),
                       ),
                       SuggestionChip(
                         label: 'Open Settings',
@@ -2406,6 +2654,18 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Widget _buildStatusBar() {
+    final budget = _contextBudget;
+    final percent = budget == null
+        ? null
+        : (budget.usageRatio * 100).clamp(0, 999).round();
+    final meterColor = percent == null
+        ? Colors.grey
+        : percent >= 85
+        ? Colors.redAccent
+        : percent >= 70
+        ? Colors.amber
+        : const Color(0xFF6C63FF);
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
@@ -2427,7 +2687,56 @@ class _AssistantScreenState extends State<AssistantScreen>
               style: TextStyle(fontSize: 11, color: Colors.grey[500]),
             ),
           ),
-          if (_thinkingMode)
+          if (percent != null) ...[
+            const SizedBox(width: 8),
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _showContextBudgetSheet,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: meterColor.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: meterColor.withValues(alpha: 0.45),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 28,
+                        height: 4,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: LinearProgressIndicator(
+                            value: (percent / 100).clamp(0.0, 1.0),
+                            backgroundColor: Colors.white.withValues(
+                              alpha: 0.12,
+                            ),
+                            color: meterColor,
+                            minHeight: 4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Context $percent%',
+                        style: TextStyle(fontSize: 10, color: meterColor),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+          if (_thinkingMode) ...[
+            const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
@@ -2446,6 +2755,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                 ],
               ),
             ),
+          ],
         ],
       ),
     );
@@ -2536,6 +2846,11 @@ class _AssistantScreenState extends State<AssistantScreen>
                     icon: const Icon(Icons.attach_file, color: Colors.grey),
                     tooltip: 'Attach',
                   ),
+                  IconButton(
+                    onPressed: _showClipboardActions,
+                    icon: const Icon(Icons.content_paste, color: Colors.grey),
+                    tooltip: 'Paste / analyze clipboard',
+                  ),
                   const Spacer(),
                   IconButton(
                     onPressed: busy || _isGenerating ? null : _onBulbPressed,
@@ -2573,6 +2888,21 @@ class _AssistantScreenState extends State<AssistantScreen>
                         counterText: '',
                       ),
                       textInputAction: TextInputAction.send,
+                      contextMenuBuilder: (context, editableTextState) {
+                        return AdaptiveTextSelectionToolbar.buttonItems(
+                          anchors: editableTextState.contextMenuAnchors,
+                          buttonItems: [
+                            ...editableTextState.contextMenuButtonItems,
+                            ContextMenuButtonItem(
+                              label: 'Analyze clipboard',
+                              onPressed: () {
+                                ContextMenuController.removeAny();
+                                unawaited(_showClipboardActions());
+                              },
+                            ),
+                          ],
+                        );
+                      },
                       onSubmitted: (_) {
                         if (canSend) _sendMessage();
                       },

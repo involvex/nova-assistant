@@ -128,6 +128,33 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
     }
   }
 
+  Future<void> _editCustomModelContext(CustomModel model) async {
+    final next = await showCustomModelContextSheet(context, model: model);
+    if (next == null || !mounted) return;
+    if (next == model.maxContextTokens) return;
+
+    final updated = await ModelManager.instance.updateCustomModel(
+      model.copyWith(maxContextTokens: next),
+    );
+    if (updated == null || !mounted) return;
+
+    setState(() {
+      final index = _customModels.indexWhere((m) => m.id == updated.id);
+      if (index != -1) _customModels[index] = updated;
+      if (_selectedCustomModel?.id == updated.id) {
+        _selectedCustomModel = updated;
+        widget.onCustomModelSelected(updated);
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Context set to ${updated.maxContextTokens}. Reloads on next use.',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -377,6 +404,9 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
                         widget.onAutoModeChanged(false);
                       },
                 onDelete: () => _deleteCustomModel(model),
+                onEditContext: model.isGguf
+                    ? null
+                    : () => _editCustomModelContext(model),
               ),
             );
           }),

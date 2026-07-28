@@ -119,48 +119,125 @@ class PromptPresetsService {
     return sorted.take(5).toList();
   }
 
+  /// Short starter chips for an empty chat (Summarize / Plan / Debug / Learn).
+  List<({String label, String prompt})> get emptyStateStarters {
+    const order = ['Summarize', 'Plan', 'Debug', 'Learn'];
+    final byName = <String, PromptPreset>{for (final p in _presets) p.name: p};
+    final starters = <({String label, String prompt})>[];
+    for (final name in order) {
+      final preset = byName[name];
+      if (preset != null) {
+        starters.add((label: name, prompt: preset.prompt));
+      } else {
+        final fallback = _starterFallback(name);
+        if (fallback != null) starters.add(fallback);
+      }
+    }
+
+    return starters;
+  }
+
+  static ({String label, String prompt})? _starterFallback(String name) {
+    return switch (name) {
+      'Summarize' => (
+        label: 'Summarize',
+        prompt:
+            'Provide a concise summary of the following text, '
+            'highlighting the key points:\n\n',
+      ),
+      'Plan' => (
+        label: 'Plan',
+        prompt:
+            'Help me build a clear step-by-step plan for the following '
+            'goal:\n\n',
+      ),
+      'Debug' => (
+        label: 'Debug',
+        prompt:
+            'I encountered the following error. Help me debug it '
+            'step by step:\n\n',
+      ),
+      'Learn' => (
+        label: 'Learn',
+        prompt:
+            'Teach me about the following topic like a patient tutor. '
+            'Use simple explanations and a short quiz at the end:\n\n',
+      ),
+      _ => null,
+    };
+  }
+
   List<PromptPreset> _defaultPresets() {
     return [
       PromptPreset(
         id: _uuid.v4(),
         name: 'Explain Code',
-        prompt: 'Explain the following code in detail, including what each part does and why it works:',
+        prompt:
+            'Explain the following code in detail, including what each '
+            'part does and why it works:',
         description: 'Get a detailed explanation of code snippets',
         category: 'Coding',
       ),
       PromptPreset(
         id: _uuid.v4(),
-        name: 'Debug Error',
+        name: 'Debug',
         prompt:
-            'I encountered the following error. Help me debug it step by step:',
+            'I encountered the following error. Help me debug it '
+            'step by step:\n\n',
         description: 'Get help debugging errors',
         category: 'Coding',
       ),
       PromptPreset(
         id: _uuid.v4(),
         name: 'Write Unit Test',
-        prompt: 'Write comprehensive unit tests for the following code, covering edge cases and error scenarios:',
+        prompt:
+            'Write comprehensive unit tests for the following code, '
+            'covering edge cases and error scenarios:',
         description: 'Generate unit tests for code',
         category: 'Coding',
       ),
       PromptPreset(
         id: _uuid.v4(),
         name: 'Summarize',
-        prompt: 'Provide a concise summary of the following text, highlighting the key points:',
+        prompt:
+            'Provide a concise summary of the following text, '
+            'highlighting the key points:\n\n',
         description: 'Summarize text or content',
         category: 'Writing',
       ),
       PromptPreset(
         id: _uuid.v4(),
+        name: 'Plan',
+        prompt:
+            'Help me build a clear step-by-step plan for the following '
+            'goal:\n\n',
+        description: 'Break a goal into actionable steps',
+        category: 'Productivity',
+      ),
+      PromptPreset(
+        id: _uuid.v4(),
+        name: 'Learn',
+        prompt:
+            'Teach me about the following topic like a patient tutor. '
+            'Use simple explanations and a short quiz at the end:\n\n',
+        description: 'Learn a topic with a short quiz',
+        category: 'Learning',
+      ),
+      PromptPreset(
+        id: _uuid.v4(),
         name: 'Improve Writing',
-        prompt: 'Improve the following text for clarity, grammar, and style while maintaining the original meaning:',
+        prompt:
+            'Improve the following text for clarity, grammar, and style '
+            'while maintaining the original meaning:',
         description: 'Improve text quality',
         category: 'Writing',
       ),
       PromptPreset(
         id: _uuid.v4(),
         name: 'Brainstorm Ideas',
-        prompt: 'Help me brainstorm creative ideas for the following topic or problem:',
+        prompt:
+            'Help me brainstorm creative ideas for the following topic '
+            'or problem:',
         description: 'Generate creative ideas',
         category: 'Creative',
       ),

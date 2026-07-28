@@ -908,6 +908,23 @@ class ModelManager {
     }
   }
 
+  /// Persists metadata edits (e.g. context size) for an installed custom model.
+  ///
+  /// The new [maxContextTokens] applies on the next model load.
+  Future<CustomModel?> updateCustomModel(CustomModel updated) async {
+    final index = _customModels.indexWhere((m) => m.id == updated.id);
+    if (index == -1) return null;
+
+    _customModels[index] = updated;
+    await _saveCustomModelsToPrefs();
+    _statusController.add(
+      'Custom model updated: ${updated.displayName} '
+      '(${updated.maxContextTokens} ctx)',
+    );
+
+    return updated;
+  }
+
   bool isModelInstalled(String fileName) {
     return _installedModels.any((m) => m.fileName == fileName);
   }

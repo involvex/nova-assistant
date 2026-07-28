@@ -228,6 +228,37 @@ class CustomModel {
 
   String get sizeLabel => '${fileSizeMB.toStringAsFixed(0)} MB';
 
+  CustomModel copyWith({
+    String? id,
+    String? displayName,
+    String? fileName,
+    ModelType? modelType,
+    ModelFileType? fileType,
+    bool? hasVision,
+    bool? hasThinking,
+    bool? supportsFunctionCalling,
+    int? fileSizeBytes,
+    DateTime? installedAt,
+    bool? isGguf,
+    int? maxContextTokens,
+  }) {
+    return CustomModel(
+      id: id ?? this.id,
+      displayName: displayName ?? this.displayName,
+      fileName: fileName ?? this.fileName,
+      modelType: modelType ?? this.modelType,
+      fileType: fileType ?? this.fileType,
+      hasVision: hasVision ?? this.hasVision,
+      hasThinking: hasThinking ?? this.hasThinking,
+      supportsFunctionCalling:
+          supportsFunctionCalling ?? this.supportsFunctionCalling,
+      fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
+      installedAt: installedAt ?? this.installedAt,
+      isGguf: isGguf ?? this.isGguf,
+      maxContextTokens: maxContextTokens ?? this.maxContextTokens,
+    );
+  }
+
   String get capabilitySummary {
     final caps = <String>[];
     if (hasVision) caps.add('Vision');

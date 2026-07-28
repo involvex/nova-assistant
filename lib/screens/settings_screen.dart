@@ -26,6 +26,7 @@ import 'package:nova_assistant/screens/conversation_search_screen.dart';
 import 'package:nova_assistant/screens/model_browser_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/download_network_gate.dart';
 import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/services/settings_backup_service.dart';
@@ -59,6 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _highContext = false;
   bool _autoCompact = true;
   bool _adultMode = false;
+  bool _wifiOnlyDownloads = false;
   bool _isAssistantRoleHeld = false;
   bool _screenTimeoutStream = true;
   bool _debugMode = false;
@@ -129,6 +131,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
         _autoCompact = prefs.getBool('settings_auto_compact') ?? true;
         _adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
+        _wifiOnlyDownloads =
+            prefs.getBool(DownloadNetworkGate.wifiOnlyPrefsKey) ?? false;
         _debugMode = prefs.getBool('settings_debug_mode') ?? false;
         _screenTimeoutStream =
             prefs.getBool('settings_screen_timeout_stream') ?? true;
@@ -497,6 +501,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (context.mounted) {
             setState(() {});
           }
+        },
+      ),
+      _toggleTile(
+        icon: Icons.wifi,
+        title: 'Wi‑Fi only downloads',
+        subtitle: 'Block Hub model downloads on cellular data',
+        value: _wifiOnlyDownloads,
+        onChanged: (v) async {
+          setState(() => _wifiOnlyDownloads = v);
+          await DownloadNetworkGate.instance.setWifiOnlyEnabled(v);
         },
       ),
       _actionTile(
@@ -1743,6 +1757,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       return;
     }
+
+    final allowed = await DownloadNetworkGate.instance.confirmDownloadAllowed(
+      context,
+      sizeHint: model.displayName,
+    );
+    if (!allowed || !context.mounted) return;
 
     setState(() => _installStatus = 'Downloading ${model.displayName}...');
 

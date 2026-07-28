@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/litert_model_catalog.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
+import 'package:nova_assistant/services/download_network_gate.dart';
 import 'package:nova_assistant/services/huggingface_hub_service.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 
@@ -185,6 +186,12 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+
+    final allowed = await DownloadNetworkGate.instance.confirmDownloadAllowed(
+      context,
+      sizeHint: '~${entry.approxSizeMB}MB',
+    );
+    if (!allowed || !mounted) return;
 
     setState(() {
       _status = 'Downloading ${entry.displayName}...';
@@ -383,6 +390,12 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+
+    final allowed = await DownloadNetworkGate.instance.confirmDownloadAllowed(
+      context,
+      sizeHint: sizeLabel,
+    );
+    if (!allowed || !mounted) return;
 
     setState(() {
       _status = 'Downloading ${file.fileName}...';

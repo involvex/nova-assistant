@@ -221,9 +221,9 @@ class ModelOrchestrator {
   final _historyClearedController = StreamController<void>.broadcast();
   Stream<void> get historyClearedStream => _historyClearedController.stream;
 
-  /// Emits a [ContextBudgetEstimate] whenever the orchestrator detects the
-  /// current turn is within 8 % of the model's KV ceiling. The assistant
-  /// screen subscribes to this to render a "context near limit" banner.
+  /// Emits a [ContextBudgetEstimate] after each pre-flight so the chat
+  /// status bar can show a live context meter. Near-limit snackbars are
+  /// handled in the UI from the same stream.
   final _contextNearLimitController =
       StreamController<ContextBudgetEstimate>.broadcast();
   Stream<ContextBudgetEstimate> get contextNearLimitStream =>
@@ -525,7 +525,11 @@ class ModelOrchestrator {
   CustomModel? get preferredCustomModel => _preferredCustomModelOverride;
 
   set preferredCustomModel(CustomModel? model) {
-    if (_preferredCustomModelOverride?.id == model?.id) return;
+    final sameId = _preferredCustomModelOverride?.id == model?.id;
+    final sameCtx =
+        _preferredCustomModelOverride?.maxContextTokens ==
+        model?.maxContextTokens;
+    if (sameId && sameCtx) return;
     _preferredCustomModelOverride = model;
     _preferredModelOverride = null;
     _modelOverrideDirty = true;
@@ -2772,9 +2776,8 @@ class ModelOrchestrator {
         textToolPrompt: textToolPrompt,
         toolsCount: chatTools.length,
       );
-      if (preflight.isNearLimit) {
-        _contextNearLimitController.add(preflight);
-      }
+      // Always publish so the chat status bar context meter stays current.
+      _contextNearLimitController.add(preflight);
       if (preflight.isOverflow) {
         final ok = await _autoCompactForBudget(
           preflight,

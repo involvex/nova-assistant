@@ -1,5 +1,7 @@
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/models/chat_message.dart';
+import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/utils/tool_call_parser.dart';
 
 /// Converts persisted UI chat turns into LiteRT replay messages.
@@ -17,12 +19,21 @@ class SessionHistoryReinjection {
     return (message.text.length / 4).round();
   }
 
-  static int estimateChatMessageTokens(ChatMessage message) {
+  /// Per-model real-token estimate for a persisted chat turn.
+  ///
+  /// Defaults to Gemma 4's ratio (the default inference model) when [model]
+  /// is null. Falls back to the legacy chars/4 estimate when the message has
+  /// an attached image (image tokens are dominated by the vision pipeline,
+  /// not by the tokenizer).
+  static int estimateChatMessageTokens(
+    ChatMessage message, {
+    NovaModel? model,
+  }) {
     if (message.imageData != null && message.imageData!.isNotEmpty) {
       return imageTokenEstimate;
     }
 
-    return (message.text.length / 4).round();
+    return MessageLimits.estimateRealTokens(message.text, model: model);
   }
 
   /// Newest-first fit into [maxTokens] (hard cap), returned oldest→newest.
@@ -30,9 +41,14 @@ class SessionHistoryReinjection {
   /// Skips cancelled / stop-only / error / streaming turns. Trims in
   /// user↔assistant pairs so the oldest kept message is never a lone
   /// assistant reply. Sanitizes ChatML/tool markup before conversion.
+  ///
+  /// When [model] is provided the per-model real-token ratio table is used
+  /// for budgeting. Defaults to Gemma 4 (the default inference model) to
+  /// keep callers that don't know the model name out of trouble.
   static List<Message> buildReplayMessages(
     List<ChatMessage> uiMessages, {
     required int maxTokens,
+    NovaModel? model,
   }) {
     final usable = uiMessages.where(_isReplayable).toList();
     if (usable.isEmpty) return const [];
@@ -45,7 +61,7 @@ class SessionHistoryReinjection {
     var tokens = 0;
     for (var i = candidates.length - 1; i >= 0; i--) {
       final msg = candidates[i];
-      final cost = estimateChatMessageTokens(msg);
+      final cost = estimateChatMessageTokens(msg, model: model);
       if (tokens + cost > maxTokens) break;
       selected.add(msg);
       tokens += cost;

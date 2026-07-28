@@ -164,6 +164,7 @@ class ModelOrchestrator {
     modelId: RemoteInferenceConfig.defaultModelId,
   );
   List<ChatMessage> _pendingReplay = const [];
+  List<ChatMessage> _lastReplaySource = const [];
 
   /// Fingerprint of the last createChat (tools / RAG / adult / model).
   /// When it changes, the warm session is dropped so system+tools refresh.
@@ -220,6 +221,14 @@ class ModelOrchestrator {
   final _historyClearedController = StreamController<void>.broadcast();
   Stream<void> get historyClearedStream => _historyClearedController.stream;
 
+  /// Emits a [ContextBudgetEstimate] whenever the orchestrator detects the
+  /// current turn is within 8 % of the model's KV ceiling. The assistant
+  /// screen subscribes to this to render a "context near limit" banner.
+  final _contextNearLimitController =
+      StreamController<ContextBudgetEstimate>.broadcast();
+  Stream<ContextBudgetEstimate> get contextNearLimitStream =>
+      _contextNearLimitController.stream;
+
   bool get isInitialized => _isInitialized;
 
   bool get keepModelWarm => _keepModelWarm;
@@ -257,6 +266,7 @@ class ModelOrchestrator {
 
   void setPendingReplayMessages(List<ChatMessage> messages) {
     _pendingReplay = List<ChatMessage>.from(messages);
+    _lastReplaySource = List<ChatMessage>.from(messages);
   }
 
   /// Drop the live InferenceChat and replay [messages] on the next send.
@@ -301,6 +311,7 @@ class ModelOrchestrator {
     final replay = SessionHistoryReinjection.buildReplayMessages(
       retained,
       maxTokens: (_tokenLimitFor(model) * ratio).round(),
+      model: model,
     );
     if (replay.isEmpty) return;
     try {
@@ -312,6 +323,111 @@ class ModelOrchestrator {
       setPendingReplayMessages(retained);
       _activeChat = null;
     }
+  }
+
+  /// Auto-compacts the live chat when the pre-flight estimate already
+  /// exceeds the model's KV ceiling.
+  ///
+  /// Strategy: drop the chat session and stash the last [historyKeepPairs]
+  /// turn pairs as pending replay, so the next `createChat` call rebuilds
+  /// with a small, provably in-budget history. We deliberately do not call
+  /// `clearHistory` here — the LiteRT session has already been told the
+  /// prompt is too large, so reusing it would just re-trigger the same
+  /// overflow on the next `addQuery`.
+  ///
+  /// Rebuilds the live chat with the trimmed [systemInstruction] / [chatTools]
+  /// / [inferenceModel] triplet so the caller can immediately `addQuery` on
+  /// the freshly created session. Returns true on success, false if the chat
+  /// could not be recreated (caller should bail out of the current turn).
+  Future<bool> _autoCompactForBudget(
+    ContextBudgetEstimate preflight,
+    NovaModel model,
+    List<ChatMessage> source,
+    InferenceModel inferenceModel,
+    String systemInstruction,
+    List<Tool> chatTools,
+  ) async {
+    final retained = _lastReplayableTurnPairs(source, historyKeepPairs);
+    _activeChat = null;
+    _lastChatSessionKey = null;
+    setPendingReplayMessages(retained);
+    // #region agent log
+    await AgentDebugLog.log(
+      hypothesisId: 'A',
+      location: 'model_orchestrator.dart:_autoCompactForBudget',
+      message: 'Auto-compacted live chat due to budget overflow',
+      data: {
+        'estimatedTokens': preflight.estimatedTokens,
+        'kvLimit': preflight.kvLimit,
+        'usageRatio': preflight.usageRatio.toStringAsFixed(3),
+        'keptPairs': historyKeepPairs,
+        'retainedTurns': retained.length,
+        'model': model.name,
+      },
+      runId: 'post-fix',
+    );
+    // #endregion
+    _statusController.add(
+      'Context near limit (${(preflight.usageRatio * 100).round()}%) — '
+      'auto-compacting chat history.',
+    );
+
+    try {
+      _activeChat = await inferenceModel.createChat(
+        systemInstruction: systemInstruction,
+        tools: chatTools,
+        supportImage: model.hasVision && _activeModelSupportsImage,
+      );
+      // _lastChatSessionKey will be reassigned on the next processMessage
+      // pass; leave it null so the caller treats this as a fresh session.
+      return true;
+    } on Exception catch (e) {
+      debugPrint('Auto-compact chat rebuild failed: $e');
+      return false;
+    }
+  }
+
+  /// Number of recent turn pairs (user + assistant) kept after an overflow
+  /// auto-compaction. Tuned to leave room for the system prompt + 1 user
+  /// turn on a 4096-token KV window.
+  static const historyKeepPairs = 3;
+
+  /// Returns the most recent [pairs] complete user+assistant turn pairs from
+  /// [source]. Drops streaming, error and stop-only turns.
+  static List<ChatMessage> _lastReplayableTurnPairs(
+    List<ChatMessage> source,
+    int pairs,
+  ) {
+    if (source.isEmpty) return const [];
+
+    final clean = source
+        .where(
+          (m) =>
+              !m.isStreaming &&
+              !m.isError &&
+              !m.wasCancelled &&
+              m.text.trim().isNotEmpty,
+        )
+        .toList();
+    final out = <ChatMessage>[];
+    var i = clean.length - 1;
+    var remaining = pairs;
+    while (i >= 0 && remaining > 0) {
+      if (clean[i].isUser) {
+        out.add(clean[i]);
+        remaining--;
+        if (i - 1 >= 0 && !clean[i - 1].isUser) {
+          out.add(clean[i - 1]);
+          i -= 2;
+        } else {
+          i--;
+        }
+      } else {
+        i--;
+      }
+    }
+
+    return out.reversed.toList();
   }
 
   void setBatteryOptimization(bool enabled) {
@@ -825,11 +941,66 @@ class ModelOrchestrator {
     return true;
   }
 
+  /// Caps the native tool schema size on tight Android Gemma 4 sessions.
+  ///
+  /// Native tool schemas cost ~35–80 KV tokens each in the LiteRT chat
+  /// template. Passing all 16 bundled tools to Gemma 4 on a 2048/4096 KV
+  /// budget burns 600–1 000 tokens before the user message lands, which is
+  /// what produced the "Input token ids are too long" failures after only a
+  /// handful of turns.
+  ///
+  /// Strategy:
+  /// - If the caller already filtered the list down (the assistant screen
+  ///   does this in `_toolsForQuery`), honor that — it knows which tools the
+  ///   current turn might need.
+  /// - Otherwise, pass a conservative top-5 set covering the high-frequency
+  ///   on-device actions (time, alarm, open app, settings, web search).
+  /// - The full tool list is still described via the text-mode suffix
+  ///   ([_deviceToolsCapabilitySuffix]) so the model can fall back to
+  ///   text-JSON function calling for tools it didn't see in the schema.
   List<Tool> _toolsForCreateChat(NovaModel model, List<Tool> tools) {
     if (!_shouldPassTools(model, tools)) return const [];
 
-    return tools;
+    final isTightAndroid =
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        model == NovaModel.gemma4E2b;
+    if (!isTightAndroid) return tools;
+
+    // Caller already filtered to <= 5 tools — honor it.
+    if (tools.length <= _androidGemma4MaxNativeTools) return tools;
+
+    // Caller passed a wide tool list — narrow to the top common ones so we
+    // do not blow the KV budget on schema overhead.
+    final preferred = _androidGemma4PreferredToolNames;
+    final narrowed = <Tool>[];
+    final seenNames = <String>{};
+    for (final tool in tools) {
+      if (preferred.contains(tool.name) && !seenNames.contains(tool.name)) {
+        narrowed.add(tool);
+        seenNames.add(tool.name);
+      }
+      if (narrowed.length >= _androidGemma4MaxNativeTools) break;
+    }
+
+    return narrowed.isEmpty ? tools : narrowed;
   }
+
+  static const _androidGemma4MaxNativeTools = 5;
+
+  /// High-frequency on-device tool names that should be passed through the
+  /// native schema on tight Android Gemma 4 sessions. Tools outside this set
+  /// remain available via the text-JSON fallback in
+  /// [_deviceToolsCapabilitySuffix].
+  static const _androidGemma4PreferredToolNames = <String>{
+    'get_time',
+    'set_alarm',
+    'cancel_alarm',
+    'open_app',
+    'open_settings',
+    'search_web',
+    'take_screenshot',
+  };
 
   /// When Auto lands on SmolLM but the turn has tools and Gemma 3 fits free
   /// RAM, escalate so function calling actually works.
@@ -881,6 +1052,8 @@ class ModelOrchestrator {
     }
     _activeChat = null;
     _lastChatSessionKey = null;
+    _pendingReplay = const [];
+    _lastReplaySource = const [];
     await _teardownPartialLoad();
     _isStreaming = false;
     _isLoadingModel = false;
@@ -1960,7 +2133,17 @@ class ModelOrchestrator {
 
   int _estimateTokens(Message message) {
     if (message.hasImage) return MessageLimits.visionImageTokenEstimate;
+
     return (message.text.length / 4).round();
+  }
+
+  /// Real-token estimate for a chat message — uses the per-model tokenizer
+  /// ratio table in [MessageLimits] instead of the legacy chars/4 heuristic.
+  /// Falls back to the legacy estimate when no model is available.
+  int _estimateRealTokens(Message message, [NovaModel? model]) {
+    if (message.hasImage) return MessageLimits.visionImageTokenEstimate;
+
+    return MessageLimits.estimateRealTokens(message.text, model: model);
   }
 
   NovaModel _selectModel({
@@ -2404,6 +2587,14 @@ class ModelOrchestrator {
           'textToolPrompt': textToolPrompt,
           'adultMode': _adultModeEnabled,
           'sessionKeyChanged': wasNull && _lastChatSessionKey != sessionKey,
+          'computedOverhead': MessageLimits.computedOverheadFor(
+            model,
+            systemPromptChars: systemInstruction.length,
+            toolsCount: chatTools.length,
+            textToolPrompt: textToolPrompt,
+            hasRag: ragContext.trim().isNotEmpty,
+            hasAttachments: attachmentContext.trim().isNotEmpty,
+          ),
         },
         runId: 'post-fix',
       );
@@ -2422,13 +2613,33 @@ class ModelOrchestrator {
         if (wasNull && _pendingReplay.isNotEmpty) {
           final rawBudget = (_tokenLimitFor(model) * _contextBudgetRatio)
               .round();
-          final budget = (rawBudget - MessageLimits.systemPromptOverheadTokens)
+          // Reserve the actual measured overhead for this turn (system prompt
+          // length + jinja FC template + native tool schemas + RAG/attachment
+          // wrappers) instead of the historical flat 220 token estimate.
+          // Without this, replay budgets let the pre-call token count
+          // overshoot the KV ceiling on Gemma 4 Android and produced
+          // "Input token ids are too long" after just a handful of turns.
+          final overhead = MessageLimits.computedOverheadFor(
+            model,
+            systemPromptChars: systemInstruction.length,
+            toolsCount: chatTools.length,
+            textToolPrompt: textToolPrompt,
+            hasRag: ragContext.trim().isNotEmpty,
+            hasAttachments: attachmentContext.trim().isNotEmpty,
+          );
+          final safetyMargin = MessageLimits.safetyMarginFor(model);
+          final budget = (rawBudget - overhead - safetyMargin)
               .clamp(64, rawBudget)
               .toInt();
           final replay = SessionHistoryReinjection.buildReplayMessages(
             _pendingReplay,
             maxTokens: budget,
+            model: model,
           );
+          // Snapshot before consumption so the pre-flight auto-compact path
+          // can fall back to a slimmed subset of the same turns when the
+          // prompt is already over-budget.
+          _lastReplaySource = List<ChatMessage>.from(_pendingReplay);
           _pendingReplay = const [];
           // #region agent log
           await AgentDebugLog.log(
@@ -2480,13 +2691,17 @@ class ModelOrchestrator {
         }
       }
 
-      final ragTokenEstimate = MessageLimits.estimateTokens(ragContext);
+      final ragTokenEstimate = MessageLimits.estimateRealTokens(
+        ragContext,
+        model: model,
+      );
       final historyTokenEstimate = _activeChat!.fullHistory.fold<int>(
         0,
-        (sum, msg) => sum + _estimateTokens(msg),
+        (sum, msg) => sum + _estimateRealTokens(msg, model),
       );
-      final systemPromptTokenEstimate = MessageLimits.estimateTokens(
+      final systemPromptTokenEstimate = MessageLimits.estimateRealTokens(
         systemInstruction,
+        model: model,
       );
 
       await _truncateContext(_activeChat!, model);
@@ -2509,6 +2724,50 @@ class ModelOrchestrator {
         );
 
         return;
+      }
+
+      // Pre-flight token check using real-token ratios. Emits the "context
+      // near limit" warning to the UI when within 8 % of the soft ceiling,
+      // and auto-compacts the live chat if we already exceed it (so the
+      // next turn does not blow past the KV ceiling and produce
+      // "Input token ids are too long" again).
+      final preflight = MessageLimits.estimatePromptTokens(
+        model: model,
+        systemPrompt: systemInstruction,
+        query: query,
+        ragContext: ragContext,
+        attachmentContext: attachmentContext,
+        historyTokenEstimate: historyTokenEstimate,
+        hasVisionImage: hasVisionImage,
+        highContext: _highContextEnabled,
+        textToolPrompt: textToolPrompt,
+        toolsCount: chatTools.length,
+      );
+      if (preflight.isNearLimit) {
+        _contextNearLimitController.add(preflight);
+      }
+      if (preflight.isOverflow) {
+        final ok = await _autoCompactForBudget(
+          preflight,
+          model,
+          _lastReplaySource,
+          inferenceModel,
+          systemInstruction,
+          chatTools,
+        );
+        if (!ok) {
+          yield InferenceResult(
+            text:
+                '⚠️ Could not auto-compact chat history to fit '
+                'within the model\'s context window. Try a shorter '
+                'question, turn off High context in Settings, or reset '
+                'inference.',
+            model: model,
+            isStreaming: false,
+          );
+          _isLoadingModel = false;
+          return;
+        }
       }
 
       final Message message;
@@ -2842,6 +3101,24 @@ class ModelOrchestrator {
       }
 
       if (streamError != null) {
+        final errText = streamError.toString();
+        final isTokenOverflow =
+            errText.contains('too long') ||
+            errText.contains('INVALID_ARGUMENT') ||
+            errText.contains('Exceeding the maximum');
+
+        // Drop the dead chat so the next send rebuilds with a fresh session.
+        _activeChat = null;
+        _lastChatSessionKey = null;
+        // For token overflow, shrink the pending replay to the last 2 turns so
+        // the user's next send starts with a provably in-budget history
+        // instead of the same over-budget payload.
+        if (isTokenOverflow && _lastReplaySource.length > 2) {
+          setPendingReplayMessages(
+            _lastReplaySource.sublist(_lastReplaySource.length - 2),
+          );
+        }
+
         // #region agent log
         await AgentDebugLog.log(
           hypothesisId: 'B',
@@ -2851,20 +3128,17 @@ class ModelOrchestrator {
             'error': streamError.toString(),
             'model': model.name,
             'partialLen': fullResponse.length,
+            'isTokenOverflow': isTokenOverflow,
           },
           runId: 'post-fix',
         );
         // #endregion
-        // Native graph said "create a new Session" — drop the dead chat.
-        _activeChat = null;
         inferenceStopwatch.stop();
-        final hint =
-            streamError.toString().contains('too long') ||
-                streamError.toString().contains('INVALID_ARGUMENT') ||
-                streamError.toString().contains('Exceeding the maximum')
+        final hint = isTokenOverflow
             ? 'The prompt (screenshot + tools/context) exceeded the model '
-                  'context window. Try a shorter question, disable High '
-                  'context in Settings, or Settings → Reset inference.'
+                  'context window. Next send will use a shorter history — '
+                  'try again, disable High context in Settings, or use '
+                  'Settings → Reset inference.'
             : streamError.toString().contains('prefill') ||
                   streamError.toString().contains('Session')
             ? 'The model session broke (often after edit/regenerate). '
@@ -3204,11 +3478,11 @@ class ModelOrchestrator {
     String base;
     if (identity != null && identity.name != 'Nova') {
       base = compact
-          ? 'You are ${identity.name}. Be concise and helpful.'
+          ? identity.buildCompactSystemPrompt()
           : identity.buildSystemPrompt();
     } else {
       base = compact
-          ? _getAssistantRole().systemPrompt.split('\n').first
+          ? _getAssistantRole().compactSystemPrompt
           : _getAssistantRole().systemPrompt;
     }
 
@@ -3227,16 +3501,17 @@ class ModelOrchestrator {
       buffer.write('\n\n${await _languageInstruction()}');
     }
 
-    // Compact Android prompts drop the role's tool list — restore capability
-    // so the model does not claim it cannot open apps / set alarms.
-    // Gate to Android only: web FC-off must not get "Android device" wording.
-    // SmolLM must never get the tool sermon (no FC + tiny KV).
+    // Compact Android prompts drop the role's tool list. Only restore the
+    // capability suffix when native FC is unavailable AND we actually have a
+    // non-empty tool list to describe — otherwise every Gemma 4 Android turn
+    // pays ~500 chars / ~120 tokens of sermon it never reads.
     final isAndroid =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    if (isAndroid &&
-        model != NovaModel.smollm &&
-        (compact || (textTools != null && textTools.isNotEmpty))) {
-      buffer.write(_deviceToolsCapabilitySuffix(textTools));
+    final hasTextTools = textTools != null && textTools.isNotEmpty;
+    if (isAndroid && model != NovaModel.smollm && (!compact || hasTextTools)) {
+      buffer.write(
+        _deviceToolsCapabilitySuffix(hasTextTools ? textTools : null),
+      );
     }
 
     if (_adultModeEnabled) {
@@ -3426,6 +3701,7 @@ class ModelOrchestrator {
     _activeChat = null;
     _lastChatSessionKey = null;
     _pendingReplay = const [];
+    _lastReplaySource = const [];
     _activeModelSupportsImage = false;
     ConversationSummaryService.instance.activeSummary = null;
     // Keep preferred / custom model pinned across history wipe.
@@ -3449,6 +3725,7 @@ class ModelOrchestrator {
     await _clearActiveInferenceIdentity();
     await _statusController.close();
     await _historyClearedController.close();
+    await _contextNearLimitController.close();
   }
 
   Future<void> _clearActiveInferenceIdentity() async {

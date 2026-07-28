@@ -75,6 +75,9 @@ class _AssistantScreenState extends State<AssistantScreen>
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
   StreamSubscription<void>? _historyClearedSub;
   StreamSubscription<String>? _statusSub;
+  StreamSubscription<ContextBudgetEstimate>? _contextBudgetSub;
+  ContextBudgetEstimate? _contextBudget;
+  int _lastContextBudgetWarnPercent = 0;
   List<String> _followUpSuggestions = [];
   bool _isLoadingSuggestions = false;
   bool _suggestionReroll = false;
@@ -111,10 +114,41 @@ class _AssistantScreenState extends State<AssistantScreen>
     _historyClearedSub = ModelOrchestrator.instance.historyClearedStream.listen(
       (_) {
         if (mounted) {
-          setState(() => _messages.clear());
+          setState(() {
+            _messages.clear();
+            _contextBudget = null;
+            _lastContextBudgetWarnPercent = 0;
+          });
         }
       },
     );
+    _contextBudgetSub = ModelOrchestrator.instance.contextNearLimitStream.listen((
+      estimate,
+    ) {
+      if (!mounted) return;
+      final percent = (estimate.usageRatio * 100).round();
+      setState(() => _contextBudget = estimate);
+      // Avoid spamming: only show the SnackBar when the bucket changes
+      // (>=70 % info, >=85 % warning). User can dismiss freely.
+      final bucket = percent >= 85
+          ? 85
+          : percent >= 70
+          ? 70
+          : 0;
+      if (bucket > _lastContextBudgetWarnPercent) {
+        _lastContextBudgetWarnPercent = bucket;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              bucket >= 85
+                  ? 'Context near limit ($percent%). Next send will auto-compact history.'
+                  : 'Context at $percent% of the model window.',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
     unawaited(ShizukuService.instance.ensureLoaded());
     ShizukuService.instance.confirmationHandler = _confirmForceStop;
     if (widget.initialPrompt != null && widget.initialPrompt!.isNotEmpty) {
@@ -649,6 +683,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     WidgetsBinding.instance.removeObserver(this);
     _historyClearedSub?.cancel();
     _statusSub?.cancel();
+    _contextBudgetSub?.cancel();
     _memoryPollTimer?.cancel();
     _saveDebounceTimer?.cancel();
     WakelockPlus.disable();
@@ -1713,6 +1748,10 @@ class _AssistantScreenState extends State<AssistantScreen>
         ? 'loaded'
         : 'idle';
     final streamState = orchestrator.isStreaming ? 'streaming' : 'idle';
+    final contextUsage = _contextBudget == null
+        ? 'ctx: idle'
+        : 'ctx: ${(_contextBudget!.usageRatio * 100).round()}% '
+              '(${_contextBudget!.estimatedTokens}/${_contextBudget!.kvLimit})';
 
     return Positioned(
       left: 8,
@@ -1727,7 +1766,7 @@ class _AssistantScreenState extends State<AssistantScreen>
           ),
           child: Text(
             'DEBUG  RAM: $ram  |  Model: $modelState  |  Stream: $streamState  |  '
-            '$_effectiveModelLabel',
+            '$_effectiveModelLabel  |  $contextUsage',
             style: const TextStyle(color: Colors.white60, fontSize: 10),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,

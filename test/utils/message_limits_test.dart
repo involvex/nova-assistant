@@ -129,7 +129,106 @@ void main() {
         effectiveModel: NovaModel.gemma4E2b,
         highContext: false,
       );
-      expect(maxChars, greaterThanOrEqualTo(1500));
+      // Conservative floor: even with the new Gemma 4 safety margin the
+      // remaining budget should still admit a real user message.
+      expect(maxChars, greaterThanOrEqualTo(800));
+    });
+
+    test('estimateRealTokens returns higher count than chars/4 for code', () {
+      const code = 'const x = 42; if (x > 0) return x;';
+      final legacy = MessageLimits.estimateTokens(code);
+      final real = MessageLimits.estimateRealTokens(
+        code,
+        model: NovaModel.gemma4E2b,
+      );
+      expect(real, greaterThan(legacy));
+    });
+
+    test('estimateRealTokens counts digits more aggressively', () {
+      final digits = '0' * 100;
+      final legacy = MessageLimits.estimateTokens(digits);
+      final real = MessageLimits.estimateRealTokens(
+        digits,
+        model: NovaModel.gemma4E2b,
+      );
+      expect(real, greaterThan(legacy));
+    });
+
+    test('safetyMarginFor Gemma 4 is larger than the base margin', () {
+      expect(
+        MessageLimits.safetyMarginFor(NovaModel.gemma4E2b),
+        greaterThan(MessageLimits.safetyMarginFor(NovaModel.smollm)),
+      );
+    });
+
+    test('computedOverheadFor scales with system prompt length', () {
+      final shortOverhead = MessageLimits.computedOverheadFor(
+        NovaModel.gemma4E2b,
+        systemPromptChars: 500,
+      );
+      final longOverhead = MessageLimits.computedOverheadFor(
+        NovaModel.gemma4E2b,
+        systemPromptChars: 3000,
+      );
+      expect(longOverhead, greaterThan(shortOverhead));
+    });
+
+    test('computedOverheadFor includes tool schema cost', () {
+      final none = MessageLimits.computedOverheadFor(NovaModel.gemma4E2b);
+      final withTools = MessageLimits.computedOverheadFor(
+        NovaModel.gemma4E2b,
+        toolsCount: 16,
+      );
+      expect(withTools - none, greaterThanOrEqualTo(400));
+    });
+
+    test('computedOverheadFor includes jinja cost for Gemma 4', () {
+      final gemma4 = MessageLimits.computedOverheadFor(NovaModel.gemma4E2b);
+      final smollm = MessageLimits.computedOverheadFor(NovaModel.smollm);
+      expect(gemma4 - smollm, greaterThanOrEqualTo(400));
+    });
+
+    test('estimatePromptTokens flags near-limit prompts', () {
+      final estimate = MessageLimits.estimatePromptTokens(
+        model: NovaModel.gemma4E2b,
+        systemPrompt: 'x' * 3000,
+        query: 'a' * 6000,
+        highContext: true,
+      );
+      expect(estimate.isOverflow, isTrue);
+      expect(estimate.isNearLimit, isTrue);
+      expect(estimate.usageRatio, greaterThan(1.0));
+    });
+
+    test('estimatePromptTokens fits a small prompt', () {
+      final estimate = MessageLimits.estimatePromptTokens(
+        model: NovaModel.gemma4E2b,
+        systemPrompt: 'You are Nova.',
+        query: 'Hi',
+        highContext: true,
+      );
+      expect(estimate.isOverflow, isFalse);
+      expect(estimate.estimatedTokens, lessThan(estimate.kvLimit));
+    });
+
+    test('estimatePromptTokens records per-section token counts', () {
+      final estimate = MessageLimits.estimatePromptTokens(
+        model: NovaModel.gemma4E2b,
+        systemPrompt: 'system prompt',
+        query: 'hello',
+        ragContext: 'rag context',
+        attachmentContext: 'attach',
+        hasVisionImage: true,
+        highContext: true,
+        textToolPrompt: true,
+        toolsCount: 5,
+      );
+      expect(estimate.systemPromptTokens, greaterThan(0));
+      expect(estimate.queryTokens, greaterThan(0));
+      expect(estimate.ragTokens, greaterThan(0));
+      expect(estimate.attachmentTokens, greaterThan(0));
+      expect(estimate.visionTokens, MessageLimits.visionImageTokenEstimate);
+      expect(estimate.overheadTokens, greaterThan(400));
     });
   });
 }

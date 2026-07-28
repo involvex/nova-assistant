@@ -1,154 +1,69 @@
-# Task 1: Fix LiteRtLm CancelProcess Crash in ModelOrchestrator
+# Task 1: Add attribution to copy action
 
-## Goal
+## Feature 1: Message Copy with Attribution
 
-Prevent `close()` from being called on a LiteRtLm model while `generateChatResponseAsync()` stream is actively iterating, which causes a native crash in `litert::lm::Conversation::CancelProcess()`.
+**Goal:** When copying an assistant message, include model name and timestamp.
 
-## Root Cause
+### Task 1: Add attribution to copy action
 
-In `model_orchestrator.dart`, when `releaseIdleResources()` is called (due to app lifecycle or idle timeout):
-1. `_activeChat = null` is set, but this does NOT abort the native stream
-2. 100ms delay passes
-3. `_activeModel!.close()` is called, triggering native `CancelProcess()`
-4. The native stream is still iterating → CRASH
+**Files:**
+- Modify: `lib/screens/assistant_screen.dart:2471-2475`
+- Modify: `lib/screens/assistant_screen_beginner.dart:420-423`
 
-## Files to Modify
+**Interfaces:**
+- Consumes: `ChatMessage` fields (text, modelName, timestamp)
+- Produces: Updated clipboard content with attribution string
 
-- `lib/services/model_orchestrator.dart`
+- [ ] **Step 1: Locate the existing copy action in assistant_screen.dart**
 
-## Changes Required
-
-### 1. Add streaming state fields after line 133 (`_idleTimer` line):
-
+The copy action is at line ~2471:
 ```dart
-  bool _isStreaming = false;
-  Completer<void>? _streamingCompleter;
+Clipboard.setData(ClipboardData(text: msg.text));
 ```
 
-### 2. Update `preferredModelType` setter (lines 162-175)
-
-After `_activeChat = null;` (line 166), add:
-```dart
-    // Signal any active stream to abort
-    if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
-      _streamingCompleter!.complete();
-    }
-```
-
-### 3. Replace `_releaseIdleResources()` (lines 217-262)
-
-New implementation must:
-- Signal any active stream via `_streamingCompleter?.complete()`
-- Wait for `_isStreaming` to become false before calling `close()`
-- Use a timeout (3 seconds) for the wait
-- Keep the existing `_isReleasing` guard
+- [ ] **Step 2: Replace the copy logic with attributed copy**
 
 ```dart
-  Future<void> _releaseIdleResources() async {
-    if (_isReleasing) {
-      debugPrint('Release already in progress, skipping');
-      return;
-    }
-    _isReleasing = true;
-
-    try {
-      if (!_batteryOptimizationEnabled) return;
-
-      // Signal any active stream to abort
-      if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
-        _streamingCompleter!.complete();
-      }
-
-      // Clear the chat reference
-      if (_activeChat != null) {
-        try {
-          _activeChat = null;
-        } catch (_) {}
-      }
-
-      // Wait for any ongoing stream iteration to finish
-      if (_isStreaming) {
-        debugPrint('Waiting for active stream to finish...');
-        final deadline = DateTime.now().add(const Duration(seconds: 3));
-        while (_isStreaming && DateTime.now().isBefore(deadline)) {
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-        }
-        if (_isStreaming) {
-          debugPrint('Stream did not finish in time, forcing release');
-        }
-      }
-
-      // Now close the model
-      if (_activeModel != null) {
-        try {
-          await _activeModel!.close();
-        } catch (e) {
-          debugPrint('Error closing model: $e');
-        }
-      }
-      _activeModel = null;
-      _activeModelSupportsImage = false;
-
-      _statusController.add('Idle — model released to save battery');
-    } catch (e) {
-      debugPrint('Error releasing idle resources: $e');
-    } finally {
-      _isReleasing = false;
-    }
-  }
+// In assistant_screen.dart, replace the copy action around line 2471
+final attribution = msg.isUser
+    ? ''
+    : '\n\n— ${msg.modelName ?? "Nova"} · ${_formatTimestamp(msg.timestamp)}';
+Clipboard.setData(ClipboardData(text: '${msg.text}$attribution'));
 ```
 
-### 4. Update `processMessage()` stream handling (lines 822-926)
+- [ ] **Step 3: Add the same logic to assistant_screen_beginner.dart**
 
-The `await for` loop at line 826 must track streaming state:
-
-Before the loop (around line 822):
 ```dart
-    // Set streaming state for releaseIdleResources() to observe
-    _isStreaming = true;
-    _streamingCompleter = Completer<void>();
-
-    try {
-      await for (final event in _activeChat!.generateChatResponseAsync()) {
-        // Check if releaseIdleResources() signaled abort
-        if (_streamingCompleter?.isCompleted ?? false) {
-          debugPrint('Stream aborted by releaseIdleResources');
-          break;
-        }
+// In assistant_screen_beginner.dart, replace the copy action around line 420
+final attribution = msg.isUser
+    ? ''
+    : '\n\n— ${msg.modelName ?? "Nova"} · ${_formatTimestamp(msg.timestamp)}';
+Clipboard.setData(ClipboardData(text: '${msg.text}$attribution'));
 ```
 
-After the loop ends (wrap the entire while loop in try/finally):
+- [ ] **Step 4: Add a helper method if `_formatTimestamp` doesn't exist**
+
+Check if `_formatTimestamp` exists in both files. If not, add:
 ```dart
-      } // end await for
-    } finally {
-      // Clear streaming state
-      _isStreaming = false;
-      if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
-        _streamingCompleter!.complete();
-      }
-      _streamingCompleter = null;
-    }
+String _formatTimestamp(DateTime? timestamp) {
+  if (timestamp == null) return '';
+  final now = DateTime.now();
+  final diff = now.difference(timestamp);
+  if (diff.inMinutes < 1) return 'just now';
+  if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+  if (diff.inDays < 1) return '${diff.inHours}h ago';
+  return '${timestamp.month}/${timestamp.day}/${timestamp.year}';
+}
 ```
 
-### 5. Update `clearHistory()` (line 1166)
+- [ ] **Step 5: Run analysis and format**
 
-Add before `_activeChat = null`:
-```dart
-    if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
-      _streamingCompleter!.complete();
-    }
+Run: `flutter analyze lib/screens/assistant_screen.dart lib/screens/assistant_screen_beginner.dart`
+Expected: No new errors
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add lib/screens/assistant_screen.dart lib/screens/assistant_screen_beginner.dart
+git commit -m "feat: add model name and timestamp attribution when copying messages"
 ```
-
-## Acceptance Criteria
-
-1. `_isStreaming` flag is set to `true` before entering the `await for` loop and `false` in `finally`
-2. `_streamingCompleter` signals abort to the loop when `releaseIdleResources()` is called
-3. `close()` is NOT called while `_isStreaming == true` (waits up to 3 seconds)
-4. The crash at `CancelProcess()` does not occur when app is backgrounded during inference
-
-## Key Implementation Notes
-
-- The `await for` loop in Dart does NOT automatically exit when `_activeChat` is set to null
-- The `Completer` is the signaling mechanism — when `complete()` is called, the loop checks `isCompleted` and breaks
-- The timeout prevents infinite waiting if the stream hangs
-- Follow existing code patterns for `debugPrint` and error handling

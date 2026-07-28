@@ -149,6 +149,19 @@ class AgentIdentity {
 
     return buffer.toString();
   }
+
+  /// Single-line variant of [buildSystemPrompt] used on tight Android Gemma 4
+  /// sessions. The detailed persona is reserved for non-Android / desktop /
+  /// high-context runs via [buildSystemPrompt].
+  String buildCompactSystemPrompt() {
+    final buffer = StringBuffer('You are $name');
+    if (avatarEmoji != null) {
+      buffer.write(' $avatarEmoji');
+    }
+    buffer.write('. Be concise and helpful.');
+
+    return buffer.toString();
+  }
 }
 
 class IdentityService {

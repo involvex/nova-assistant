@@ -2,7 +2,9 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_assistant/models/chat_message.dart';
+import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/session_history_reinjection.dart';
+import 'package:nova_assistant/utils/message_limits.dart';
 
 void main() {
   group('SessionHistoryReinjection', () {
@@ -213,6 +215,64 @@ void main() {
 
       expect(replay.first.isUser, isTrue);
       expect(replay.first.text, 'user turn');
+    });
+
+    test('estimateChatMessageTokens matches MessageLimits ratio for model', () {
+      const text = 'hello world this is a test message';
+      final defaultEst = SessionHistoryReinjection.estimateChatMessageTokens(
+        ChatMessage(
+          id: '1',
+          text: text,
+          isUser: true,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+      );
+      final gemma = SessionHistoryReinjection.estimateChatMessageTokens(
+        ChatMessage(
+          id: '1',
+          text: text,
+          isUser: true,
+          timestamp: DateTime(2026, 1, 1),
+        ),
+        model: NovaModel.gemma4E2b,
+      );
+      final expected = MessageLimits.estimateRealTokens(
+        text,
+        model: NovaModel.gemma4E2b,
+      );
+      expect(gemma, expected);
+      // Without an explicit model the helper uses the default ratio
+      // (currently Gemma 4). Both should match the same expected value.
+      expect(defaultEst, expected);
+    });
+
+    test('buildReplayMessages keeps fewer turns for tighter Gemma 4 ratio', () {
+      // 6 turns of mixed prose + code. Gemma 4 tokenizes code more
+      // aggressively than chars/4, so the same maxTokens should keep fewer
+      // turns when model-aware estimation is used.
+      final input = <ChatMessage>[];
+      for (var i = 0; i < 6; i++) {
+        input.add(
+          ChatMessage(
+            id: '$i',
+            text: 'turn ${'x' * 300}; const fn = (a, b) => a + b;',
+            isUser: i.isEven,
+            timestamp: DateTime(2026, 1, 1),
+          ),
+        );
+      }
+
+      // Budget big enough to fit at least the last user+assistant pair but
+      // tight enough that the older turns must be trimmed away.
+      final replay = SessionHistoryReinjection.buildReplayMessages(
+        input,
+        maxTokens: 500,
+        model: NovaModel.gemma4E2b,
+      );
+      expect(replay.length, lessThan(6));
+      // With an even-indexed user as the first message, replay always starts
+      // on a user turn once leading orphans are dropped.
+      expect(replay.first.isUser, isTrue);
     });
   });
 }

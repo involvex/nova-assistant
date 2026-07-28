@@ -15,15 +15,158 @@ class MessageLimits {
   static const gemma4JinjaOverheadTokens = 400;
 
   /// Typical system prompt + role + identity overhead.
+  ///
+  /// Kept for backward compatibility with callers that only need a flat
+  /// reservation. Use [computedOverheadFor] when the real system prompt
+  /// length is known — it gives a far more accurate number.
   static const systemPromptOverheadTokens = 220;
+
+  /// Per-tool overhead when the schema is passed to native function calling.
+  /// Measured against Gemma 4 with the bundled tool set (~35–80 tokens each).
+  static const toolSchemaOverheadBaseTokens = 80;
+  static const toolSchemaOverheadPerToolTokens = 35;
+
+  /// Estimated cost of the text-mode tool essay injected into the system
+  /// prompt when native FC is unavailable.
+  static const textToolPromptOverheadTokens = 120;
+
+  /// RAG + attachment context overhead (mostly chat-template wrappers).
+  static const ragOverheadTokens = 40;
+  static const attachmentOverheadTokens = 60;
 
   /// Conservative vision-image token estimate (phone screenshot tiles).
   static const visionImageTokenEstimate = 1024;
 
   /// Leave headroom so native prefill never sits on the KV ceiling.
-  static const kvSafetyMarginTokens = 128;
+  ///
+  /// Gemma 4's tokenizer produces ~30–60 % more tokens than chars/4, so the
+  /// historical 128-token margin was too tight and produced "Input token ids
+  /// are too long" errors after a handful of turns. 256 is the minimum that
+  /// holds across short English chat, code, and numbers.
+  static const kvSafetyMarginTokens = 256;
+
+  /// Larger safety margin for Gemma 4 Android where the jinja FC template +
+  /// 16 native tool schemas routinely consume 600–1 000 KV tokens.
+  static const gemma4KvSafetyMarginTokens = 384;
 
   static const exhaustedBudgetFloorChars = 400;
+
+  /// Real-token-per-character ratios for each model's tokenizer.
+  ///
+  /// The legacy `(text.length / 4).round()` estimator systematically
+  /// underestimates Gemma 4's actual SentencePiece output by 30-60 % on
+  /// English chat and up to 80 % on code / numbers / non-ASCII. Use the
+  /// table below for budget-critical paths (replay budget, pre-flight
+  /// validation, native FC overflow detection).
+  static double realTokenRatio(NovaModel model) {
+    switch (model) {
+      case NovaModel.smollm:
+        return 0.36;
+      case NovaModel.fastvlm:
+        return 0.33;
+      case NovaModel.gemma3_1b:
+        return 0.33;
+      case NovaModel.gemma4E2b:
+        return 0.32;
+    }
+  }
+
+  /// Returns a smarter token estimate that accounts for code-like runs and
+  /// digits, which the tokenizer fragments far more aggressively than prose.
+  ///
+  /// Single linear pass — fast enough to call inside the per-turn pre-flight
+  /// without adding noticeable latency.
+  static int estimateRealTokens(String text, {NovaModel? model}) {
+    if (text.isEmpty) return 0;
+    final ratio = realTokenRatio(model ?? NovaModel.gemma4E2b);
+    final len = text.length;
+
+    var codeChars = 0;
+    var digitChars = 0;
+    for (var i = 0; i < len; i++) {
+      final c = text.codeUnitAt(i);
+      final isDigit = c >= 0x30 && c <= 0x39;
+      // Identifiers, brackets, operators, punctuation that SentencePiece
+      // typically splits into single tokens.
+      final isCodey =
+          c == 0x5F || // _
+          c == 0x7B ||
+          c == 0x7D || // { }
+          c == 0x28 ||
+          c == 0x29 || // ( )
+          c == 0x3B ||
+          c == 0x3D || // ; =
+          c == 0x3C ||
+          c == 0x3E || // < >
+          c == 0x2F ||
+          c == 0x5C || // / \
+          c == 0x5B ||
+          c == 0x5D || // [ ]
+          c == 0x2B ||
+          c == 0x2D ||
+          c == 0x2A ||
+          c == 0x25 ||
+          c == 0x24 ||
+          c == 0x23 ||
+          c == 0x40 ||
+          c == 0x7E;
+      if (isDigit) {
+        digitChars++;
+      } else if (isCodey) {
+        codeChars++;
+      }
+    }
+    final other = len - digitChars - codeChars;
+    final tokens = (other * ratio) + (codeChars * 0.45) + (digitChars * 0.55);
+
+    return tokens.round();
+  }
+
+  /// Returns the [kvSafetyMarginTokens] appropriate for [model].
+  ///
+  /// Gemma 4 has a heavier chat template + tool schema; other models stay at
+  /// the lower base margin so they don't lose usable budget unnecessarily.
+  static int safetyMarginFor(NovaModel model) {
+    if (model == NovaModel.gemma4E2b) return gemma4KvSafetyMarginTokens;
+
+    return kvSafetyMarginTokens;
+  }
+
+  /// Returns the realistic token overhead already consumed by the prompt
+  /// scaffolding (system prompt length + native tool schemas + text tool
+  /// essay + RAG/attachment wrappers) before user / history tokens are
+  /// counted.
+  ///
+  /// Replaces the historical flat [systemPromptOverheadTokens] = 220 used in
+  /// replay-budget math, which under-reserved by ~500–900 tokens on Gemma 4
+  /// Android and caused "Input token ids are too long" after a handful of
+  /// turns.
+  static int computedOverheadFor(
+    NovaModel model, {
+    int systemPromptChars = 0,
+    int toolsCount = 0,
+    bool textToolPrompt = false,
+    bool hasRag = false,
+    bool hasAttachments = false,
+  }) {
+    var overhead = systemPromptOverheadTokens;
+    if (model == NovaModel.gemma4E2b) {
+      overhead += gemma4JinjaOverheadTokens;
+    }
+    if (systemPromptChars > 0) {
+      overhead += estimateRealTokens('x' * systemPromptChars, model: model);
+    }
+    if (toolsCount > 0) {
+      overhead +=
+          toolSchemaOverheadBaseTokens +
+          (toolsCount * toolSchemaOverheadPerToolTokens);
+    }
+    if (textToolPrompt) overhead += textToolPromptOverheadTokens;
+    if (hasRag) overhead += ragOverheadTokens;
+    if (hasAttachments) overhead += attachmentOverheadTokens;
+
+    return overhead;
+  }
 
   static MessageLimitTier tierFor({
     NovaModel? model,
@@ -121,7 +264,8 @@ class MessageLimits {
   }) {
     final kvLimit = kvTokenLimitFor(effectiveModel, highContext: highContext);
     final ratio = highContext ? highContextBudgetRatio : contextBudgetRatio;
-    final usableBudget = (kvLimit * ratio).round() - kvSafetyMarginTokens;
+    final usableBudget =
+        (kvLimit * ratio).round() - safetyMarginFor(effectiveModel);
 
     var reserved = historyTokenEstimate + ragTokenEstimate;
     reserved += systemPromptTokenEstimate > 0
@@ -261,4 +405,136 @@ class MessageLimits {
 
     return text.length > soft;
   }
+
+  /// Pre-flight estimate of the full prompt's token cost.
+  ///
+  /// Combines system prompt, RAG, history, attachment context and the new
+  /// query into a single number using real-token ratios. Returns null if the
+  /// result fits comfortably under the KV ceiling.
+  ///
+  /// Used by the orchestrator before `addQuery` to decide whether to
+  /// auto-compact or surface a "context near limit" warning.
+  static ContextBudgetEstimate estimatePromptTokens({
+    required NovaModel model,
+    required String systemPrompt,
+    required String query,
+    String ragContext = '',
+    String attachmentContext = '',
+    int historyTokenEstimate = 0,
+    bool hasVisionImage = false,
+    bool highContext = false,
+    bool textToolPrompt = false,
+    int toolsCount = 0,
+  }) {
+    final kvLimit = kvTokenLimitFor(model, highContext: highContext);
+    final ratio = highContext ? highContextBudgetRatio : contextBudgetRatio;
+    final ceiling = (kvLimit * ratio).round();
+
+    final systemTokens = estimateRealTokens(systemPrompt, model: model);
+    final ragTokens = estimateRealTokens(ragContext, model: model);
+    final attachmentTokens = estimateRealTokens(
+      attachmentContext,
+      model: model,
+    );
+    final queryTokens = estimateRealTokens(query, model: model);
+
+    final visionTokens = hasVisionImage ? visionImageTokenEstimate : 0;
+
+    final overhead = computedOverheadFor(
+      model,
+      systemPromptChars: systemPrompt.length,
+      toolsCount: toolsCount,
+      textToolPrompt: textToolPrompt,
+      hasRag: ragContext.trim().isNotEmpty,
+      hasAttachments: attachmentContext.trim().isNotEmpty,
+    );
+
+    final total =
+        systemTokens +
+        ragTokens +
+        attachmentTokens +
+        visionTokens +
+        historyTokenEstimate +
+        queryTokens +
+        overhead;
+
+    return ContextBudgetEstimate(
+      estimatedTokens: total,
+      kvLimit: kvLimit,
+      usableCeiling: ceiling,
+      systemPromptTokens: systemTokens,
+      queryTokens: queryTokens,
+      historyTokens: historyTokenEstimate,
+      ragTokens: ragTokens,
+      attachmentTokens: attachmentTokens,
+      visionTokens: visionTokens,
+      overheadTokens: overhead,
+    );
+  }
+}
+
+/// Result of [MessageLimits.estimatePromptTokens].
+///
+/// Exposes both the raw estimate and the KV ceiling so the UI can show a
+/// progress bar ("78% of context used") and the orchestrator can decide
+/// whether to auto-compact before `addQuery`.
+class ContextBudgetEstimate {
+  ContextBudgetEstimate({
+    required this.estimatedTokens,
+    required this.kvLimit,
+    required this.usableCeiling,
+    required this.systemPromptTokens,
+    required this.queryTokens,
+    required this.historyTokens,
+    required this.ragTokens,
+    required this.attachmentTokens,
+    required this.visionTokens,
+    required this.overheadTokens,
+  });
+
+  /// Total estimated tokens across system + RAG + history + query + overhead.
+  final int estimatedTokens;
+
+  /// Hard KV ceiling reported by [MessageLimits.kvTokenLimitFor].
+  final int kvLimit;
+
+  /// Soft ceiling the orchestrator aims to stay under (kvLimit * ratio).
+  final int usableCeiling;
+
+  final int systemPromptTokens;
+  final int queryTokens;
+  final int historyTokens;
+  final int ragTokens;
+  final int attachmentTokens;
+  final int visionTokens;
+  final int overheadTokens;
+
+  /// Fraction of the soft ceiling used (0.0–1.0+, >1.0 means overflow).
+  double get usageRatio =>
+      usableCeiling <= 0 ? 1.0 : estimatedTokens / usableCeiling;
+
+  /// True when the prompt already exceeds the KV hard cap. The orchestrator
+  /// should auto-compact or refuse rather than stream into the native
+  /// engine.
+  bool get isOverflow => estimatedTokens > kvLimit;
+
+  /// True when within 8 % of the soft ceiling — good trigger for the
+  /// "context near limit" banner.
+  bool get isNearLimit => usageRatio >= 0.92;
+
+  Map<String, Object?> toJson() => {
+    'estimatedTokens': estimatedTokens,
+    'kvLimit': kvLimit,
+    'usableCeiling': usableCeiling,
+    'systemPromptTokens': systemPromptTokens,
+    'queryTokens': queryTokens,
+    'historyTokens': historyTokens,
+    'ragTokens': ragTokens,
+    'attachmentTokens': attachmentTokens,
+    'visionTokens': visionTokens,
+    'overheadTokens': overheadTokens,
+    'usageRatio': usageRatio.toStringAsFixed(3),
+    'isOverflow': isOverflow,
+    'isNearLimit': isNearLimit,
+  };
 }

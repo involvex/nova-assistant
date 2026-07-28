@@ -94,6 +94,27 @@ enum AssistantRole {
 
   const AssistantRole(this.displayName, this.systemPrompt);
 
+  /// Single-line system prompt used on tight Android Gemma 4 sessions to
+  /// keep the system prompt under ~120 real tokens (≈ 380 chars).
+  ///
+  /// Falls back to the first non-empty line of [systemPrompt] when the role
+  /// does not need a specialized identity (e.g. helpful / student), and uses
+  /// a role-flavored single line for specialized roles so the model still
+  /// knows what it is doing.
+  String get compactSystemPrompt {
+    switch (this) {
+      case AssistantRole.coder:
+        return 'You are Nova, an expert programmer AI assistant.';
+      case AssistantRole.creative:
+        return 'You are Nova, a creative writing AI assistant.';
+      case AssistantRole.analyst:
+        return 'You are Nova, a data analysis AI assistant.';
+      case AssistantRole.helpful:
+      case AssistantRole.student:
+        return 'You are Nova, a helpful on-device AI assistant.';
+    }
+  }
+
   static AssistantRole fromString(String? value) {
     return AssistantRole.values.firstWhere(
       (r) => r.name == value,

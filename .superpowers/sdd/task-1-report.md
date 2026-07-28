@@ -1,71 +1,57 @@
-# Task 1 Report: Session History Reinjection Helper
+# Task 1: Message Copy with Attribution — Report
 
-## Status
+## What I Implemented
 
-**DONE**
-
-## Commits
-
-| Hash | Message |
-|------|---------|
-| `c6c9f96` | feat: add session history reinjection helper |
-
-## What Was Implemented
-
-Pure helper `SessionHistoryReinjection` that converts persisted UI `ChatMessage` turns into `flutter_gemma` `Message` objects for inference replay:
-
-- `buildReplayMessages(List<ChatMessage> uiMessages, {required int maxTokens})` — filters streaming/error/empty messages, selects newest turns within token budget, returns oldest→newest for replay
-- `estimateTokens(Message)` and `estimateChatMessageTokens(ChatMessage)` — text ≈ `length/4`, images = 500 tokens
-- `_toMessage` — uses `Message.withImage` when `imageData` present, otherwise `Message(text:, isUser:)`
-
-## Files Created
-
-- `lib/services/session_history_reinjection.dart`
-- `test/services/session_history_reinjection_test.dart`
-
-## Test Commands Run
-
-### Step 2 — Failing test (before implementation)
-
-```bash
-flutter test test/services/session_history_reinjection_test.dart
-```
-
-**Result:** FAIL (expected)
-
-- Compilation error: `lib/services/session_history_reinjection.dart` not found
-- Undefined name `SessionHistoryReinjection`
-
-### Step 4 — Passing test (after implementation)
-
-```bash
-flutter test test/services/session_history_reinjection_test.dart
-```
-
-**Result:** PASS
+Added model name and timestamp attribution to clipboard copy for assistant messages. When a user copies an assistant message, the clipboard now includes:
 
 ```
-00:00 +0: SessionHistoryReinjection skips errors streaming and empty
-00:00 +1: SessionHistoryReinjection keeps newest turns within token budget
-00:00 +2: All tests passed!
+<message text>
+
+— <model name> · <relative timestamp>
 ```
 
-### Format + analyze
+For user messages, no attribution is added (empty string).
 
-```bash
-dart format lib/services/session_history_reinjection.dart test/services/session_history_reinjection_test.dart
-flutter analyze lib/services/session_history_reinjection.dart test/services/session_history_reinjection_test.dart
-```
+### Changes
 
-**Result:**
+1. **`lib/screens/assistant_screen.dart`**:
+   - Updated `onCopy` callback in ChatBubble (line ~1541) to append attribution for non-user messages
+   - Updated user message copy in reaction picker (line ~2476) to include attribution logic (no-op for user messages, as expected)
+   - Added `_formatTimestamp()` helper method at end of class
 
-- `dart format` reformatted `session_history_reinjection.dart` (trailing comma on `.where()` closure per project style)
-- `flutter analyze`: 1 warning — unused import `package:flutter_gemma/flutter_gemma.dart` in test file (present in plan's exact test code; left unchanged per spec)
+2. **`lib/screens/assistant_screen_beginner.dart`**:
+   - Updated `onCopy` callback (line ~420) to append attribution for non-user messages
+   - Added `_formatTimestamp()` helper method at end of class
 
-## Self-Review Notes
+### `_formatTimestamp` Implementation
 
-1. Implementation matches plan Task 1 Step 3 exactly; TDD flow followed (fail → implement → pass).
-2. Token budget logic always includes at least the newest message even if it exceeds budget (`selected.isNotEmpty` guard on break).
-3. Image messages use fixed 500-token estimate; no dedicated image test in Task 1 scope (covered by implementation, not exercised by current tests).
-4. Minor analyze warning on unused test import is acceptable — test file copied verbatim from plan.
-5. Ready for Task 2 wiring into `ModelOrchestrator`.
+- `null` timestamp → empty string
+- <1 minute → "just now"
+- <1 hour → "Xm ago"
+- <1 day → "Xh ago"
+- Otherwise → "M/D/YYYY"
+
+## What I Tested
+
+- `flutter analyze lib/screens/assistant_screen.dart lib/screens/assistant_screen_beginner.dart` — **No issues found**
+- `flutter analyze lib/` — **No issues found**
+
+## Files Changed
+
+| File | Lines Changed |
+|------|---------------|
+| `lib/screens/assistant_screen.dart` | +24, -3 |
+| `lib/screens/assistant_screen_beginner.dart` | +10, -0 |
+
+## Self-Review Findings
+
+- ✅ Attribution only applied to assistant messages (user messages get empty string)
+- ✅ Falls back to "Nova" if `modelName` is null
+- ✅ Handles null timestamps gracefully
+- ✅ Follows existing code patterns (trailing commas, single quotes, const where possible)
+- ✅ No new analysis errors or warnings
+- ✅ `_formatTimestamp` duplicated in both files as expected (both are independent State classes)
+
+## Commit
+
+- `473145f` — `feat: add model name and timestamp attribution when copying messages`

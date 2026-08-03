@@ -127,6 +127,41 @@ class TaskService {
     );
   }
 
+  Future<void> editTask(Task task) async {
+    final index = _tasks.indexWhere((t) => t.id == task.id);
+    if (index != -1) {
+      _tasks[index] = task;
+      await _save();
+      _notifyListeners();
+
+      // Reschedule reminder if due date changed
+      if (task.dueDate != null) {
+        _scheduleReminder(task);
+      }
+    }
+  }
+
+  Future<void> archiveTask(String taskId) async {
+    final index = _tasks.indexWhere((t) => t.id == taskId);
+    if (index != -1) {
+      _tasks[index] = _tasks[index].copyWith(status: TaskStatus.archived);
+      await _save();
+      _notifyListeners();
+
+      NotificationService.instance.cancelNotification(
+        NotificationService.instance.notificationIdForTask(taskId),
+      );
+    }
+  }
+
+  Task? findTaskById(String taskId) {
+    try {
+      return _tasks.firstWhere((t) => t.id == taskId);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Task? findTaskByTitle(String query) {
     final lower = query.toLowerCase();
     // Try exact match first
@@ -161,6 +196,12 @@ class TaskService {
         return _handleListTasks(args);
       case 'complete_task':
         return _handleCompleteTask(args);
+      case 'edit_task':
+        return _handleEditTask(args);
+      case 'archive_task':
+        return _handleArchiveTask(args);
+      case 'restore_task':
+        return _handleRestoreTask(args);
       default:
         return {'success': false, 'error': 'Unknown task tool: $toolName'};
     }
@@ -257,6 +298,115 @@ class TaskService {
 
     await completeTask(task.id);
     return {'success': true, 'message': 'Task completed: ${task.title}'};
+  }
+
+  Future<Map<String, dynamic>> _handleEditTask(
+    Map<String, dynamic> args,
+  ) async {
+    final taskId = args['task_id'] as String?;
+    if (taskId == null || taskId.isEmpty) {
+      return {'success': false, 'error': 'Task ID is required'};
+    }
+
+    final task = findTaskById(taskId);
+    if (task == null) {
+      return {'success': false, 'error': 'Task not found: $taskId'};
+    }
+
+    final title = args['title'] as String?;
+    final description = args['description'] as String?;
+    final priorityStr = args['priority'] as String?;
+    final statusStr = args['status'] as String?;
+    final dueDateStr = args['due_date'] as String?;
+
+    TaskPriority? priority;
+    if (priorityStr != null) {
+      priority = TaskPriority.values.firstWhere(
+        (p) => p.name == priorityStr,
+        orElse: () => task.priority,
+      );
+    }
+
+    TaskStatus? status;
+    if (statusStr != null) {
+      status = TaskStatus.values.firstWhere(
+        (s) => s.name == statusStr,
+        orElse: () => task.status,
+      );
+    }
+
+    DateTime? dueDate;
+    if (dueDateStr != null) {
+      try {
+        dueDate = DateTime.parse(dueDateStr);
+      } catch (e) {
+        return {'success': false, 'error': 'Invalid due_date format'};
+      }
+    }
+
+    final tagsStr = args['tags'] as String?;
+    final tags = tagsStr != null
+        ? tagsStr.split(',').map((t) => t.trim()).toList()
+        : task.tags;
+
+    final updatedTask = task.edit(
+      title: title,
+      description: description,
+      priority: priority,
+      status: status,
+      dueDate: dueDate,
+      tags: tags,
+    );
+
+    await editTask(updatedTask);
+    return {
+      'success': true,
+      'taskId': updatedTask.id,
+      'title': updatedTask.title,
+      'message': 'Task updated: ${updatedTask.title}',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleArchiveTask(
+    Map<String, dynamic> args,
+  ) async {
+    final taskId = args['task_id'] as String?;
+    if (taskId == null || taskId.isEmpty) {
+      return {'success': false, 'error': 'Task ID is required'};
+    }
+
+    final task = findTaskById(taskId);
+    if (task == null) {
+      return {'success': false, 'error': 'Task not found: $taskId'};
+    }
+
+    if (!task.canArchive) {
+      return {'success': false, 'error': 'Task cannot be archived'};
+    }
+
+    await archiveTask(task.id);
+    return {'success': true, 'message': 'Task archived: ${task.title}'};
+  }
+
+  Future<Map<String, dynamic>> _handleRestoreTask(
+    Map<String, dynamic> args,
+  ) async {
+    final taskId = args['task_id'] as String?;
+    if (taskId == null || taskId.isEmpty) {
+      return {'success': false, 'error': 'Task ID is required'};
+    }
+
+    final task = findTaskById(taskId);
+    if (task == null) {
+      return {'success': false, 'error': 'Task not found: $taskId'};
+    }
+
+    if (!task.canRestore) {
+      return {'success': false, 'error': 'Task cannot be restored'};
+    }
+
+    await editTask(task.edit(status: TaskStatus.pending));
+    return {'success': true, 'message': 'Task restored: ${task.title}'};
   }
 
   Future<void> _save() async {

@@ -1,6 +1,6 @@
 enum TaskPriority { low, medium, high }
 
-enum TaskStatus { pending, inProgress, completed, cancelled }
+enum TaskStatus { pending, inProgress, completed, cancelled, archived }
 
 class Task {
   final String id;
@@ -35,6 +35,34 @@ class Task {
   bool get isPending =>
       status == TaskStatus.pending || status == TaskStatus.inProgress;
 
+  bool get canEdit => status != TaskStatus.cancelled;
+
+  bool get canArchive => status == TaskStatus.completed && !isArchived;
+
+  bool get canRestore => status == TaskStatus.cancelled;
+
+  Task edit({
+    String? title,
+    String? description,
+    TaskPriority? priority,
+    TaskStatus? status,
+    DateTime? dueDate,
+    DateTime? completedAt,
+    List<String>? tags,
+  }) {
+    return Task(
+      id: id,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      priority: priority ?? this.priority,
+      status: status ?? this.status,
+      createdAt: createdAt,
+      dueDate: dueDate ?? this.dueDate,
+      completedAt: completedAt ?? this.completedAt,
+      tags: tags ?? this.tags,
+    );
+  }
+
   Task copyWith({
     String? title,
     String? description,
@@ -56,6 +84,8 @@ class Task {
       tags: tags ?? this.tags,
     );
   }
+
+  bool get isArchived => status == TaskStatus.archived;
 
   Map<String, dynamic> toJson() => {
     'id': id,

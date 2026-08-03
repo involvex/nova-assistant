@@ -141,13 +141,26 @@ class _TasksScreenState extends State<TasksScreen> {
           : ListView.builder(
               padding: const EdgeInsets.all(12),
               itemCount: _filteredTasks.length,
-              itemBuilder: (context, index) => _TaskCard(
-                task: _filteredTasks[index],
-                onComplete: () =>
-                    _taskService.completeTask(_filteredTasks[index].id),
-                onDelete: () =>
-                    _taskService.deleteTask(_filteredTasks[index].id),
-              ),
+              itemBuilder: (context, index) {
+                final task = _filteredTasks[index];
+                return _TaskCard(
+                  task: task,
+                  onToggleComplete: () {
+                    if (task.status == TaskStatus.completed) {
+                      _taskService.editTask(
+                        task.edit(
+                          status: TaskStatus.pending,
+                          completedAt: null,
+                        ),
+                      );
+                    } else {
+                      _taskService.completeTask(task.id);
+                    }
+                  },
+                  onEdit: () => _showEditDialog(task),
+                  onDelete: () => _taskService.deleteTask(task.id),
+                );
+              },
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showCreateDialog,
@@ -385,16 +398,286 @@ class _TasksScreenState extends State<TasksScreen> {
       ),
     );
   }
+
+  void _showEditDialog(Task task) {
+    final titleController = TextEditingController(text: task.title);
+    final descController = TextEditingController(text: task.description ?? '');
+    final tagController = TextEditingController();
+    TaskPriority priority = task.priority;
+    TaskStatus status = task.status;
+    DateTime? dueDate = task.dueDate;
+    List<String> tags = List.from(task.tags);
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2E),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Padding(
+          padding: EdgeInsets.only(
+            left: 24,
+            right: 24,
+            top: 24,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Edit Task',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      setModalState(() {
+                        status = status == TaskStatus.completed
+                            ? TaskStatus.pending
+                            : TaskStatus.completed;
+                      });
+                    },
+                    icon: Icon(
+                      status == TaskStatus.completed
+                          ? Icons.undo
+                          : Icons.check_circle_outline,
+                      size: 18,
+                      color: status == TaskStatus.completed
+                          ? Colors.orange
+                          : Colors.green,
+                    ),
+                    label: Text(
+                      status == TaskStatus.completed ? 'Re-enable' : 'Complete',
+                      style: TextStyle(
+                        color: status == TaskStatus.completed
+                            ? Colors.orange
+                            : Colors.green,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: titleController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Task title',
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  filled: true,
+                  fillColor: const Color(0xFF0D0D1A),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: descController,
+                style: const TextStyle(color: Colors.white),
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'Description (optional)',
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  filled: true,
+                  fillColor: const Color(0xFF0D0D1A),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: tagController,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      onSubmitted: (value) {
+                        final tag = value.trim();
+                        if (tag.isNotEmpty && !tags.contains(tag)) {
+                          setModalState(() {
+                            tags = [...tags, tag];
+                            tagController.clear();
+                          });
+                        }
+                      },
+                      decoration: InputDecoration(
+                        hintText: 'Add tag...',
+                        hintStyle: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 13,
+                        ),
+                        filled: true,
+                        fillColor: const Color(0xFF0D0D1A),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () {
+                      final tag = tagController.text.trim();
+                      if (tag.isNotEmpty && !tags.contains(tag)) {
+                        setModalState(() {
+                          tags = [...tags, tag];
+                          tagController.clear();
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.add_circle_outline, size: 22),
+                    color: const Color(0xFF6C63FF),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+              if (tags.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: tags
+                      .map(
+                        (tag) => Chip(
+                          label: Text(
+                            tag,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          backgroundColor: const Color(0xFF6C63FF)
+                              .withValues(alpha: 0.15),
+                          labelStyle: const TextStyle(color: Color(0xFF6C63FF)),
+                          deleteIcon: const Icon(Icons.close, size: 14),
+                          onDeleted: () => setModalState(() {
+                            tags = tags.where((t) => t != tag).toList();
+                          }),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _PriorityChip(
+                    label: 'Low',
+                    color: Colors.green,
+                    selected: priority == TaskPriority.low,
+                    onTap: () =>
+                        setModalState(() => priority = TaskPriority.low),
+                  ),
+                  const SizedBox(width: 8),
+                  _PriorityChip(
+                    label: 'Med',
+                    color: Colors.orange,
+                    selected: priority == TaskPriority.medium,
+                    onTap: () =>
+                        setModalState(() => priority = TaskPriority.medium),
+                  ),
+                  const SizedBox(width: 8),
+                  _PriorityChip(
+                    label: 'High',
+                    color: Colors.red,
+                    selected: priority == TaskPriority.high,
+                    onTap: () =>
+                        setModalState(() => priority = TaskPriority.high),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: dueDate ?? DateTime.now(),
+                        firstDate: DateTime.now().subtract(
+                          const Duration(days: 365),
+                        ),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (picked != null) {
+                        setModalState(() => dueDate = picked);
+                      }
+                    },
+                    icon: const Icon(Icons.calendar_today, size: 16),
+                    label: Text(
+                      dueDate != null
+                          ? '${dueDate!.month}/${dueDate!.day}'
+                          : 'Due date',
+                      style: TextStyle(
+                        color: dueDate != null
+                            ? const Color(0xFF6C63FF)
+                            : Colors.grey[500],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () {
+                  if (titleController.text.isNotEmpty) {
+                    final updatedTask = task.edit(
+                      title: titleController.text.trim(),
+                      description: descController.text.trim().isEmpty
+                          ? null
+                          : descController.text.trim(),
+                      priority: priority,
+                      status: status,
+                      completedAt: status == TaskStatus.completed
+                          ? (task.completedAt ?? DateTime.now())
+                          : null,
+                      dueDate: dueDate,
+                      tags: tags,
+                    );
+                    _taskService.editTask(updatedTask);
+                    Navigator.pop(ctx);
+                  }
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF6C63FF),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text('Save Changes'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _TaskCard extends StatelessWidget {
   final Task task;
-  final VoidCallback onComplete;
+  final VoidCallback onToggleComplete;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _TaskCard({
     required this.task,
-    required this.onComplete,
+    required this.onToggleComplete,
+    required this.onEdit,
     required this.onDelete,
   });
 
@@ -405,12 +688,58 @@ class _TaskCard extends StatelessWidget {
 
     return Dismissible(
       key: Key(task.id),
-      onDismissed: (_) => onDelete(),
+      confirmDismiss: (direction) async {
+        if (direction == DismissDirection.endToStart) {
+          // Swipe left -> Delete
+          return true;
+        } else if (direction == DismissDirection.startToEnd) {
+          // Swipe right -> Edit task
+          onEdit();
+          return false;
+        }
+        return false;
+      },
+      onDismissed: (direction) {
+        if (direction == DismissDirection.endToStart) {
+          onDelete();
+        }
+      },
       background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 24),
+        color: const Color(0xFF6C63FF),
+        child: const Row(
+          children: [
+            Icon(Icons.edit, color: Colors.white),
+            SizedBox(width: 8),
+            Text(
+              'Edit',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+      secondaryBackground: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 24),
         color: Colors.red,
-        child: const Icon(Icons.delete, color: Colors.white),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text(
+              'Delete',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(width: 8),
+            Icon(Icons.delete, color: Colors.white),
+          ],
+        ),
       ),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -429,7 +758,7 @@ class _TaskCard extends StatelessWidget {
         child: Row(
           children: [
             GestureDetector(
-              onTap: isCompleted ? null : onComplete,
+              onTap: onToggleComplete,
               child: Container(
                 width: 24,
                 height: 24,
@@ -454,44 +783,48 @@ class _TaskCard extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    task.title,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      decoration: isCompleted
-                          ? TextDecoration.lineThrough
-                          : null,
-                    ),
-                  ),
-                  if (task.description != null &&
-                      task.description!.isNotEmpty) ...[
-                    const SizedBox(height: 4),
+              child: GestureDetector(
+                onTap: onEdit,
+                behavior: HitTestBehavior.opaque,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      task.description!,
-                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                  if (task.dueDate != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      '${task.dueDate!.year}-${task.dueDate!.month.toString().padLeft(2, '0')}-${task.dueDate!.day.toString().padLeft(2, '0')}',
+                      task.title,
                       style: TextStyle(
-                        fontSize: 11,
-                        color: isOverdue ? Colors.red : Colors.grey[600],
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        decoration: isCompleted
+                            ? TextDecoration.lineThrough
+                            : null,
                       ),
                     ),
+                    if (task.description != null &&
+                        task.description!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        task.description!,
+                        style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    if (task.dueDate != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '${task.dueDate!.year}-${task.dueDate!.month.toString().padLeft(2, '0')}-${task.dueDate!.day.toString().padLeft(2, '0')}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isOverdue ? Colors.red : Colors.grey[600],
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-            if (task.tags.isNotEmpty)
+            if (task.tags.isNotEmpty) ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
@@ -506,6 +839,19 @@ class _TaskCard extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+            ],
+            IconButton(
+              icon: const Icon(
+                Icons.edit_outlined,
+                size: 18,
+                color: Colors.grey,
+              ),
+              onPressed: onEdit,
+              tooltip: 'Edit task',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
           ],
         ),
       ),

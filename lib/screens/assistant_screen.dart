@@ -1653,10 +1653,7 @@ class _AssistantScreenState extends State<AssistantScreen>
 
   Future<void> _pickFile() async {
     try {
-      final result = await FilePicker.pickFiles(
-        allowMultiple: true,
-        type: FileType.any,
-      );
+      final result = await FilePicker.pickFiles(type: FileType.any);
 
       if (result == null || result.files.isEmpty) return;
 

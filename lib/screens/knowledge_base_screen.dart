@@ -57,8 +57,7 @@ class _KnowledgeBaseScreenState extends State<KnowledgeBaseScreen> {
         'css',
         'sql',
       ],
-      withData: false,
-    );
+          );
     if (result == null || result.files.isEmpty) return;
 
     final file = result.files.first;
@@ -294,3 +293,4 @@ class _KnowledgeBaseScreenState extends State<KnowledgeBaseScreen> {
     );
   }
 }
+

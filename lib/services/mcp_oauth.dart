@@ -81,7 +81,9 @@ class McpOAuthService {
         'redirect_uri': redirectUri,
         'code_challenge': codeChallenge,
         'code_challenge_method': 'S256',
+        // ignore: use_null_aware_elements
         if (scope != null && scope.isNotEmpty) 'scope': scope,
+        // ignore: use_null_aware_elements
         if (state != null) 'state': state,
       },
     );
@@ -115,6 +117,7 @@ class McpOAuthService {
         'redirect_uri': redirectUri,
         'code': code,
         'code_verifier': codeVerifier,
+        // ignore: use_null_aware_elements
         if (clientSecret != null) 'client_secret': clientSecret,
       };
       request.write(

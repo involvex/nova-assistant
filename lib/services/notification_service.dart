@@ -38,7 +38,7 @@ class NotificationService {
     const initSettings = InitializationSettings(android: androidSettings);
 
     await _plugin.initialize(
-      initSettings,
+      settings: initSettings,
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
@@ -91,11 +91,11 @@ class NotificationService {
         : NotificationAction.openTasks;
 
     await _plugin.zonedSchedule(
-      id,
-      title,
-      body,
-      tzDateTime,
-      NotificationDetails(
+      id: id,
+      title: title,
+      body: body,
+      scheduledDate: tzDateTime,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           'nova_task_reminders',
           'Task Reminders',
@@ -120,15 +120,13 @@ class NotificationService {
         ),
       ),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
       payload: payload,
     );
   }
 
   Future<void> cancelNotification(int id) async {
     if (!_initialized) return;
-    await _plugin.cancel(id);
+    await _plugin.cancel(id: id);
   }
 
   Future<void> cancelAllNotifications() async {

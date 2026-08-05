@@ -75,7 +75,9 @@ class McpPresetInstaller {
         'method': preset.httpMethod ?? 'POST',
         'headers': headers.join('\n'),
         'presetId': preset.id,
+        // ignore: use_null_aware_elements
         if (apiKey != null) 'apiKey': apiKey,
+        // ignore: use_null_aware_elements
         if (apiKeyBodyField != null) 'apiKeyBodyField': apiKeyBodyField,
       },
       enabled: true,

@@ -109,15 +109,14 @@ class SettingsBackupService {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['json'],
-      withData: true,
     );
     if (result == null || result.files.isEmpty) {
       return SettingsImportResult.cancelled();
     }
 
     final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) {
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty) {
       return SettingsImportResult.failure('Could not read the selected file.');
     }
 

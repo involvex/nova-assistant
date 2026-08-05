@@ -259,6 +259,7 @@ class McpClient {
       config.command!,
       config.args,
       environment: {
+        // ignore: use_null_aware_elements
         if (_resolvedToken != null) 'MCP_AUTH_TOKEN': _resolvedToken!,
       },
     );

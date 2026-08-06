@@ -37,6 +37,21 @@ class ChatMessage {
     this.isPinned = false,
   });
 
+  List<Map<String, dynamic>>? _parsedToolCalls;
+
+  List<Map<String, dynamic>>? get parsedToolCalls {
+    if (toolCalls == null || toolCalls!.isEmpty) return null;
+    if (_parsedToolCalls != null) return _parsedToolCalls;
+    try {
+      _parsedToolCalls = (jsonDecode(toolCalls!) as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+    } on FormatException {
+      _parsedToolCalls = null;
+    }
+
+    return _parsedToolCalls;
+  }
+
   ChatMessage copyWith({
     String? id,
     String? text,
@@ -53,7 +68,9 @@ class ChatMessage {
     Map<String, int>? reactions,
     bool? isPinned,
   }) {
-    return ChatMessage(
+    final hasNewToolCalls = toolCalls != null && toolCalls != this.toolCalls;
+
+    final result = ChatMessage(
       id: id ?? this.id,
       text: text ?? this.text,
       isUser: isUser ?? this.isUser,
@@ -69,6 +86,13 @@ class ChatMessage {
       reactions: reactions ?? this.reactions,
       isPinned: isPinned ?? this.isPinned,
     );
+    if (hasNewToolCalls) {
+      result._parsedToolCalls = null;
+    } else {
+      result._parsedToolCalls = _parsedToolCalls;
+    }
+
+    return result;
   }
 
   Map<String, dynamic> toJson() => {

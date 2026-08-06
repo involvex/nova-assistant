@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/chat_bubble_theme.dart';
 import 'package:nova_assistant/models/chat_message.dart';
@@ -335,14 +333,8 @@ class ChatBubble extends StatelessWidget {
   }
 
   Widget _buildToolCalls() {
-    List<dynamic> calls;
-    try {
-      calls = jsonDecode(message.toolCalls!) as List<dynamic>;
-    } on FormatException {
-      return const SizedBox.shrink();
-    }
-
-    if (calls.isEmpty) return const SizedBox.shrink();
+    final calls = message.parsedToolCalls;
+    if (calls == null || calls.isEmpty) return const SizedBox.shrink();
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),

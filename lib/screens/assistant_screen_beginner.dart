@@ -140,7 +140,7 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
 
         accumulated = result.text;
 
-        final idx = _messages.indexWhere((m) => m.id == assistantId);
+        final idx = _messages.lastIndexWhere((m) => m.id == assistantId);
         if (idx != -1) {
           setState(() {
             _messages[idx] = _messages[idx].copyWith(
@@ -160,7 +160,7 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
         }
       }
     } catch (e) {
-      final idx = _messages.indexWhere((m) => m.id == assistantId);
+      final idx = _messages.lastIndexWhere((m) => m.id == assistantId);
       if (idx != -1) {
         String errorText;
         errorText = e is ModelException
@@ -195,7 +195,7 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
       _messages.removeRange(assistantIndex, _messages.length);
     });
     ModelOrchestrator.instance.invalidateSessionForReplay(
-      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+      _messages.where((m) => !m.isStreaming).toList(),
     );
 
     // Re-send the user message

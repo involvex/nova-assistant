@@ -188,7 +188,9 @@ class _AssistantScreenState extends State<AssistantScreen>
         });
         ConversationSummaryService.instance.activeSummary =
             conversation.summary;
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _scrollToBottom(force: true),
+        );
       }
     } else {
       final history = await ChatHistoryService.load();
@@ -197,7 +199,9 @@ class _AssistantScreenState extends State<AssistantScreen>
           _messages.addAll(history);
           _refreshLocalContextBudget();
         });
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _scrollToBottom(force: true),
+        );
       } else if (mounted) {
         // Empty main chat — drop any leftover summary from a prior session.
         ConversationSummaryService.instance.activeSummary = null;
@@ -1085,14 +1089,19 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
   }
 
-  void _scrollToBottom() {
+  void _scrollToBottom({bool force = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        final currentScroll = _scrollController.position.pixels;
+
+        if (force || (maxScroll - currentScroll) < 120.0) {
+          _scrollController.animateTo(
+            maxScroll,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
       }
     });
   }
@@ -1113,7 +1122,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       _messages.removeRange(errorIndex, _messages.length);
     });
     ModelOrchestrator.instance.invalidateSessionForReplay(
-      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+      _messages.where((m) => !m.isStreaming).toList(),
     );
 
     // Re-send
@@ -1137,7 +1146,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       _messages.removeRange(assistantIndex, _messages.length);
     });
     ModelOrchestrator.instance.invalidateSessionForReplay(
-      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+      _messages.where((m) => !m.isStreaming).toList(),
     );
 
     // Re-send the user message
@@ -1194,7 +1203,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       _messages.removeRange(userIndex, _messages.length);
     });
     ModelOrchestrator.instance.invalidateSessionForReplay(
-      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+      _messages.where((m) => !m.isStreaming).toList(),
     );
     // #region agent log
     unawaited(
@@ -1307,9 +1316,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     await ModelOrchestrator.instance.stopGeneration();
     WakelockPlus.disable();
     // Avoid reusing a half-written MediaPipe session after cancel.
-    ModelOrchestrator.instance.invalidateSessionForReplay(
-      List<ChatMessage>.from(_messages),
-    );
+    ModelOrchestrator.instance.invalidateSessionForReplay(_messages.toList());
     if (!mounted) return;
     final idx = _messages.lastIndexWhere((m) => !m.isUser);
     if (idx != -1) {
@@ -1398,7 +1405,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
 
     ModelOrchestrator.instance.setPendingReplayMessages(
-      List<ChatMessage>.from(_messages.where((m) => !m.isStreaming)),
+      _messages.where((m) => !m.isStreaming).toList(),
     );
 
     _inputController.clear();
@@ -1468,7 +1475,7 @@ class _AssistantScreenState extends State<AssistantScreen>
 
         accumulated = result.text;
 
-        final idx = _messages.indexWhere((m) => m.id == assistantId);
+        final idx = _messages.lastIndexWhere((m) => m.id == assistantId);
         if (idx != -1) {
           final prior = _messages[idx];
           // After Stop, keep wasCancelled and do not replace with empty /
@@ -1502,7 +1509,7 @@ class _AssistantScreenState extends State<AssistantScreen>
               );
             });
           }
-          _scrollToBottom();
+          _scrollToBottom(force: true);
         }
       }
     } catch (e) {

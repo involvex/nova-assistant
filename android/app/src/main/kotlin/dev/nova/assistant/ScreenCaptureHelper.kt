@@ -50,7 +50,9 @@ object ScreenCaptureHelper {
                     var frame = _latestFrame
                     if (frame == null) {
                         frame = AssistantActivity.latestScreenshot
+                        AssistantActivity.latestScreenshot = null
                     }
+                    _latestFrame = null
                     if (frame != null) {
                         Log.d(TAG, "Returning screenshot: ${frame.size} bytes")
                         result.success(frame)
@@ -59,6 +61,11 @@ object ScreenCaptureHelper {
                     }
                 }
                 "isCapturing" -> result.success(isCapturing)
+                "wasLaunchedFromSystemAssistant" -> {
+                    val launched = AssistantActivity.isSystemAssistantLaunch
+                    AssistantActivity.isSystemAssistantLaunch = false // consume the flag
+                    result.success(launched)
+                }
                 "requestCapture" -> {
                     if (mediaProjection != null) {
                         // Force a fresh frame even if one is already cached

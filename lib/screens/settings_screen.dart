@@ -56,6 +56,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _ragMemory = false;
   bool _batteryOptimization = true;
   bool _keepModelWarm = true;
+  bool _prewarmModel = false;
   bool _batteryAwareSwitching = true;
   bool _highContext = false;
   bool _autoCompact = true;
@@ -124,6 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _batteryOptimization =
             prefs.getBool('settings_battery_optimization') ?? true;
         _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
+        _prewarmModel = prefs.getBool('settings_prewarm_model') ?? false;
         _batteryAwareSwitching =
             prefs.getBool('settings_battery_aware_switching') ?? true;
         _highContext =
@@ -950,6 +952,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
           setState(() => _keepModelWarm = v);
           await _saveSetting('settings_keep_model_warm', v);
           ModelOrchestrator.instance.setKeepModelWarm(v);
+        },
+      ),
+      _toggleTile(
+        icon: Icons.flash_on_outlined,
+        title: 'Pre-warm model at startup',
+        subtitle:
+            'Load the default model in background when the app starts '
+            'so the first response is faster. Uses more RAM at launch.',
+        value: _prewarmModel,
+        onChanged: (v) async {
+          setState(() => _prewarmModel = v);
+          await _saveSetting('settings_prewarm_model', v);
         },
       ),
       _toggleTile(

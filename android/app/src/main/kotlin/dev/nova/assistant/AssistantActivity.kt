@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import io.flutter.embedding.android.FlutterActivity
 import java.io.File
 import java.io.FileOutputStream
 
@@ -12,12 +11,13 @@ import java.io.FileOutputStream
  * AssistantActivity — Nova's entry point when the user triggers the system
  * assistant button (long-press home/gesture or power button).
  *
- * Receives the ASSIST intent, captures the current screen, and passes
- * the screenshot + text to the main Flutter app for inference.
+ * This is a lightweight transparent Activity — NOT a FlutterActivity.
+ * It shows no Flutter UI so the screenshot captures the previous app,
+ * not Nova's own chat UI. After capturing, it launches MainActivity.
  *
  * Screenshot is written to a temp file to avoid Binder transaction size limits.
  */
-class AssistantActivity : FlutterActivity() {
+class AssistantActivity : Activity() {
     private val TAG = "NovaAssistant"
 
     companion object {
@@ -29,6 +29,9 @@ class AssistantActivity : FlutterActivity() {
         var latestScreenshot: ByteArray? = null
         var latestScreenText: String? = null
         var latestTimestamp: Long = 0L
+
+        /** Set to true when MainActivity starts with a screenshot from a system assistant trigger. */
+        var isSystemAssistantLaunch: Boolean = false
     }
 
     private var launchScheduled = false

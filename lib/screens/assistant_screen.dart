@@ -12,6 +12,7 @@ import 'package:nova_assistant/models/chat_bubble_theme.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
+import 'package:nova_assistant/services/audio_recorder_service.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
 import 'package:nova_assistant/services/export_service.dart';
@@ -45,12 +46,14 @@ class AssistantScreen extends StatefulWidget {
   final String? conversationId;
   final String? initialPrompt;
   final bool autoSendInitialPrompt;
+  final bool isSystemAssistantLaunch;
 
   const AssistantScreen({
     super.key,
     this.conversationId,
     this.initialPrompt,
     this.autoSendInitialPrompt = true,
+    this.isSystemAssistantLaunch = false,
   });
 
   @override
@@ -84,6 +87,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _suggestionReroll = false;
   int _suggestionRequestId = 0;
   bool _memoryWarningShown = false;
+  bool _autoSendFromAssistantTrigger = false;
   bool _debugMode = false;
   int? _debugMemoryMb;
   Timer? _memoryPollTimer;
@@ -94,6 +98,8 @@ class _AssistantScreenState extends State<AssistantScreen>
   int _currentSearchMatch = 0;
   List<int> _searchMatchIndices = [];
   ChatBubbleTheme _chatTheme = ChatBubbleTheme.defaultTheme;
+  RecordingState _recordingState = RecordingState.idle;
+  StreamSubscription<RecordingState>? _recordingStateSub;
 
   @override
   void initState() {
@@ -112,6 +118,13 @@ class _AssistantScreenState extends State<AssistantScreen>
     _requestPermissions();
     _listenToModelStatus();
     _checkModelAvailability();
+    _recordingStateSub = AudioRecorderService.instance.onStateChanged.listen((
+      state,
+    ) {
+      if (mounted) {
+        setState(() => _recordingState = state);
+      }
+    });
     _historyClearedSub = ModelOrchestrator.instance.historyClearedStream.listen(
       (_) {
         if (mounted) {
@@ -243,7 +256,24 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _requestPermissions() async {
-    await [Permission.microphone, Permission.photos].request();
+    final micStatus = await Permission.microphone.request();
+    if (micStatus.isDenied || micStatus.isPermanentlyDenied) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            micStatus.isPermanentlyDenied
+                ? 'Microphone permission denied permanently. Enable in Settings.'
+                : 'Microphone permission needed for voice input.',
+          ),
+          action: SnackBarAction(
+            label: 'Settings',
+            onPressed: () => openAppSettings(),
+          ),
+        ),
+      );
+    }
+    await Permission.photos.request();
   }
 
   void _listenToModelStatus() {
@@ -907,6 +937,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     _contextBudgetSub?.cancel();
     _memoryPollTimer?.cancel();
     _saveDebounceTimer?.cancel();
+    _recordingStateSub?.cancel();
     WakelockPlus.disable();
     if (_screenshotLoadedCompleter != null &&
         !_screenshotLoadedCompleter!.isCompleted) {
@@ -963,25 +994,94 @@ class _AssistantScreenState extends State<AssistantScreen>
       }
     } else if (state == AppLifecycleState.resumed) {
       _checkModelAvailability();
+      _detectModelEviction();
     }
+  }
+
+  Future<void> _detectModelEviction() async {
+    final orch = ModelOrchestrator.instance;
+    // Only check if model was previously loaded and keep-warm is enabled
+    if (!orch.keepModelWarm || orch.isModelLoaded) return;
+    // Check if a model should be loaded but was evicted (e.g. by HyperOS)
+    final prefs = await SharedPreferences.getInstance();
+    final hadModel = prefs.getString('settings_preferred_model_override');
+    if (hadModel == null || hadModel == 'none') return;
+    // Model was expected but not loaded — show eviction notice
+    if (!mounted) return;
+    final ignoringOptimizations = await orch.isIgnoringBatteryOptimizations();
+    if (!ignoringOptimizations) {
+      _showBatteryOptimizationGuide();
+    }
+  }
+
+  void _showBatteryOptimizationGuide() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Keep Nova Responsive'),
+        content: const Text(
+          'Your device may be stopping Nova in the background, '
+          'causing the AI model to reload.\n\n'
+          'To fix this: Open Settings → Apps → Nova → '
+          'Battery → "No restrictions".\n\n'
+          'On Xiaomi/Poco: also disable "Pause app activity if unused".',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadInitialScreenshot() async {
     _screenshotLoadedCompleter = Completer<void>();
     _isLoadingInitialScreenshot = true;
     try {
-      final screenshot = await ScreenshotService.instance.getLatestScreenshot();
+      // Fetch screenshot and assistant-launch flag in parallel
+      final results = await Future.wait([
+        ScreenshotService.instance.getLatestScreenshot(),
+        ScreenshotService.instance.wasLaunchedFromSystemAssistant(),
+      ]);
+      final screenshot = results[0] as Uint8List?;
+      final isAssistantLaunch =
+          (results[1] as bool?) ?? false || widget.isSystemAssistantLaunch;
+
       if (mounted) {
         setState(() {
           _currentScreenshot = screenshot;
           _isLoadingInitialScreenshot = false;
         });
+        // Screenshot came from system assistant trigger — auto-send with context.
+        // Only auto-send when the screen was actually opened via the system assistant
+        // (not on regular "New Chat" where a stale cached screenshot might linger).
+        if (screenshot != null && _messages.isEmpty && isAssistantLaunch) {
+          _autoSendFromAssistantTrigger = true;
+        }
       }
     } finally {
       if (mounted) {
         setState(() => _isLoadingInitialScreenshot = false);
       }
       _screenshotLoadedCompleter?.complete();
+    }
+    // Auto-send when triggered via system assistant button with a fresh screenshot
+    if (_autoSendFromAssistantTrigger && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_autoSendFromAssistantTrigger) return;
+        _autoSendFromAssistantTrigger = false;
+        _inputController.text = 'What\'s on my screen?';
+        _sendMessage();
+      });
     }
   }
 
@@ -1947,7 +2047,10 @@ class _AssistantScreenState extends State<AssistantScreen>
               ],
             ),
             if (_debugMode) _buildDebugBanner(),
-            if (isLoadingModel) _buildModelLoadingOverlay(),
+            if (isLoadingModel)
+              _buildModelLoadingOverlay()
+            else if (ModelOrchestrator.instance.isPreparingChat)
+              _buildChatPrepOverlay(),
             if (_showSearch)
               Positioned(
                 top: 0,
@@ -1993,6 +2096,39 @@ class _AssistantScreenState extends State<AssistantScreen>
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatPrepOverlay() {
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF6C63FF),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                _status,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+            ],
           ),
         ),
       ),
@@ -2758,6 +2894,67 @@ class _AssistantScreenState extends State<AssistantScreen>
     );
   }
 
+  void _toggleRecording() {
+    final svc = AudioRecorderService.instance;
+    if (svc.isRecording) {
+      svc.stopRecording();
+    } else if (_recordingState == RecordingState.paused) {
+      svc.stopRecording();
+    } else {
+      svc.startRecording();
+    }
+  }
+
+  Widget _buildRecordButton() {
+    final isRec = _recordingState == RecordingState.recording;
+    final isPaused = _recordingState == RecordingState.paused;
+    final isActive = isRec || isPaused;
+
+    if (isActive) {
+      return GestureDetector(
+        onTap: _toggleRecording,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.redAccent.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isRec ? Colors.redAccent : Colors.orangeAccent,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                AudioRecorderService.instance.formattedDuration,
+                style: const TextStyle(
+                  color: Colors.redAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.stop, color: Colors.redAccent, size: 18),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return IconButton(
+      onPressed: _toggleRecording,
+      icon: const Icon(Icons.mic_outlined, color: Colors.grey),
+      tooltip: 'Record audio',
+    );
+  }
+
   Widget _buildInputBar() {
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: _inputController,
@@ -2924,6 +3121,8 @@ class _AssistantScreenState extends State<AssistantScreen>
                       unawaited(_sendMessage());
                     },
                   ),
+                  const SizedBox(width: 8),
+                  _buildRecordButton(),
                   const SizedBox(width: 8),
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),

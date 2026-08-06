@@ -3,7 +3,7 @@
 
     <!-- Screen capture permission (system consent dialog) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -103,11 +103,12 @@
             </intent-filter>
         </activity>
 
-        <!-- Assistant Activity — triggered by system assistant button -->
+        <!-- Trampoline activity that captures the screen before opening main app.
+             Transparent — no Flutter UI, so the screenshot shows the previous app. -->
         <activity
             android:name=".AssistantActivity"
             android:exported="true"
-            android:theme="@style/LaunchTheme"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard"
             android:launchMode="singleTask"
             android:taskAffinity=""
@@ -136,7 +137,11 @@
             android:name=".ModelService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the Gemma AI model loaded in memory for instant responses when the assistant button is pressed" />
+        </service>
 
         <!-- Required on Android 14+ before creating a MediaProjection -->
         <service

@@ -148,6 +148,7 @@ class ModelOrchestrator {
   InferenceModel? _activeModel;
   InferenceChat? _activeChat;
   NovaModel? _activeModelType;
+  int? _activeModelMaxTokens;
   bool _activeModelSupportsImage = false;
   NovaModel? _preferredModelOverride;
   CustomModel? _preferredCustomModelOverride;
@@ -206,6 +207,10 @@ class ModelOrchestrator {
 
   /// Whether an inference stream is currently active.
   bool get isStreaming => _isStreaming;
+
+  /// Whether the chat session is being recreated (model stays loaded).
+  bool get isPreparingChat =>
+      !_isLoadingModel && _activeModel != null && _activeChat == null;
 
   /// Whether the native engine is being loaded / compiled (GPU init).
   bool get isLoadingModel => _isLoadingModel;
@@ -380,6 +385,7 @@ class ModelOrchestrator {
       );
       // _lastChatSessionKey will be reassigned on the next processMessage
       // pass; leave it null so the caller treats this as a fresh session.
+      _pendingReplay = const [];
       return true;
     } on Exception catch (e) {
       debugPrint('Auto-compact chat rebuild failed: $e');
@@ -565,6 +571,7 @@ class ModelOrchestrator {
     } catch (_) {}
     _activeModel = null;
     _activeModelType = null;
+    _activeModelMaxTokens = null;
     _activeModelSupportsImage = false;
     await _clearActiveInferenceIdentity();
   }
@@ -664,16 +671,16 @@ class ModelOrchestrator {
 
     // maxTokens is baked into the loaded LiteRT engine — reload when KV tier
     // changes (high-context toggle or RAM cache becoming available).
+    // Defer the actual engine close to the next sendMessage so the user can
+    // toggle the setting without waiting 30-120s for a same-model cold reload.
     if (highContextChanged && _isInitialized) {
       _activeChat = null;
       _lastChatSessionKey = null;
-      try {
-        await _activeModel?.close();
-      } catch (_) {}
-      _activeModel = null;
-      _activeModelType = null;
-      _isInitialized = false;
-      await _clearActiveInferenceIdentity();
+      // Stale model will be detected by _getOrCreateModel via the
+      // _activeModelMaxTokens cache check and reloaded on next use.
+      _statusController.add(
+        'High-context updated; model recompiles on next query',
+      );
     }
   }
 
@@ -708,6 +715,59 @@ class ModelOrchestrator {
     _idleTimer = Timer(_idleTimeout, () {
       unawaited(_releaseIdleResources());
     });
+  }
+
+  void _startModelKeepAlive(String modelName) {
+    if (kIsWeb) return;
+    if (!_canAccessPlatformChannel()) return;
+    const channel = MethodChannel('dev.nova.assistant/model_service');
+    channel
+        .invokeMethod<bool>('start', {'modelName': modelName})
+        .catchError((_) => false);
+  }
+
+  void _stopModelKeepAlive() {
+    if (kIsWeb) return;
+    if (!_canAccessPlatformChannel()) return;
+    const channel = MethodChannel('dev.nova.assistant/model_service');
+    channel.invokeMethod<bool>('stop').catchError((_) => false);
+  }
+
+  bool _canAccessPlatformChannel() {
+    try {
+      return defaultTargetPlatform == TargetPlatform.android;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> isModelServiceRunning() async {
+    if (kIsWeb) return false;
+    if (!_canAccessPlatformChannel()) return false;
+    try {
+      const channel = MethodChannel('dev.nova.assistant/model_service');
+      return await channel.invokeMethod<bool>('isRunning') ?? false;
+    } catch (e) {
+      debugPrint('Failed to check model service: $e');
+
+      return false;
+    }
+  }
+
+  Future<bool> isIgnoringBatteryOptimizations() async {
+    if (kIsWeb) return false;
+    if (!_canAccessPlatformChannel()) return false;
+    try {
+      const channel = MethodChannel('dev.nova.assistant/model_service');
+      return await channel.invokeMethod<bool>(
+            'isIgnoringBatteryOptimizations',
+          ) ??
+          true;
+    } catch (e) {
+      debugPrint('Failed to check battery optimization: $e');
+
+      return true;
+    }
   }
 
   Future<void> _releaseIdleResources() async {
@@ -785,8 +845,10 @@ class ModelOrchestrator {
       }
       _activeModel = null;
       _activeModelType = null;
+      _activeModelMaxTokens = null;
       _activeModelSupportsImage = false;
       await _clearActiveInferenceIdentity();
+      _stopModelKeepAlive();
 
       // #region agent log
       await AgentDebugLog.log(
@@ -870,9 +932,11 @@ class ModelOrchestrator {
     }
     _activeModel = null;
     _activeModelType = null;
+    _activeModelMaxTokens = null;
     _activeModelSupportsImage = false;
     _activeChat = null;
     _isInitialized = false;
+    _stopModelKeepAlive();
     await _clearActiveInferenceIdentity();
   }
 
@@ -1219,11 +1283,27 @@ class ModelOrchestrator {
     // flutter_gemma's singleton then ignored a later supportImage:true.
     final needsImageSupport = model.hasVision;
 
-    // Return cached model if same type AND image support setting matches
+    // Return cached model if same type, image support, AND token limit match
     if (_activeModel != null &&
         _activeModelType == model &&
         _activeModelSupportsImage == needsImageSupport) {
-      return _activeModel!;
+      final currentLimit = _tokenLimitFor(model);
+      if (_activeModelMaxTokens != null &&
+          _activeModelMaxTokens != currentLimit) {
+        // maxTokens changed (e.g. high-context toggle) — force reload
+        debugPrint(
+          'maxTokens changed $_activeModelMaxTokens→$currentLimit, reloading...',
+        );
+        try {
+          await _activeModel!.close();
+        } catch (_) {}
+        _activeModel = null;
+        _activeModelType = null;
+        _activeModelSupportsImage = false;
+        _activeModelMaxTokens = null;
+      } else {
+        return _activeModel!;
+      }
     }
 
     // Free-RAM hard gate before a cold load of heavy models (Android).
@@ -1399,8 +1479,10 @@ class ModelOrchestrator {
             );
             _activeModelType = modelToLoad;
             _activeModelSupportsImage = supportImage;
+            _activeModelMaxTokens = _tokenLimitFor(modelToLoad);
             _isInitialized = true;
             _statusController.add('${modelToLoad.displayName} ready');
+            _startModelKeepAlive(modelToLoad.displayName);
             _resetIdleTimer();
             return _activeModel!;
           }
@@ -2962,6 +3044,7 @@ class ModelOrchestrator {
                         },
                       ),
                     );
+                    executedToolSignatures.add(signature);
                     hasPendingToolCalls = true;
                     continue;
                   }
@@ -3073,6 +3156,7 @@ class ModelOrchestrator {
                     },
                   ),
                 );
+                executedToolSignatures.add(signature);
                 hasPendingToolCalls = true;
                 continue;
               }
@@ -3734,7 +3818,6 @@ class ModelOrchestrator {
     _lastChatSessionKey = null;
     _pendingReplay = const [];
     _lastReplaySource = const [];
-    _activeModelSupportsImage = false;
     ConversationSummaryService.instance.activeSummary = null;
     // Keep preferred / custom model pinned across history wipe.
     await ChatHistoryService.clear();
@@ -3750,10 +3833,12 @@ class ModelOrchestrator {
     _activeModel = null;
     _activeChat = null;
     _activeModelType = null;
+    _activeModelMaxTokens = null;
     _activeModelSupportsImage = false;
     _isInitialized = false;
     _idleTimer?.cancel();
     _idleTimer = null;
+    _stopModelKeepAlive();
     await _clearActiveInferenceIdentity();
     await _statusController.close();
     await _historyClearedController.close();
@@ -3794,5 +3879,30 @@ class ModelOrchestrator {
     _cachedRole = AssistantRole.fromString(roleName);
     _cachedIdentity = await IdentityService.getIdentity();
     await instance._loadRuntimeSettings(invalidateChatOnAdultChange: true);
+  }
+
+  /// Pre-warms the default model at app startup (opt-in via settings).
+  /// Loads the model into memory so the first response is instant.
+  /// Does not create a chat session — that happens on first message.
+  static Future<void> warmUpDefaultModel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final enabled = prefs.getBool('settings_prewarm_model') ?? false;
+    if (!enabled) return;
+
+    final orch = instance;
+    if (orch._activeModel != null) return;
+
+    final defaultModel = orch.preferredModelType ?? NovaModel.gemma4E2b;
+
+    if (kIsWeb) return;
+
+    try {
+      debugPrint('Pre-warming model: ${defaultModel.displayName}');
+      await orch._getOrCreateModel(defaultModel);
+      debugPrint('Pre-warmed: ${defaultModel.displayName}');
+      orch._startModelKeepAlive(defaultModel.displayName);
+    } catch (e) {
+      debugPrint('Pre-warm failed (non-critical): $e');
+    }
   }
 }

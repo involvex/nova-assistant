@@ -72,6 +72,23 @@ class ScreenshotService {
     return DateTime.now().difference(_lastCapture!).inSeconds < 5;
   }
 
+  /// Returns true iff this cold-start was triggered by the system assistant
+  /// button. Consumes the flag on first read — subsequent calls return false.
+  Future<bool> wasLaunchedFromSystemAssistant() async {
+    try {
+      return await _channel.invokeMethod<bool>(
+            'wasLaunchedFromSystemAssistant',
+          ) ??
+          false;
+    } on MissingPluginException {
+      return false;
+    } catch (e) {
+      debugPrint('ScreenshotService: failed to check assistant launch — $e');
+
+      return false;
+    }
+  }
+
   void clearCache() {
     _cachedScreenshot = null;
     _lastCapture = null;

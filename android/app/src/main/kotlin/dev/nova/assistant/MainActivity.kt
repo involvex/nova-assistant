@@ -6,6 +6,7 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
@@ -172,6 +173,28 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.nova.assistant/model_service")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "start" -> {
+                        val modelName = call.argument<String>("modelName") ?: "Nova"
+                        startModelService(modelName)
+                        result.success(true)
+                    }
+                    "stop" -> {
+                        stopModelService()
+                        result.success(true)
+                    }
+                    "isRunning" -> {
+                        result.success(ModelService.isRunning)
+                    }
+                    "isIgnoringBatteryOptimizations" -> {
+                        result.success(isIgnoringBatteryOptimizations())
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -291,6 +314,32 @@ class MainActivity : FlutterActivity() {
         return result
     }
 
+    private fun startModelService(modelName: String) {
+        val intent = Intent(this, ModelService::class.java).apply {
+            putExtra("modelName", modelName)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        Log.d("NovaMain", "ModelService started for $modelName")
+    }
+
+    private fun stopModelService() {
+        val intent = Intent(this, ModelService::class.java)
+        stopService(intent)
+        Log.d("NovaMain", "ModelService stopped")
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            return powerManager.isIgnoringBatteryOptimizations(packageName)
+        }
+        return true
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -310,6 +359,7 @@ class MainActivity : FlutterActivity() {
             Log.d("NovaMain", "onCreate: screenshotPath=$screenshotPath, screenText=$screenText, timestamp=$timestamp")
 
             if (screenshotPath != null) {
+                AssistantActivity.isSystemAssistantLaunch = true
                 val file = File(screenshotPath)
                 if (file.exists()) {
                     try {

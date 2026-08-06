@@ -498,6 +498,7 @@ class _AppLoaderState extends State<AppLoader> {
         _isLoading = false;
       });
     }
+    unawaited(ModelOrchestrator.warmUpDefaultModel());
   }
 
   @override

@@ -27,6 +27,8 @@ class NovaTools {
     createNote,
     searchNotes,
     listNotes,
+    startAudioRecording,
+    stopAudioRecording,
   ];
 
   static final Tool getTime = Tool(
@@ -336,6 +338,30 @@ class NovaTools {
   static final Tool listNotes = Tool(
     name: 'list_notes',
     description: 'List recent or pinned notes.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{},
+    },
+  );
+
+  static final Tool startAudioRecording = Tool(
+    name: 'start_audio_recording',
+    description:
+        'Start recording audio from the microphone. '
+        'Use this when the user asks to record audio, capture sound, '
+        'or take a voice note.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{},
+    },
+  );
+
+  static final Tool stopAudioRecording = Tool(
+    name: 'stop_audio_recording',
+    description:
+        'Stop the current audio recording and save the file. '
+        'Use this after start_audio_recording or when the user asks '
+        'to stop or finish recording.',
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},

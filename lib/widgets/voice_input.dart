@@ -1,13 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 class VoiceInputButton extends StatefulWidget {
-  /// Called once when listening ends with the full transcript.
   final void Function(String transcription) onTranscription;
 
-  /// Optional live preview while the user is still speaking.
   final void Function(String partial)? onPartial;
 
   const VoiceInputButton({
@@ -27,6 +26,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
   bool _isListening = false;
   bool _speechAvailable = false;
   bool _isInitializing = true;
+  String _initError = '';
   String _lastWords = '';
   bool _isPressed = false;
   bool _flushing = false;
@@ -44,10 +44,21 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
   Future<void> _initSpeech() async {
     if (!_isInitializing) setState(() => _isInitializing = true);
     try {
+      final hasPermission = await Permission.microphone.isGranted;
+      if (!hasPermission) {
+        if (mounted) {
+          setState(() {
+            _speechAvailable = false;
+            _initError = 'Microphone permission required';
+            _isInitializing = false;
+          });
+        }
+        return;
+      }
+
       _speechAvailable = await _speech.initialize(
         onStatus: (status) {
           debugPrint('Speech status: $status');
-          // Engine may auto-stop after pauseFor — flush full transcript once.
           final ended = status == 'done' || status == 'notListening';
           if (ended && _isListening) {
             unawaited(_finishListening());
@@ -65,8 +76,19 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
           }
         },
       );
+
+      if (!_speechAvailable && mounted) {
+        setState(() {
+          _initError =
+              'Speech recognition unavailable. '
+              'Install Google Speech Services from Play Store.';
+        });
+      }
     } catch (e) {
       debugPrint('Speech init failed: $e');
+      if (mounted) {
+        setState(() => _initError = 'Speech services error');
+      }
     } finally {
       if (mounted) setState(() => _isInitializing = false);
     }
@@ -116,14 +138,27 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
 
   Future<void> _startListening() async {
     if (!_speechAvailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Speech recognition not available. Check microphone permission.',
+      if (_initError.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_initError),
+            duration: const Duration(seconds: 4),
+            action: _initError.contains('permission')
+                ? SnackBarAction(
+                    label: 'Settings',
+                    onPressed: () => openAppSettings(),
+                  )
+                : null,
           ),
-          duration: Duration(seconds: 2),
-        ),
-      );
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Speech recognition not available.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
 
       return;
     }
@@ -133,9 +168,6 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
 
     await _speech.listen(
       onResult: (result) {
-        // Accumulate partial + final segments; never auto-send mid-listen.
-        // Early finalResult after pauseFor was sending ~20% then leaving the
-        // rest stuck in the input while _isGenerating blocked a second send.
         _lastWords = result.recognizedWords;
         widget.onPartial?.call(_lastWords);
       },

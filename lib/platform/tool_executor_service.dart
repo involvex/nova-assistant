@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:nova_assistant/models/tool_progress.dart';
+import 'package:nova_assistant/services/audio_recorder_service.dart';
 import 'package:nova_assistant/services/shizuku_service.dart';
 
 class ToolExecutorService {
@@ -40,6 +41,38 @@ class ToolExecutorService {
       return ShizukuService.instance.forceStopApp(pkg);
     }
 
+    return switch (toolName) {
+      'start_audio_recording' => _executeStartRecording(),
+      'stop_audio_recording' => _executeStopRecording(),
+      _ => _invokePlatformChannel(toolName, args),
+    };
+  }
+
+  Future<Map<String, dynamic>> _executeStartRecording() async {
+    final path = await AudioRecorderService.instance.startRecording();
+    if (path != null) {
+      return {'success': true, 'result': 'Recording started', 'path': path};
+    }
+    return {'success': false, 'error': 'Failed to start recording'};
+  }
+
+  Future<Map<String, dynamic>> _executeStopRecording() async {
+    final path = await AudioRecorderService.instance.stopRecording();
+    if (path != null) {
+      return {
+        'success': true,
+        'result': 'Recording saved',
+        'path': path,
+        'duration': AudioRecorderService.instance.formattedDuration,
+      };
+    }
+    return {'success': false, 'error': 'No active recording to stop'};
+  }
+
+  Future<Map<String, dynamic>> _invokePlatformChannel(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
     try {
       final result = await _channel.invokeMethod(toolName, args);
       if (result is Map) {

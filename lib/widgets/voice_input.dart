@@ -37,7 +37,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
-    )..repeat(reverse: true);
+    );
     _initSpeech();
   }
 
@@ -124,6 +124,9 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
     if (_flushing) return;
     _flushing = true;
     try {
+      _animController
+        ..stop()
+        ..reset();
       await _speech.stop();
       if (mounted) setState(() => _isListening = false);
       final transcript = _lastWords.trim();
@@ -164,6 +167,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
     }
 
     _lastWords = '';
+    _animController.repeat(reverse: true);
     setState(() => _isListening = true);
 
     await _speech.listen(

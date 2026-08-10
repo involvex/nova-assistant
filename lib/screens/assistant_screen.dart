@@ -1089,18 +1089,22 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
   }
 
-  void _scrollToBottom({bool force = false}) {
+  void _scrollToBottom({bool force = false, bool useJump = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         final maxScroll = _scrollController.position.maxScrollExtent;
         final currentScroll = _scrollController.position.pixels;
 
         if (force || (maxScroll - currentScroll) < 120.0) {
-          _scrollController.animateTo(
-            maxScroll,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
+          if (useJump) {
+            _scrollController.jumpTo(maxScroll);
+          } else {
+            _scrollController.animateTo(
+              maxScroll,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
         }
       }
     });
@@ -1509,7 +1513,7 @@ class _AssistantScreenState extends State<AssistantScreen>
               );
             });
           }
-          _scrollToBottom(force: true);
+          _scrollToBottom(force: true, useJump: result.isStreaming);
         }
       }
     } catch (e) {

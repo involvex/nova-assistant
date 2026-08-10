@@ -139,6 +139,7 @@ class ModelOrchestrator {
 
   static const _prefsKey = 'preferred_model_override';
   static const _customPrefsKey = 'preferred_custom_model_id';
+  SharedPreferences? _cachedPrefs;
 
   final ModelSelector selector = ModelSelector(
     primaryHeavy: NovaModel.gemma4E2b,
@@ -3569,9 +3570,9 @@ class ModelOrchestrator {
   }
 
   Future<String> _languageInstruction() async {
-    final prefs = await SharedPreferences.getInstance();
+    _cachedPrefs ??= await SharedPreferences.getInstance();
     final language = AssistantLanguage.fromString(
-      prefs.getString(AssistantLanguage.prefsKey),
+      _cachedPrefs!.getString(AssistantLanguage.prefsKey),
     );
 
     return language.systemPromptLine;

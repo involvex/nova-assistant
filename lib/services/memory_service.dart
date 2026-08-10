@@ -12,10 +12,21 @@ class MemoryService {
   static const _maxEntries = 50;
   static const _maxEntryLength = 1000;
 
+  static List<List<String>>? _cachedCustomMemoryTokens;
+  static List<List<String>>? _cachedConversationTokens;
+
   static Future<void> initialize() async {}
 
   static Future<SharedPreferences> get _p async =>
       _prefs ??= await SharedPreferences.getInstance();
+
+  static void _invalidateCustomMemoryTokens() {
+    _cachedCustomMemoryTokens = null;
+  }
+
+  static void _invalidateConversationTokens() {
+    _cachedConversationTokens = null;
+  }
 
   static Future<void> storeConversation(String query, String response) async {
     final isEnabled = await _isConversationMemoryEnabled();
@@ -50,6 +61,7 @@ class MemoryService {
       }
 
       await p.setString(_key, jsonEncode(entries));
+      _invalidateConversationTokens();
     } catch (e) {
       debugPrint('MemoryService.storeConversation error: $e');
     }
@@ -92,6 +104,7 @@ class MemoryService {
       });
 
       await p.setString(_customMemoriesKey, jsonEncode(memories));
+      _invalidateCustomMemoryTokens();
     } catch (e) {
       debugPrint('MemoryService.addCustomMemory error: $e');
     }
@@ -134,6 +147,7 @@ class MemoryService {
       );
       entries.removeWhere((e) => e['query'] == query && e['time'] == time);
       await p.setString(_key, jsonEncode(entries));
+      _invalidateConversationTokens();
     } catch (e) {
       debugPrint('MemoryService.deleteConversationMemoryEntry error: $e');
     }
@@ -161,6 +175,7 @@ class MemoryService {
           'content': content,
         };
         await p.setString(_customMemoriesKey, jsonEncode(memories));
+        _invalidateCustomMemoryTokens();
       }
     } catch (e) {
       debugPrint('MemoryService.updateCustomMemory error: $e');
@@ -179,6 +194,7 @@ class MemoryService {
 
       memories.removeWhere((m) => m['id'] == id);
       await p.setString(_customMemoriesKey, jsonEncode(memories));
+      _invalidateCustomMemoryTokens();
     } catch (e) {
       debugPrint('MemoryService.deleteCustomMemory error: $e');
     }
@@ -189,6 +205,7 @@ class MemoryService {
     try {
       final p = await _p;
       await p.remove(_customMemoriesKey);
+      _invalidateCustomMemoryTokens();
     } catch (e) {
       debugPrint('MemoryService.clearAllCustomMemories error: $e');
     }
@@ -199,6 +216,7 @@ class MemoryService {
     try {
       final p = await _p;
       await p.remove(_key);
+      _invalidateConversationTokens();
     } catch (e) {
       debugPrint('MemoryService.clearConversationMemory error: $e');
     }
@@ -236,10 +254,12 @@ class MemoryService {
       final queryTokens = SemanticSearch.tokenize(query);
       if (queryTokens.isEmpty) return null;
 
-      final docTokensList = memories.map((m) {
+      _cachedCustomMemoryTokens ??= memories.map((m) {
         final text = '${m['title']} ${m['content']}';
         return SemanticSearch.tokenize(text);
       }).toList();
+
+      final docTokensList = _cachedCustomMemoryTokens!;
 
       final results = SemanticSearch.search(
         queryTokens: queryTokens,
@@ -279,10 +299,12 @@ class MemoryService {
       final queryTokens = SemanticSearch.tokenize(query);
       if (queryTokens.isEmpty) return null;
 
-      final docTokensList = entries.map((e) {
+      _cachedConversationTokens ??= entries.map((e) {
         final text = '${e['query']} ${e['response']}';
         return SemanticSearch.tokenize(text);
       }).toList();
+
+      final docTokensList = _cachedConversationTokens!;
 
       final results = SemanticSearch.search(
         queryTokens: queryTokens,
@@ -332,6 +354,7 @@ class MemoryService {
     try {
       final p = await _p;
       await p.remove(_key);
+      _invalidateConversationTokens();
     } catch (e) {
       debugPrint('MemoryService.clearConversationHistory error: $e');
     }
@@ -341,6 +364,7 @@ class MemoryService {
     try {
       final p = await _p;
       await p.remove(_customMemoriesKey);
+      _invalidateCustomMemoryTokens();
     } catch (e) {
       debugPrint('MemoryService.clearCustomMemories error: $e');
     }

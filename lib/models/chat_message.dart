@@ -52,6 +52,48 @@ class ChatMessage {
     return _parsedToolCalls;
   }
 
+  @override
+  bool operator ==(Object other) =>
+      other is ChatMessage &&
+      other.runtimeType == runtimeType &&
+      other.id == id &&
+      other.text == text &&
+      other.isUser == isUser &&
+      other.isStreaming == isStreaming &&
+      other.isError == isError &&
+      other.wasCancelled == wasCancelled &&
+      other.thinking == thinking &&
+      other.toolCalls == toolCalls &&
+      other.inferenceTimeMs == inferenceTimeMs &&
+      other.modelName == modelName &&
+      other.isPinned == isPinned &&
+      _mapEquals(other.reactions, reactions) &&
+      other.imageData == imageData;
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    text,
+    isUser,
+    isStreaming,
+    isError,
+    wasCancelled,
+    thinking,
+    toolCalls,
+    inferenceTimeMs,
+    modelName,
+    isPinned,
+    Object.hashAll(reactions.entries.map((e) => Object.hash(e.key, e.value))),
+  );
+
+  static bool _mapEquals(Map<String, int> a, Map<String, int> b) {
+    if (a.length != b.length) return false;
+    for (final key in a.keys) {
+      if (!b.containsKey(key) || b[key] != a[key]) return false;
+    }
+    return true;
+  }
+
   ChatMessage copyWith({
     String? id,
     String? text,

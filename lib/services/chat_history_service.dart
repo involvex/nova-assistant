@@ -504,7 +504,22 @@ class ChatHistoryService {
   }
 
   static ChatMessage _deepCopyMessage(ChatMessage message) {
-    return ChatMessage.fromJson(Map<String, dynamic>.from(message.toJson()));
+    return message.copyWith(
+      id: message.id,
+      text: message.text,
+      isUser: message.isUser,
+      timestamp: message.timestamp,
+      imageData: message.imageData,
+      modelName: message.modelName,
+      isStreaming: false,
+      isError: message.isError,
+      wasCancelled: message.wasCancelled,
+      thinking: message.thinking,
+      toolCalls: message.toolCalls,
+      inferenceTimeMs: message.inferenceTimeMs,
+      reactions: Map<String, int>.from(message.reactions),
+      isPinned: message.isPinned,
+    );
   }
 
   /// Creates a new conversation forked from [splitAtIndex] (inclusive).
@@ -520,7 +535,10 @@ class ChatHistoryService {
         return null;
       }
 
-      final forkedMessages = convo.messages.sublist(splitAtIndex);
+      final forkedMessages = convo.messages
+          .sublist(splitAtIndex)
+          .map(_deepCopyMessage)
+          .toList();
       final forkedConv = Conversation(
         title: '${convo.previewTitle} (fork)',
         messages: forkedMessages,

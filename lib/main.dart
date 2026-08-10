@@ -175,6 +175,9 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
   ThemeModeSetting _themeMode = ThemeModeSetting.system;
   double _fontScale = 1.0;
 
+  late final ThemeData _lightTheme = _buildLightTheme();
+  late final ThemeData _darkTheme = _buildDarkTheme();
+
   @override
   void initState() {
     super.initState();
@@ -201,7 +204,7 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     ThemeModeSetting.light => ThemeMode.light,
   };
 
-  ThemeData _lightTheme() {
+  ThemeData _buildLightTheme() {
     final seed = const Color(0xFF6C63FF);
     return ThemeData(
       brightness: Brightness.light,
@@ -238,7 +241,7 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     );
   }
 
-  ThemeData _darkTheme() {
+  ThemeData _buildDarkTheme() {
     final seed = const Color(0xFF6C63FF);
     return ThemeData(
       brightness: Brightness.dark,
@@ -463,8 +466,8 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
       child: MaterialApp(
         title: 'Nova',
         debugShowCheckedModeBanner: false,
-        theme: _lightTheme(),
-        darkTheme: _darkTheme(),
+        theme: _lightTheme,
+        darkTheme: _darkTheme,
         themeMode: _materialThemeMode(),
         navigatorKey: _navigatorKey,
         home: const AppLoader(),

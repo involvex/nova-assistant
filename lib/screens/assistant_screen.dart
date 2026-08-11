@@ -22,6 +22,7 @@ import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
+import 'package:nova_assistant/platform/overlay_service.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
 import 'package:nova_assistant/widgets/chat_bubble.dart';
@@ -47,6 +48,7 @@ class AssistantScreen extends StatefulWidget {
   final String? initialPrompt;
   final bool autoSendInitialPrompt;
   final bool isSystemAssistantLaunch;
+  final bool overlayMode;
 
   const AssistantScreen({
     super.key,
@@ -54,6 +56,7 @@ class AssistantScreen extends StatefulWidget {
     this.initialPrompt,
     this.autoSendInitialPrompt = true,
     this.isSystemAssistantLaunch = false,
+    this.overlayMode = false,
   });
 
   @override
@@ -87,7 +90,6 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _suggestionReroll = false;
   int _suggestionRequestId = 0;
   bool _memoryWarningShown = false;
-  bool _autoSendFromAssistantTrigger = false;
   bool _debugMode = false;
   int? _debugMemoryMb;
   Timer? _memoryPollTimer;
@@ -1051,41 +1053,19 @@ class _AssistantScreenState extends State<AssistantScreen>
     _screenshotLoadedCompleter = Completer<void>();
     _isLoadingInitialScreenshot = true;
     try {
-      // Fetch screenshot and assistant-launch flag in parallel
-      final results = await Future.wait([
-        ScreenshotService.instance.getLatestScreenshot(),
-        ScreenshotService.instance.wasLaunchedFromSystemAssistant(),
-      ]);
-      final screenshot = results[0] as Uint8List?;
-      final isAssistantLaunch =
-          (results[1] as bool?) ?? false || widget.isSystemAssistantLaunch;
+      final screenshot = await ScreenshotService.instance.getLatestScreenshot();
 
       if (mounted) {
         setState(() {
           _currentScreenshot = screenshot;
           _isLoadingInitialScreenshot = false;
         });
-        // Screenshot came from system assistant trigger — auto-send with context.
-        // Only auto-send when the screen was actually opened via the system assistant
-        // (not on regular "New Chat" where a stale cached screenshot might linger).
-        if (screenshot != null && _messages.isEmpty && isAssistantLaunch) {
-          _autoSendFromAssistantTrigger = true;
-        }
       }
     } finally {
       if (mounted) {
         setState(() => _isLoadingInitialScreenshot = false);
       }
       _screenshotLoadedCompleter?.complete();
-    }
-    // Auto-send when triggered via system assistant button with a fresh screenshot
-    if (_autoSendFromAssistantTrigger && mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_autoSendFromAssistantTrigger) return;
-        _autoSendFromAssistantTrigger = false;
-        _inputController.text = 'What\'s on my screen?';
-        _sendMessage();
-      });
     }
   }
 
@@ -1562,29 +1542,45 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _captureAndAttachScreenshot() async {
-    final granted = await ScreenshotService.instance.requestCapture();
-    if (!granted) {
-      if (mounted) {
+    if (widget.overlayMode) {
+      // Hide the overlay so the capture shows the app underneath, and give
+      // the display a moment to redraw without our window.
+      await OverlayService.instance.hideForCapture();
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    try {
+      final granted = await ScreenshotService.instance.requestCapture();
+      if (!granted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Screen capture denied. Enable in Settings.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+
+        return;
+      }
+      if (widget.overlayMode) {
+        // Let the capture thread grab a frame of the app underneath.
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+      final screenshot = await ScreenshotService.instance.getLatestScreenshot();
+      if (screenshot != null && mounted) {
+        setState(() => _currentScreenshot = screenshot);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Screen capture denied. Enable in Settings.'),
-            backgroundColor: Colors.red,
+            content: Text('Screenshot attached!'),
+            duration: Duration(seconds: 1),
+            backgroundColor: Color(0xFF6C63FF),
           ),
         );
       }
-
-      return;
-    }
-    final screenshot = await ScreenshotService.instance.getLatestScreenshot();
-    if (screenshot != null && mounted) {
-      setState(() => _currentScreenshot = screenshot);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Screenshot attached!'),
-          duration: Duration(seconds: 1),
-          backgroundColor: Color(0xFF6C63FF),
-        ),
-      );
+    } finally {
+      if (widget.overlayMode) {
+        await OverlayService.instance.showAfterCapture();
+      }
     }
   }
 
@@ -2258,6 +2254,12 @@ class _AssistantScreenState extends State<AssistantScreen>
             ),
           ),
           const Spacer(),
+          if (widget.overlayMode)
+            IconButton(
+              onPressed: () => OverlayService.instance.expandToFullApp(),
+              icon: const Icon(Icons.open_in_full, color: Colors.grey),
+              tooltip: 'Expand to full app',
+            ),
           IconButton(
             onPressed: () => Navigator.push(
               context,
@@ -3050,6 +3052,11 @@ class _AssistantScreenState extends State<AssistantScreen>
                     onPressed: _showAttachSheet,
                     icon: const Icon(Icons.attach_file, color: Colors.grey),
                     tooltip: 'Attach',
+                  ),
+                  IconButton(
+                    onPressed: _captureAndAttachScreenshot,
+                    icon: const Icon(Icons.screenshot, color: Colors.grey),
+                    tooltip: 'Capture screenshot',
                   ),
                   IconButton(
                     onPressed: _showClipboardActions,

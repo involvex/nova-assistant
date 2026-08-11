@@ -71,6 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _shizukuStatusLabel = 'Checking…';
   AssistantRole _assistantRole = AssistantRole.helpful;
   AssistantLanguage _assistantLanguage = AssistantLanguage.match;
+  String _assistantLaunchMode = 'overlay';
   String _installStatus = '';
   String _appVersion = '0.1.0';
   String _hfTokenStatus = 'Not configured';
@@ -147,6 +148,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _assistantLanguage = AssistantLanguage.fromString(
           prefs.getString(AssistantLanguage.prefsKey),
         );
+        _assistantLaunchMode =
+            prefs.getString('assistant_launch_mode') ?? 'overlay';
         _hfTokenStatus = _resolveHfTokenStatus(prefs.getString('hf_token'));
         _themeMode = loadedThemeMode;
         _fontScale = loadedFontScale;
@@ -720,6 +723,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           setState(() => _thinkingMode = v);
           _saveSetting('settings_thinking_mode', v);
         },
+      ),
+      _actionTile(
+        icon: Icons.open_in_new,
+        title: 'Assistant button opens',
+        subtitle: _assistantLaunchMode == 'overlay'
+            ? 'Overlay chat'
+            : 'Full app',
+        onTap: () => _showLaunchModeSelector(),
       ),
     ];
   }
@@ -1569,6 +1580,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (selected != null && selected != _assistantRole) {
       setState(() => _assistantRole = selected);
       await _saveAssistantRole(selected);
+    }
+  }
+
+  Future<void> _showLaunchModeSelector() async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Assistant button opens',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.picture_in_picture,
+                color: _assistantLaunchMode == 'overlay'
+                    ? const Color(0xFF6C63FF)
+                    : Colors.grey[400],
+              ),
+              title: Text(
+                'Overlay chat',
+                style: TextStyle(
+                  color: _assistantLaunchMode == 'overlay'
+                      ? const Color(0xFF6C63FF)
+                      : Colors.white,
+                  fontWeight: _assistantLaunchMode == 'overlay'
+                      ? FontWeight.w600
+                      : FontWeight.normal,
+                ),
+              ),
+              trailing: _assistantLaunchMode == 'overlay'
+                  ? const Icon(Icons.check, color: Color(0xFF6C63FF))
+                  : null,
+              onTap: () => Navigator.pop(ctx, 'overlay'),
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.open_in_full,
+                color: _assistantLaunchMode == 'full'
+                    ? const Color(0xFF6C63FF)
+                    : Colors.grey[400],
+              ),
+              title: Text(
+                'Full app',
+                style: TextStyle(
+                  color: _assistantLaunchMode == 'full'
+                      ? const Color(0xFF6C63FF)
+                      : Colors.white,
+                  fontWeight: _assistantLaunchMode == 'full'
+                      ? FontWeight.w600
+                      : FontWeight.normal,
+                ),
+              ),
+              trailing: _assistantLaunchMode == 'full'
+                  ? const Icon(Icons.check, color: Color(0xFF6C63FF))
+                  : null,
+              onTap: () => Navigator.pop(ctx, 'full'),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+
+    if (selected != null && selected != _assistantLaunchMode) {
+      setState(() => _assistantLaunchMode = selected);
+      await UserPreferencesService.instance.setAssistantLaunchMode(selected);
     }
   }
 

@@ -109,4 +109,16 @@ class UserPreferencesService {
   Future<void> resetToDefaults() async {
     await savePreferences(const UserPreferences());
   }
+
+  Future<String> getAssistantLaunchMode() async {
+    final prefs = await getPreferences();
+    return prefs.assistantLaunchMode;
+  }
+
+  Future<void> setAssistantLaunchMode(String mode) async {
+    final current = await getPreferences();
+    await savePreferences(current.copyWith(assistantLaunchMode: mode));
+    final p = await _p;
+    await p.setString('assistant_launch_mode', mode);
+  }
 }

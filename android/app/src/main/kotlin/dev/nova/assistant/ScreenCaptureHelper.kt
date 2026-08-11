@@ -40,6 +40,9 @@ object ScreenCaptureHelper {
     private var _latestFrame: ByteArray? = null
     val latestFrame: ByteArray? get() = _latestFrame
 
+    /** Whether a MediaProjection is alive and actively capturing frames. */
+    val hasActiveProjection: Boolean get() = mediaProjection != null && isCapturing
+
     private var _captureCompletionCallback: ((Boolean) -> Unit)? = null
     private var _firstFrameCallback: (() -> Unit)? = null
 
@@ -215,6 +218,33 @@ object ScreenCaptureHelper {
                 cb?.invoke()
             }
         }, timeoutMs)
+    }
+
+    /**
+     * Captures a fresh frame when a projection is active, then invokes [onReady].
+     * If no projection exists, [onReady] is called immediately.
+     *
+     * Frames cached by previous sessions are discarded first — the process can
+     * stay alive for a long time (ModelService), so a stale frame would
+     * otherwise be handed to the UI as if it were current.
+     */
+    fun captureFreshFrame(onReady: () -> Unit) {
+        if (!hasActiveProjection) {
+            onReady()
+            return
+        }
+        _latestFrame = null
+        AssistantActivity.latestScreenshot = null
+        waitForFirstFrame(timeoutMs = 1500L, onReady = onReady)
+        captureHandler?.post { captureFrame() } ?: run { captureFrame() }
+    }
+
+    /**
+     * Drops any frame cached by a previous capture session without touching
+     * the live projection.
+     */
+    fun clearStaleFrame() {
+        _latestFrame = null
     }
 
     private fun notifyFirstFrame() {

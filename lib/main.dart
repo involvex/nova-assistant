@@ -28,6 +28,8 @@ import 'package:nova_assistant/services/widget_service.dart';
 import 'package:nova_assistant/services/share_intent_service.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
+import 'package:nova_assistant/platform/overlay_service.dart';
+import 'package:nova_assistant/screens/overlay_chat_screen.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -80,6 +82,19 @@ void main() async {
     debugPrint('Initialization error: $e');
   }
 
+  try {
+    final isOverlay = await OverlayService.instance.getLaunchMode().timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => 'full',
+    );
+    if (isOverlay == 'overlay') {
+      runApp(const OverlayApp());
+      return;
+    }
+  } catch (e) {
+    debugPrint('Overlay check failed: $e');
+  }
+
   runApp(const NovaApp());
 }
 
@@ -109,6 +124,41 @@ Future<void> _prefetchModels() async {
     await ModelOrchestrator.instance.initializeDefaultModel();
   } catch (e) {
     debugPrint('Default model init failed: $e');
+  }
+}
+
+class OverlayApp extends StatelessWidget {
+  const OverlayApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Nova',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF6C63FF),
+          brightness: Brightness.dark,
+        ),
+        fontFamily: 'Roboto',
+        scaffoldBackgroundColor: const Color(0xFF0D0D1A),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF0D0D1A),
+          elevation: 0,
+          centerTitle: true,
+        ),
+        cardTheme: CardThemeData(
+          color: const Color(0xFF1A1A2E),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+      home: const OverlayChatScreen(),
+    );
   }
 }
 

@@ -76,7 +76,6 @@ void main() async {
     await NotificationService.instance.requestPermission();
     await WidgetService.instance.initialize();
 
-    await ModelOrchestrator.instance.applyRamAwareModelDefaults();
     _prefetchModels();
   } catch (e) {
     debugPrint('Initialization error: $e');

@@ -12,7 +12,6 @@ import 'package:nova_assistant/models/chat_bubble_theme.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
-import 'package:nova_assistant/services/audio_recorder_service.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
 import 'package:nova_assistant/services/export_service.dart';
@@ -100,8 +99,6 @@ class _AssistantScreenState extends State<AssistantScreen>
   int _currentSearchMatch = 0;
   List<int> _searchMatchIndices = [];
   ChatBubbleTheme _chatTheme = ChatBubbleTheme.defaultTheme;
-  RecordingState _recordingState = RecordingState.idle;
-  StreamSubscription<RecordingState>? _recordingStateSub;
 
   @override
   void initState() {
@@ -120,13 +117,6 @@ class _AssistantScreenState extends State<AssistantScreen>
     _requestPermissions();
     _listenToModelStatus();
     _checkModelAvailability();
-    _recordingStateSub = AudioRecorderService.instance.onStateChanged.listen((
-      state,
-    ) {
-      if (mounted) {
-        setState(() => _recordingState = state);
-      }
-    });
     _historyClearedSub = ModelOrchestrator.instance.historyClearedStream.listen(
       (_) {
         if (mounted) {
@@ -486,7 +476,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     final model =
         _selectedModel ??
         ModelOrchestrator.instance.preferredModelType ??
-        NovaModel.gemma4E2b;
+        ModelOrchestrator.instance.selector.primaryHeavy;
     final historyTokens = _messages.fold<int>(
       0,
       (sum, m) => sum + MessageLimits.estimateRealTokens(m.text, model: model),
@@ -943,7 +933,6 @@ class _AssistantScreenState extends State<AssistantScreen>
     _contextBudgetSub?.cancel();
     _memoryPollTimer?.cancel();
     _saveDebounceTimer?.cancel();
-    _recordingStateSub?.cancel();
     WakelockPlus.disable();
     if (_screenshotLoadedCompleter != null &&
         !_screenshotLoadedCompleter!.isCompleted) {
@@ -2907,67 +2896,6 @@ class _AssistantScreenState extends State<AssistantScreen>
     );
   }
 
-  void _toggleRecording() {
-    final svc = AudioRecorderService.instance;
-    if (svc.isRecording) {
-      svc.stopRecording();
-    } else if (_recordingState == RecordingState.paused) {
-      svc.stopRecording();
-    } else {
-      svc.startRecording();
-    }
-  }
-
-  Widget _buildRecordButton() {
-    final isRec = _recordingState == RecordingState.recording;
-    final isPaused = _recordingState == RecordingState.paused;
-    final isActive = isRec || isPaused;
-
-    if (isActive) {
-      return GestureDetector(
-        onTap: _toggleRecording,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.redAccent.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isRec ? Colors.redAccent : Colors.orangeAccent,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                AudioRecorderService.instance.formattedDuration,
-                style: const TextStyle(
-                  color: Colors.redAccent,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(Icons.stop, color: Colors.redAccent, size: 18),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return IconButton(
-      onPressed: _toggleRecording,
-      icon: const Icon(Icons.mic_outlined, color: Colors.grey),
-      tooltip: 'Record audio',
-    );
-  }
-
   Widget _buildInputBar() {
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: _inputController,
@@ -3139,8 +3067,6 @@ class _AssistantScreenState extends State<AssistantScreen>
                       unawaited(_sendMessage());
                     },
                   ),
-                  const SizedBox(width: 8),
-                  _buildRecordButton(),
                   const SizedBox(width: 8),
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),

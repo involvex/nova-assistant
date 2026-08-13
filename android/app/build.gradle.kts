@@ -49,8 +49,11 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = true
-            if (file("keystore/release.jks").exists()) {
-                signingConfig = signingConfigs.getByName("release")
+            val releaseKeystore = file("keystore/release.jks")
+            signingConfig = if (releaseKeystore.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

@@ -310,7 +310,7 @@ class ModelOrchestrator {
       setPendingReplayMessages(retained);
       return;
     }
-    final model = _activeModelType ?? NovaModel.gemma4E2b;
+    final model = _activeModelType ?? selector.primaryHeavy;
     final ratio = _highContextEnabled
         ? MessageLimits.highContextBudgetRatio
         : MessageLimits.contextBudgetRatio;
@@ -1662,6 +1662,37 @@ class ModelOrchestrator {
 
   /// Apply Auto-mode defaults for low free-RAM devices (call at startup).
   Future<void> applyRamAwareModelDefaults() async {
+    if (_preferredModelOverride != null &&
+        _preferredCustomModelOverride == null) {
+      final block = await PlatformAdaptationService.instance.checkCanLoadModel(
+        _preferredModelOverride!,
+      );
+      if (block != null) {
+        _preferredModelOverride = null;
+        _modelOverrideDirty = false;
+        unawaited(_persistPreferredModel(null));
+      }
+    }
+
+    if (_preferredCustomModelOverride != null) {
+      final custom = _preferredCustomModelOverride!;
+      final availMemMb = await MemoryDiagnosticsService.instance
+          .readAvailableMemMb();
+      final modelSizeMb = custom.fileSizeMB;
+      if (availMemMb != null && modelSizeMb > 0) {
+        final minFree = modelSizeMb >= 2000
+            ? 1800
+            : modelSizeMb >= 400
+            ? 700
+            : null;
+        if (minFree != null && availMemMb < minFree) {
+          _preferredCustomModelOverride = null;
+          _modelOverrideDirty = false;
+          unawaited(_persistPreferredCustomModel(null));
+        }
+      }
+    }
+
     final recommended = await PlatformAdaptationService.instance
         .recommendModelForDevice();
     if (selector.primaryHeavy != recommended) {
@@ -1694,6 +1725,28 @@ class ModelOrchestrator {
   }) async* {
     final customModel = _preferredCustomModelOverride!;
     _statusController.add('Using custom model: ${customModel.displayName}');
+
+    final availMemMb = await MemoryDiagnosticsService.instance
+        .readAvailableMemMb();
+    final modelSizeMb = customModel.fileSizeMB;
+    if (availMemMb != null && modelSizeMb > 0) {
+      final minFree = modelSizeMb >= 2000
+          ? 1800
+          : modelSizeMb >= 400
+          ? 700
+          : null;
+      if (minFree != null && availMemMb < minFree) {
+        yield InferenceResult(
+          text:
+              'Not enough free RAM to load ${customModel.displayName} '
+              '($availMemMb MB free, need ~$minFree MB free). '
+              'Close background apps or switch to a smaller model.',
+          model: selector.primaryHeavy,
+          isStreaming: false,
+        );
+        return;
+      }
+    }
 
     // Check if this is a GGUF model - route to GgufService
     if (customModel.isGguf) {
@@ -1868,8 +1921,6 @@ class ModelOrchestrator {
       tools: tools,
       supportImage: customModel.hasVision && _activeModelSupportsImage,
     );
-
-    await _truncateContext(chat, NovaModel.gemma4E2b);
 
     final queryError = _validateQueryLength(
       query: query,
@@ -3886,6 +3937,7 @@ class ModelOrchestrator {
     await _loadRuntimeSettings();
     await _loadIdentity();
     _startBatteryCheck();
+    await applyRamAwareModelDefaults();
     // NOTE: We deliberately do NOT load a model here.
     // Loading a 2.4GB model at startup causes memory/CPU exhaustion
     // on some devices, leading to crashes. Models are loaded lazily
@@ -3916,7 +3968,7 @@ class ModelOrchestrator {
     final orch = instance;
     if (orch._activeModel != null) return;
 
-    final defaultModel = orch.preferredModelType ?? NovaModel.gemma4E2b;
+    final defaultModel = orch.preferredModelType ?? orch.selector.primaryHeavy;
 
     if (kIsWeb) return;
 

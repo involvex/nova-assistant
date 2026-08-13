@@ -53,6 +53,8 @@ class SessionHistoryReinjection {
     final usable = uiMessages.where(_isReplayable).toList();
     if (usable.isEmpty) return const [];
 
+    final supportsVision = model?.hasVision ?? false;
+
     // For very small budgets (SmolLM ~394), prefer last N complete pairs.
     final tight = maxTokens <= 500;
     final candidates = tight ? _lastCompletePairs(usable) : usable;
@@ -70,7 +72,7 @@ class SessionHistoryReinjection {
     final ordered = selected.reversed.toList();
     final paired = _dropLeadingOrphanAssistant(ordered);
 
-    return paired.map(_toMessage).toList();
+    return paired.map((m) => _toMessage(m, supportsVision)).toList();
   }
 
   static bool _isReplayable(ChatMessage m) {
@@ -137,10 +139,10 @@ class SessionHistoryReinjection {
     return ordered;
   }
 
-  static Message _toMessage(ChatMessage m) {
+  static Message _toMessage(ChatMessage m, bool supportsVision) {
     final sanitized = ToolCallParser.stripMarkup(m.text);
     final bytes = m.imageData;
-    if (bytes != null && bytes.isNotEmpty) {
+    if (supportsVision && bytes != null && bytes.isNotEmpty) {
       return Message.withImage(
         text: sanitized,
         imageBytes: bytes,

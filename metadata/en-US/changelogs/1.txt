@@ -1,0 +1,5 @@
+* Optimized model loading to eliminate 30-60s reloads when switching between text and vision queries
+* Adult mode is now enabled by default with strengthened system prompt
+* Warm chat sessions are preserved across adult mode and tool changes
+* Fixed release signing configuration for app store distribution
+* Added IzzyOnDroid distribution metadata

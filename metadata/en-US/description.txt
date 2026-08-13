@@ -1,0 +1,19 @@
+Nova is a local-first AI assistant that runs entirely on your device. No data is ever sent to external servers.
+
+All AI inference runs on-device using Gemma models. Nova supports voice input, screen capture, and tool execution for controlling your Android device.
+
+Features:
+- 100% on-device AI - your data never leaves your phone
+- Multiple AI models with automatic selection
+- Voice input and text-to-speech
+- Screen capture for vision-based queries
+- Device control via built-in tools (alarms, apps, web search, etc.)
+- RAG memory with local storage
+- Adult mode for unrestricted conversations
+- Custom model support
+
+Anti-Features:
+- NonFreeNet: Downloads model files (~500MB-2.4GB) from HuggingFace at runtime
+- NonFreeAdd: Model files are downloaded after install and are not FOSS
+
+Categories: AI, Productivity

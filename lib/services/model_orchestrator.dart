@@ -654,7 +654,7 @@ class ModelOrchestrator {
     final highContextChanged = _highContextEnabled != nextHighContext;
     _highContextEnabled = nextHighContext;
     _autoCompactEnabled = prefs.getBool('settings_auto_compact') ?? true;
-    final adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
+    final adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? true;
     if (invalidateChatOnAdultChange && _adultModeEnabled != adultMode) {
       _adultModeEnabled = adultMode;
       _activeChat = null;
@@ -1119,12 +1119,10 @@ class ModelOrchestrator {
     required List<Tool> chatTools,
     required bool hasRag,
     required bool hasAttachments,
-    required bool textToolPrompt,
   }) {
     final toolNames = chatTools.map((t) => t.name).join(',');
 
-    return '${model.name}|$toolNames|rag=$hasRag|att=$hasAttachments|'
-        'adult=$_adultModeEnabled|ttp=$textToolPrompt';
+    return '${model.name}|$toolNames|rag=$hasRag|att=$hasAttachments';
   }
 
   /// Stops generation, closes the engine, and clears native identity.
@@ -2282,6 +2280,33 @@ class ModelOrchestrator {
       );
     }
 
+    // Stay on the loaded model when keep-warm is on and the model can handle
+    // the query. This avoids query-length-based switching (A2) and prevents
+    // vision/text model reloads (A1).
+    if (_activeModel != null && _keepModelWarm && _activeModelType != null) {
+      final current = _activeModelType!;
+      if (hasVisionContext && !current.hasVision) {
+        if (_debugMode) {
+          debugPrint(
+            '[DEBUG] _selectModel vision fallback from ${current.displayName}',
+          );
+        }
+        if (selector.primaryHeavy.hasVision) return selector.primaryHeavy;
+        if (selector.fastModel.hasVision) return selector.fastModel;
+        return NovaModel.fastvlm;
+      }
+      if (thinkingMode && !current.hasThinking) {
+        if (selector.primaryHeavy.hasThinking) return selector.primaryHeavy;
+      }
+      if (_debugMode) {
+        debugPrint(
+          '[DEBUG] _selectModel staying on ${current.displayName} '
+          '(keep-warm, loaded model)',
+        );
+      }
+      return current;
+    }
+
     final selected = selector.selectForQuery(
       query: query,
       hasVisionContext: hasVisionContext,
@@ -2298,7 +2323,6 @@ class ModelOrchestrator {
     if (hasVisionContext && !selected.hasVision) {
       if (selector.primaryHeavy.hasVision) return selector.primaryHeavy;
       if (selector.fastModel.hasVision) return selector.fastModel;
-      // Prefer FastVLM when Auto's primary/fast are both text-only (e.g. SmolLM).
       return NovaModel.fastvlm;
     }
 
@@ -2675,7 +2699,6 @@ class ModelOrchestrator {
         chatTools: chatTools,
         hasRag: ragContext.trim().isNotEmpty,
         hasAttachments: hasExtraContext,
-        textToolPrompt: textToolPrompt,
       );
       // Warm sessions ignore new systemInstruction / tools — recreate when
       // the fingerprint changes so RAG / adult / tools stay in sync.

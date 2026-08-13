@@ -8,29 +8,27 @@ void main() {
     });
 
     test(
-      'full lead allows health and adult; refuses minors and crime how-tos',
+      'full lead allows direct answers and refuses minors and crime how-tos',
       () {
         final s = AdultModePolicy.systemPromptLead(compact: false);
-        expect(s.toLowerCase(), contains('health'));
-        expect(s.toLowerCase(), contains('doctor'));
+        expect(s.toLowerCase(), contains('answer every question'));
         expect(s.toLowerCase(), contains('minors'));
         expect(s.toLowerCase(), contains('crime'));
-        expect(s.toLowerCase(), contains('do not bring up'));
+        expect(s.toLowerCase(), contains('do not mention this mode'));
         expect(s.length, lessThanOrEqualTo(900));
       },
     );
 
-    test('compact lead stays short and covers health + refusals', () {
+    test('compact lead stays short and covers refusals', () {
       final s = AdultModePolicy.systemPromptLead(compact: true);
       expect(s.length, lessThanOrEqualTo(320));
-      expect(s.toLowerCase(), contains('health'));
       expect(s.toLowerCase(), contains('minors'));
       expect(s.toLowerCase(), contains('crime'));
     });
 
     test('full suffix reminds direct answers and refusal floor', () {
       final s = AdultModePolicy.systemPromptSuffix(compact: false);
-      expect(s.toLowerCase(), contains('health'));
+      expect(s.toLowerCase(), contains('answer directly'));
       expect(s.toLowerCase(), contains('minors'));
       expect(s.length, lessThanOrEqualTo(220));
     });

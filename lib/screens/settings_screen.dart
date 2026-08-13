@@ -133,7 +133,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             prefs.getBool('settings_high_context') ??
             (kIsWeb || defaultTargetPlatform != TargetPlatform.android);
         _autoCompact = prefs.getBool('settings_auto_compact') ?? true;
-        _adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? false;
+        _adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? true;
         _wifiOnlyDownloads =
             prefs.getBool(DownloadNetworkGate.wifiOnlyPrefsKey) ?? false;
         _debugMode = prefs.getBool('settings_debug_mode') ?? false;

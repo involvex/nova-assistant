@@ -58,7 +58,8 @@ class _KnowledgeBaseScreenState extends State<KnowledgeBaseScreen> {
         'sql',
       ],
     );
-    if (result == null || result.files.isEmpty) return;
+    if (result == null) return;
+    if (result.files.isEmpty) return;
 
     final file = result.files.first;
     final path = file.path;

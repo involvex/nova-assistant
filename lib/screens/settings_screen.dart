@@ -1,13 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/chat_bubble_theme.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/models/diffusion_model_info.dart';
 import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/assistant_language.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
@@ -575,6 +578,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
         },
       ),
+      _sectionHeader('IMAGE GENERATION'),
+      ...DiffusionModel.values.map(
+        (m) => _diffusionModelCard(context, model: m),
+      ),
+      const SizedBox(height: 8),
       _sectionHeader('STORAGE BREAKDOWN'),
       FutureBuilder<Map<String, dynamic>>(
         future: _loadStorageBreakdown(),
@@ -1329,7 +1337,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         dialogTitle: 'Select a model file',
       );
 
-      if (result == null || result.files.isEmpty) return;
+      if (result == null) return;
+      if (result.files.isEmpty) return;
 
       final file = result.files.first;
       if (file.path == null) {
@@ -1838,6 +1847,196 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
+  }
+
+  Widget _diffusionModelCard(
+    BuildContext context, {
+    required DiffusionModel model,
+  }) {
+    final installed = ModelManager.instance.isDiffusionModelInstalled(model);
+
+    return GestureDetector(
+      onTap: installed ? null : () => _downloadDiffusionModel(context, model),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A2E),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: installed
+                ? Colors.green.withValues(alpha: 0.3)
+                : Colors.white.withValues(alpha: 0.06),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF6C63FF), Color(0xFFE040FB)],
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.palette_outlined,
+                color: Colors.white,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        model.displayName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${model.approxSizeMB}MB',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    installed ? 'Installed' : 'Tap to install',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: installed ? Colors.green[400] : Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (installed)
+              Icon(Icons.check_circle, color: Colors.green[400], size: 20)
+            else
+              Icon(
+                Icons.cloud_download_outlined,
+                color: Colors.grey[600],
+                size: 20,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _downloadDiffusionModel(
+    BuildContext context,
+    DiffusionModel model,
+  ) async {
+    final catalog = DiffusionModelCatalog.forModel(model);
+    if (catalog == null) return;
+
+    final url =
+        'https://huggingface.co/${catalog.repoId}/resolve/main/${catalog.fileName}';
+
+    if (catalog.gated && !await ModelManager.hasHuggingFaceToken()) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${model.displayName} needs a HuggingFace token. Add one in Settings.',
+          ),
+          backgroundColor: Colors.orange[800],
+          action: SnackBarAction(
+            label: 'Add token',
+            textColor: Colors.white,
+            onPressed: () => _showHfTokenDialog(context),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final allowed = await DownloadNetworkGate.instance.confirmDownloadAllowed(
+      context,
+      sizeHint: '${model.displayName} (${model.approxSizeMB}MB)',
+    );
+    if (!allowed || !context.mounted) return;
+
+    setState(() => _installStatus = 'Downloading ${model.displayName}...');
+
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File(
+        '${tempDir.path}/nova_download_${DateTime.now().millisecondsSinceEpoch}_${catalog.fileName}',
+      );
+
+      final hfToken = await ModelManager.getHuggingFaceToken();
+      final client = ModelManager.httpClient;
+      final uri = Uri.parse(url);
+      final request = await client.getUrl(uri);
+      if (hfToken != null && hfToken.isNotEmpty) {
+        request.headers.set('Authorization', 'Bearer $hfToken');
+      }
+      final response = await request.close();
+
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+
+      final totalBytes = response.contentLength;
+      var receivedBytes = 0;
+      var lastReportedPct = -1;
+      final sink = tempFile.openWrite();
+
+      await for (final chunk in response) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+        if (totalBytes > 0) {
+          final pct = ((receivedBytes * 90) / totalBytes).floor().clamp(0, 90);
+          if (pct != lastReportedPct) {
+            lastReportedPct = pct;
+            if (mounted) {
+              setState(() => _installStatus = 'Downloading: $pct%');
+            }
+          }
+        }
+      }
+      await sink.close();
+
+      await ModelManager.instance.installDiffusionModel(
+        model: model,
+        filePath: tempFile.path,
+      );
+
+      if (mounted) {
+        setState(() => _installStatus = '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${model.displayName} installed'),
+            backgroundColor: const Color(0xFF6C63FF),
+          ),
+        );
+      }
+
+      try {
+        await tempFile.delete();
+      } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        setState(() => _installStatus = '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Download failed: $e'),
+            backgroundColor: Colors.red[800],
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _downloadModel(BuildContext context, NovaModel model) async {

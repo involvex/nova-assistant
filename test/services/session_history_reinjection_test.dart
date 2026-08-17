@@ -108,6 +108,7 @@ void main() {
       final replay = SessionHistoryReinjection.buildReplayMessages(
         input,
         maxTokens: 10_000,
+        model: NovaModel.gemma4E2b,
       );
 
       expect(replay.length, 1);

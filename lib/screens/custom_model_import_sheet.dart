@@ -44,65 +44,66 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
         allowedExtensions: ['litertlm', 'task'],
       );
 
-      if (result != null && result.files.isNotEmpty) {
-        final file = result.files.first;
-        final path = file.path;
-
-        if (path == null) {
-          setState(() => _fileError = 'Could not access file path');
-
-          return;
-        }
-
-        final fileSize = file.size;
-        final ext = p.extension(file.name).toLowerCase();
-
-        if (ext == '.gguf') {
-          setState(
-            () => _fileError =
-                'GGUF is not supported for inference. '
-                'Use .litertlm or .task models instead.',
-          );
-
-          return;
-        }
-
-        // Validate file
-        if (fileSize < 1024 * 1024) {
-          setState(() => _fileError = 'File too small (min 1MB)');
-
-          return;
-        }
-
-        if (fileSize > 5 * 1024 * 1024 * 1024) {
-          setState(() => _fileError = 'File too large (max 5GB)');
-
-          return;
-        }
-
-        // Auto-fill name from filename
-        String autoName = p.basenameWithoutExtension(file.name);
-        autoName = autoName
-            .replaceAll('.litertlm', '')
-            .replaceAll('.task', '')
-            .replaceAll('-', ' ')
-            .replaceAll('_', ' ')
-            .split(' ')
-            .map(
-              (w) =>
-                  w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '',
-            )
-            .join(' ');
-
-        setState(() {
-          _selectedFilePath = path;
-          _selectedFileName = file.name;
-          _selectedFileSize = fileSize;
-          _fileExtension = ext;
-          _fileError = null;
-          _nameController.text = autoName;
-        });
+      if (result == null) return;
+      if (result.files.isEmpty) {
+        return;
       }
+      final file = result.files.first;
+      final path = file.path;
+
+      if (path == null) {
+        setState(() => _fileError = 'Could not access file path');
+
+        return;
+      }
+
+      final fileSize = await file.length();
+      final ext = p.extension(file.name).toLowerCase();
+
+      if (ext == '.gguf') {
+        setState(
+          () => _fileError =
+              'GGUF is not supported for inference. '
+              'Use .litertlm or .task models instead.',
+        );
+
+        return;
+      }
+
+      // Validate file
+      if (fileSize < 1024 * 1024) {
+        setState(() => _fileError = 'File too small (min 1MB)');
+
+        return;
+      }
+
+      if (fileSize > 5 * 1024 * 1024 * 1024) {
+        setState(() => _fileError = 'File too large (max 5GB)');
+
+        return;
+      }
+
+      // Auto-fill name from filename
+      String autoName = p.basenameWithoutExtension(file.name);
+      autoName = autoName
+          .replaceAll('.litertlm', '')
+          .replaceAll('.task', '')
+          .replaceAll('-', ' ')
+          .replaceAll('_', ' ')
+          .split(' ')
+          .map(
+            (w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '',
+          )
+          .join(' ');
+
+      setState(() {
+        _selectedFilePath = path;
+        _selectedFileName = file.name;
+        _selectedFileSize = fileSize;
+        _fileExtension = ext;
+        _fileError = null;
+        _nameController.text = autoName;
+      });
     } catch (e) {
       setState(() => _fileError = 'Failed to pick file: $e');
     }

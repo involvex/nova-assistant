@@ -10,7 +10,7 @@ void main() {
     test('all tools list has expected built-in count', () {
       // Built-ins include open_app_info + open_battery_settings + audio recording tools;
       // force_stop_app is only added when Advanced Shizuku force-stop is enabled.
-      expect(NovaTools.all.length, 19);
+      expect(NovaTools.all.length, 20);
       expect(NovaTools.all.any((t) => t.name == 'open_app_info'), isTrue);
       expect(
         NovaTools.all.any((t) => t.name == 'open_battery_settings'),

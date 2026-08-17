@@ -98,6 +98,8 @@ Nova is a Flutter-based mobile AI assistant that:
 
 ## Useful Commands
 
+> **Note:** Flutter and Dart commands must be run directly (e.g. `flutter test`, `dart format .`). Do **not** prefix them with `bun run`.
+
 ### Setup and Installation
 
 ```bash

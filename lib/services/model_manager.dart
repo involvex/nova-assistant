@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/models/diffusion_model_info.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 
 class InstalledModel {
@@ -47,6 +48,44 @@ class InstalledModel {
   );
 }
 
+class DiffusionModelEntry {
+  final String id;
+  final String fileName;
+  final DiffusionModel model;
+  final DateTime installedAt;
+  final int fileSizeBytes;
+
+  DiffusionModelEntry({
+    required this.id,
+    required this.fileName,
+    required this.model,
+    required this.installedAt,
+    required this.fileSizeBytes,
+  });
+
+  double get fileSizeMB => fileSizeBytes / (1024 * 1024);
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'fileName': fileName,
+    'model': model.name,
+    'installedAt': installedAt.toIso8601String(),
+    'fileSizeBytes': fileSizeBytes,
+  };
+
+  factory DiffusionModelEntry.fromJson(Map<String, dynamic> json) =>
+      DiffusionModelEntry(
+        id: json['id'] as String,
+        fileName: json['fileName'] as String,
+        model: DiffusionModel.values.firstWhere(
+          (e) => e.name == json['model'],
+          orElse: () => DiffusionModel.zImageTurbo,
+        ),
+        installedAt: DateTime.parse(json['installedAt'] as String),
+        fileSizeBytes: json['fileSizeBytes'] as int,
+      );
+}
+
 class ModelManager {
   static ModelManager? _instance;
   static ModelManager get instance => _instance ??= ModelManager._();
@@ -56,13 +95,17 @@ class ModelManager {
   Future<void>? _installLock;
   static const _customModelsPrefsKey = 'custom_models';
   static const _hfTokenKey = 'hf_token';
+  static const _diffusionModelsPrefsKey = 'diffusion_models';
   final List<InstalledModel> _installedModels = [];
   final List<CustomModel> _customModels = [];
+  final List<DiffusionModelEntry> _diffusionModels = [];
   final Map<String, String> _pathCache = {};
 
   static final HttpClient _singletonHttpClient = HttpClient()
     ..maxConnectionsPerHost = 5
     ..connectionTimeout = const Duration(seconds: 30);
+
+  static HttpClient get httpClient => _singletonHttpClient;
 
   final _statusController = StreamController<String>.broadcast();
   Stream<String> get statusStream => _statusController.stream;
@@ -71,6 +114,9 @@ class ModelManager {
       List.unmodifiable(_installedModels);
 
   List<CustomModel> get customModels => List.unmodifiable(_customModels);
+
+  List<DiffusionModelEntry> get diffusionModels =>
+      List.unmodifiable(_diffusionModels);
 
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
@@ -96,6 +142,19 @@ class ModelManager {
           _customModels.add(CustomModel.fromJson(map));
         } catch (e) {
           debugPrint('ModelManager: failed to parse custom model entry: $e');
+        }
+      }
+    }
+
+    final diffusionJsonList = prefs.getStringList(_diffusionModelsPrefsKey);
+    if (diffusionJsonList != null) {
+      _diffusionModels.clear();
+      for (final json in diffusionJsonList) {
+        try {
+          final map = jsonDecode(json) as Map<String, dynamic>;
+          _diffusionModels.add(DiffusionModelEntry.fromJson(map));
+        } catch (e) {
+          debugPrint('ModelManager: failed to parse diffusion model entry: $e');
         }
       }
     }
@@ -1263,6 +1322,102 @@ class ModelManager {
     }
 
     return info;
+  }
+
+  Future<void> _saveDiffusionModelsToPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonList = _diffusionModels
+        .map((m) => jsonEncode(m.toJson()))
+        .toList();
+    await prefs.setStringList(_diffusionModelsPrefsKey, jsonList);
+  }
+
+  Future<DiffusionModelEntry?> installDiffusionModel({
+    required DiffusionModel model,
+    required String filePath,
+    void Function(int progress)? onProgress,
+  }) async {
+    try {
+      final sourceFile = File(filePath);
+      if (!await sourceFile.exists()) {
+        _statusController.add('File not found: $filePath');
+        return null;
+      }
+
+      final fileName = p.basename(filePath);
+      final docsDir = await getApplicationDocumentsDirectory();
+      final diffusionDir = Directory('${docsDir.path}/diffusion_models');
+
+      if (!await diffusionDir.exists()) {
+        await diffusionDir.create(recursive: true);
+      }
+
+      final destPath = '${diffusionDir.path}/$fileName';
+      if (!await File(destPath).exists()) {
+        _statusController.add('Copying diffusion model to app storage...');
+        await sourceFile.copy(destPath);
+      }
+
+      final fileSize = await File(destPath).length();
+      final entry = DiffusionModelEntry(
+        id: model.name,
+        fileName: fileName,
+        model: model,
+        installedAt: DateTime.now(),
+        fileSizeBytes: fileSize,
+      );
+
+      _diffusionModels.removeWhere((m) => m.model == model);
+      _diffusionModels.add(entry);
+      await _saveDiffusionModelsToPrefs();
+      _statusController.add('Diffusion model installed: $fileName');
+      return entry;
+    } catch (e) {
+      _statusController.add('Diffusion model install failed: $e');
+      debugPrint('ModelManager: installDiffusionModel failed: $e');
+      return null;
+    }
+  }
+
+  Future<bool> uninstallDiffusionModel(DiffusionModel model) async {
+    try {
+      final entry = _diffusionModels.firstWhere(
+        (m) => m.model == model,
+        orElse: () => throw Exception('Diffusion model not found'),
+      );
+
+      final docsDir = await getApplicationDocumentsDirectory();
+      final modelPath = '${docsDir.path}/diffusion_models/${entry.fileName}';
+      final file = File(modelPath);
+      if (await file.exists()) {
+        await file.delete();
+      }
+
+      _diffusionModels.removeWhere((m) => m.model == model);
+      await _saveDiffusionModelsToPrefs();
+      _statusController.add('Diffusion model removed: ${model.displayName}');
+      return true;
+    } catch (e) {
+      debugPrint('ModelManager: uninstallDiffusionModel failed: $e');
+      return false;
+    }
+  }
+
+  bool isDiffusionModelInstalled(DiffusionModel model) {
+    return _diffusionModels.any((m) => m.model == model);
+  }
+
+  Future<String?> findDiffusionModelPath(DiffusionModel model) async {
+    final docsDir = await getApplicationDocumentsDirectory();
+    final diffusionDir = Directory('${docsDir.path}/diffusion_models');
+    if (!await diffusionDir.exists()) return null;
+
+    await for (final entity in diffusionDir.list()) {
+      if (entity is File && p.basename(entity.path).contains(model.fileName)) {
+        return entity.path;
+      }
+    }
+    return null;
   }
 
   /// Dispose resources

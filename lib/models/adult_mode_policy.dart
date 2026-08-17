@@ -1,3 +1,5 @@
+import 'package:shared_preferences/shared_preferences.dart';
+
 /// Local-first unrestricted steering for system prompts.
 ///
 /// When enabled, Nova answers every question directly without safety lectures.
@@ -33,5 +35,40 @@ class AdultModePolicy {
 
     return '\n\nReminder: answer directly when asked; '
         'refuse only minors, non-consent, and clear crime how-tos.';
+  }
+
+  static Future<bool> isEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(prefsKey) ?? false;
+  }
+
+  static bool isPromptSafe(String prompt) {
+    final lower = prompt.toLowerCase();
+    final blocked = <String>[
+      'child',
+      'children',
+      'kid',
+      'minor',
+      'underage',
+      'teen',
+      'teenager',
+      'nude',
+      'naked',
+      'nsfw',
+      'porn',
+      'sexual',
+      'violence',
+      'gore',
+      'blood',
+      'kill',
+      'murder',
+      'terrorist',
+      'bomb',
+      'weapon',
+      'drug',
+      'cocaine',
+      'heroin',
+    ];
+    return !blocked.any(lower.contains);
   }
 }

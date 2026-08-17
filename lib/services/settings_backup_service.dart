@@ -110,7 +110,8 @@ class SettingsBackupService {
       type: FileType.custom,
       allowedExtensions: const ['json'],
     );
-    if (result == null || result.files.isEmpty) {
+    if (result == null) return SettingsImportResult.cancelled();
+    if (result.files.isEmpty) {
       return SettingsImportResult.cancelled();
     }
 

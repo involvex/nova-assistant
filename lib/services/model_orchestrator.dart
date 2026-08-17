@@ -40,6 +40,8 @@ import 'package:nova_assistant/utils/tool_call_parser.dart';
 import 'package:nova_assistant/utils/vision_image_prep.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/session_history_reinjection.dart';
+import 'package:nova_assistant/services/image_generation_service.dart';
+import 'package:nova_assistant/models/diffusion_model_info.dart';
 
 enum DownloadConsent { download, pickFile, cancel }
 
@@ -1480,6 +1482,7 @@ class ModelOrchestrator {
             _activeModelSupportsImage = supportImage;
             _activeModelMaxTokens = _tokenLimitFor(modelToLoad);
             _isInitialized = true;
+            _isLoadingModel = false;
             _statusController.add('${modelToLoad.displayName} ready');
             _startModelKeepAlive(modelToLoad.displayName);
             _resetIdleTimer();
@@ -1575,6 +1578,7 @@ class ModelOrchestrator {
         _activeModelType = modelToLoad;
         _activeModelSupportsImage = supportImage;
         _isInitialized = true;
+        _isLoadingModel = false;
         _statusController.add('${modelToLoad.displayName} ready');
         _resetIdleTimer();
         return _activeModel!;
@@ -2862,6 +2866,7 @@ class ModelOrchestrator {
               } on Exception catch (e2) {
                 debugPrint('History reinjection retry failed: $e2');
                 _activeChat = null;
+                await _teardownPartialLoad();
                 yield InferenceResult(
                   text:
                       '⚠️ Could not restore chat history after edit. '
@@ -2978,6 +2983,7 @@ class ModelOrchestrator {
       } catch (e) {
         _activeChat = null;
         _lastChatSessionKey = null;
+        await _teardownPartialLoad();
         final err = e.toString();
         final isTokenOverflow =
             err.contains('too long') ||
@@ -3485,7 +3491,45 @@ class ModelOrchestrator {
       final resolvedName = normalized['name'] as String;
       final resolvedArgs = Map<String, dynamic>.from(normalized['args'] as Map);
 
-      if (dartTools.contains(resolvedName)) {
+      if (resolvedName == 'generate_image') {
+        final prompt = resolvedArgs['prompt'] as String? ?? '';
+        final sizeInt = (resolvedArgs['size'] as int?) ?? 512;
+        final size = switch (sizeInt) {
+          256 => ImageSize.size256,
+          1024 => ImageSize.size1024,
+          _ => ImageSize.size512,
+        };
+        final seed = resolvedArgs['seed'] as int?;
+        final modelName = resolvedArgs['model'] as String?;
+        final model = modelName != null
+            ? DiffusionModel.values.firstWhere(
+                (m) => m.name == modelName,
+                orElse: () => DiffusionModel.zImageTurbo,
+              )
+            : null;
+
+        final installed = await ImageGenerationService.instance
+            .isModelInstalled(model);
+        if (!installed) {
+          toolResult = <String, dynamic>{
+            'success': false,
+            'error': 'no_model',
+            'message':
+                'No diffusion model installed. '
+                'Download Z-Image-Turbo (~800MB) or FLUX.2-klein (~2.4GB) '
+                'in Settings to generate images.',
+          };
+        } else {
+          final imageBytes = await ImageGenerationService.instance
+              .generateImage(prompt, size: size, seed: seed, model: model);
+
+          toolResult = <String, dynamic>{
+            'success': imageBytes != null && imageBytes.isNotEmpty,
+            if (imageBytes != null && imageBytes.isNotEmpty)
+              'imageBytes': imageBytes,
+          };
+        }
+      } else if (dartTools.contains(resolvedName)) {
         if ([
           'create_task',
           'list_tasks',
@@ -3621,17 +3665,34 @@ class ModelOrchestrator {
         toolName: toolName,
         response: {
           'success': imageBytes != null && imageBytes.isNotEmpty,
-          if (imageBytes != null &&
-              imageBytes.isNotEmpty &&
-              _activeModelSupportsImage)
-            'message': 'Screenshot captured and displayed above'
-          else if (imageBytes != null && imageBytes.isNotEmpty)
-            'message':
-                'Screenshot captured, but the current model cannot process images'
+          if (imageBytes != null && imageBytes.isNotEmpty)
+            'message': 'Image generated and displayed above'
           else
-            'message':
-                'No screenshot available — screen capture may not be active',
+            'message': 'Image generation failed — model may not be installed',
         },
+      );
+      await _activeChat!.addQuery(toolResponseMessage);
+    } else if (toolName == 'generate_image') {
+      Uint8List? imageBytes;
+      final raw = toolResult['imageBytes'];
+      if (raw is Uint8List) {
+        imageBytes = raw;
+      } else if (raw is List<int>) {
+        imageBytes = Uint8List.fromList(raw);
+      }
+
+      if (imageBytes != null && imageBytes.isNotEmpty) {
+        final displayMessage = Message.withImage(
+          text: '[Generated image]',
+          imageBytes: imageBytes,
+          isUser: false,
+        );
+        await _activeChat!.addQuery(displayMessage);
+      }
+
+      final toolResponseMessage = Message.toolResponse(
+        toolName: toolName,
+        response: Map<String, dynamic>.from(toolResult),
       );
       await _activeChat!.addQuery(toolResponseMessage);
     } else {

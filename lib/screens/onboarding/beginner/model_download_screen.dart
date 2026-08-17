@@ -195,7 +195,8 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
         type: FileType.custom,
         allowedExtensions: ['litertlm', 'task'],
       );
-      if (pick == null || pick.files.isEmpty || pick.files.first.path == null) {
+      if (pick == null) return;
+      if (pick.files.isEmpty || pick.files.first.path == null) {
         if (mounted) {
           setState(() {
             _isBusy = false;

@@ -1762,7 +1762,7 @@ class _AssistantScreenState extends State<AssistantScreen>
           type: AttachedDataType.file,
           filePath: file.path,
           attachedAt: DateTime.now(),
-          fileSizeBytes: file.size,
+          fileSizeBytes: await file.length(),
         );
 
         _attachmentManager.add(attachment);
@@ -1797,7 +1797,8 @@ class _AssistantScreenState extends State<AssistantScreen>
         allowedExtensions: ['litertlm', 'task', 'gguf'],
       );
 
-      if (result == null || result.files.isEmpty) return;
+      if (result == null) return;
+      if (result.files.isEmpty) return;
       final file = result.files.first;
       if (file.path == null) return;
 

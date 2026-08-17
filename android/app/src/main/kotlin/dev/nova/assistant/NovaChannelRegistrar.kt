@@ -189,6 +189,9 @@ object NovaChannelRegistrar {
                 }
             }
 
+        // ── Image generation ────────────────────────────────────────────
+        ImageGenerationService.registerWith(messenger, appContext)
+
         // ── Main events ────────────────────────────────────────────────
         EventChannel(messenger, "dev.nova.assistant/main_events")
             .setStreamHandler(object : EventChannel.StreamHandler {

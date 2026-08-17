@@ -19,6 +19,7 @@ class NovaTools {
     sendSms,
     openSettings,
     takeScreenshot,
+    generateImage,
     openAppInfo,
     openBatterySettings,
     createTask,
@@ -202,6 +203,32 @@ class NovaTools {
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},
+    },
+  );
+
+  static final Tool generateImage = Tool(
+    name: 'generate_image',
+    description:
+        'Generate an image from a text prompt using an on-device diffusion model. '
+        'Use this ONLY when the user explicitly asks to create, draw, generate, '
+        'or make an image, picture, photo, or artwork. '
+        'Do NOT use this for screenshots, photos, or existing images — '
+        'use take_screenshot or image attachments for those. '
+        'Requires a diffusion model to be installed.',
+    parameters: <String, Object>{
+      'type': 'object',
+      'properties': <String, Object>{
+        'prompt': {
+          'type': 'string',
+          'description': 'Detailed text description of the image to generate',
+        },
+        'size': {
+          'type': 'integer',
+          'description':
+              'Image size in pixels (256, 512, or 1024). Default: 512.',
+        },
+      },
+      'required': ['prompt'],
     },
   );
 

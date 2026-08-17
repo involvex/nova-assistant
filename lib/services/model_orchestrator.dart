@@ -1960,8 +1960,14 @@ class ModelOrchestrator {
     try {
       await chat.addQuery(message);
     } catch (e) {
+      final err = e.toString();
+      final isImageUnsupported = err.contains('does not support image input');
       yield InferenceResult(
-        text: '⚠️ Could not start inference with this image.\n\n$e',
+        text: isImageUnsupported
+            ? '⚠️ The current model can\'t process images. Switch to a '
+                  'vision model (FastVLM or Gemma 4) in Settings, or send '
+                  'text-only input.'
+            : '⚠️ Could not start inference with this image.\n\n$e',
         model: selector.primaryHeavy,
         isStreaming: false,
       );
@@ -2989,11 +2995,16 @@ class ModelOrchestrator {
             err.contains('too long') ||
             err.contains('INVALID_ARGUMENT') ||
             err.contains('Exceeding the maximum');
+        final isImageUnsupported = err.contains('does not support image input');
         yield InferenceResult(
           text: isTokenOverflow
               ? '⚠️ This screenshot plus the system context is too large '
                     'for the model\'s context window. Try a shorter question, '
                     'turn off High context in Settings, or reset inference.'
+              : isImageUnsupported
+              ? '⚠️ The current model can\'t process images. Switch to a '
+                    'vision model (FastVLM or Gemma 4) in Settings, or send '
+                    'text-only input.'
               : '⚠️ Could not start inference.\n\n$e',
           model: model,
           isStreaming: false,

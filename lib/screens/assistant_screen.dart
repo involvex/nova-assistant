@@ -1956,6 +1956,8 @@ class _AssistantScreenState extends State<AssistantScreen>
             Column(
               children: [
                 _buildAppBar(),
+                if (ModelOrchestrator.instance.isPreparingChat)
+                  _buildChatPrepOverlay(),
                 if (_currentScreenshot != null) _buildScreenshotIndicator(),
                 if (_attachmentManager.hasAttachments)
                   _buildAttachmentIndicator(),
@@ -2044,10 +2046,7 @@ class _AssistantScreenState extends State<AssistantScreen>
               ],
             ),
             if (_debugMode) _buildDebugBanner(),
-            if (isLoadingModel)
-              _buildModelLoadingOverlay()
-            else if (ModelOrchestrator.instance.isPreparingChat)
-              _buildChatPrepOverlay(),
+            if (isLoadingModel) _buildModelLoadingOverlay(),
             if (_showSearch)
               Positioned(
                 top: 0,
@@ -2100,34 +2099,27 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Widget _buildChatPrepOverlay() {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.4),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Color(0xFF6C63FF),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                _status,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-            ],
+    return Container(
+      color: Colors.black.withValues(alpha: 0.4),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFF6C63FF),
+            ),
           ),
-        ),
+          const SizedBox(width: 10),
+          Text(
+            _status,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+        ],
       ),
     );
   }

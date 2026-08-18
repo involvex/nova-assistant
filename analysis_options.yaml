@@ -27,29 +27,28 @@ analyzer:
 
 dart_code_linter:
   metrics:
-    cyclomatic-complexity: 25
-    number-of-parameters: 5
-    maximum-nesting-level: 6
+    cyclomatic-complexity: 20
+    number-of-parameters: 4
+    maximum-nesting-level: 5
   metrics-exclude:
     - test/**
   rules:
-    - avoid-dynamic: false
-    - avoid-passing-async-when-sync-expected: false
-    - avoid-redundant-async: false
-    - avoid-unnecessary-type-assertions: false
-    - avoid-unnecessary-type-casts: false
-    - avoid-unrelated-type-assertions: false
-    - avoid-unused-parameters: false
-    - avoid-nested-conditional-expressions: false
-    - newline-before-return: false
-    - no-boolean-literal-compare: false
-    - no-empty-block: false
-    - prefer-trailing-comma: false
-    - prefer-conditional-expressions: false
-    - no-equal-then-else: false
-    # Noisy across UI/services (Theme.of/MediaQuery/getters); style debt, not defects.
-    - prefer-moving-to-variable: false
-    - prefer-match-file-name: false
+    - avoid-dynamic: true
+    - avoid-passing-async-when-sync-expected: true
+    - avoid-redundant-async: true
+    - avoid-unnecessary-type-assertions: true
+    - avoid-unnecessary-type-casts: true
+    - avoid-unrelated-type-assertions: true
+    - avoid-unused-parameters: true
+    - avoid-nested-conditional-expressions: true
+    - newline-before-return: true
+    - no-boolean-literal-compare: true
+    - no-empty-block: true
+    - prefer-trailing-comma: true
+    - prefer-conditional-expressions: true
+    - no-equal-then-else: true
+    - prefer-moving-to-variable: true
+    - prefer-match-file-name: true
 
 linter:
   rules:
@@ -108,7 +107,3 @@ linter:
     - use_full_hex_values_for_flutter_colors: true
     - use_key_in_widget_constructors: true
     - void_checks: true
-
-    # Disabled (incompatible with codebase)
-    - prefer_const_constructors_in_immutables: false
-    - sort_child_properties_last: false

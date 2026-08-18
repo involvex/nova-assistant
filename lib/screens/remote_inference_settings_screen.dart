@@ -41,7 +41,7 @@ class _RemoteInferenceSettingsScreenState
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    final config = RemoteInferenceConfig.fromPrefs(prefs);
+    final config = await RemoteInferenceConfig.fromPrefsAsync();
     if (!mounted) return;
     setState(() {
       _backend = RemoteInferenceConfig.backendFromPrefs(prefs);

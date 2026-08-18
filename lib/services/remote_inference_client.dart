@@ -54,6 +54,7 @@ class RemoteInferenceClient {
     double temperature = 0.7,
   }) async* {
     final request = await _httpClient.postUrl(config.chatCompletionsUri());
+    request.headers.set('Accept-Encoding', 'gzip');
     config.headers().forEach(request.headers.set);
     final body = jsonEncode({
       'model': config.modelId,
@@ -95,6 +96,7 @@ class RemoteInferenceClient {
   Future<bool> testConnection(RemoteInferenceConfig config) async {
     try {
       final request = await _httpClient.getUrl(config.modelsUri());
+      request.headers.set('Accept-Encoding', 'gzip');
       config.headers().forEach(request.headers.set);
       final response = await request.close().timeout(
         const Duration(seconds: 5),

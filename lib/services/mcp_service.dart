@@ -4,11 +4,14 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' as gemma;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:nova_assistant/models/external_tool.dart';
 import 'package:nova_assistant/services/mcp_client.dart';
+import 'package:nova_assistant/utils/secure_prefs.dart';
+import 'package:path/path.dart' as p;
 
 class McpService {
   static McpService? _instance;
@@ -112,6 +115,19 @@ class McpService {
       if (jsonStr != null) {
         final list = (jsonDecode(jsonStr) as List).cast<Map<String, dynamic>>();
         _servers = list.map(McpServerConfig.fromJson).toList();
+
+        for (final server in _servers) {
+          if (server.authToken != null && server.authToken!.isNotEmpty) {
+            await SecurePrefs().write(
+              'mcp_server_token_${server.id}',
+              server.authToken!,
+            );
+          }
+        }
+
+        _servers = _servers.map((s) => s.copyWith(authToken: null)).toList();
+        await _saveServers();
+
         _serversController.add(_servers);
       }
     } catch (e) {
@@ -122,7 +138,16 @@ class McpService {
   Future<void> _saveServers() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final json = jsonEncode(_servers.map((e) => e.toJson()).toList());
+
+      for (final server in _servers) {
+        final token = server.authToken;
+        if (token != null && token.isNotEmpty) {
+          await SecurePrefs().write('mcp_server_token_${server.id}', token);
+        }
+      }
+
+      final sanitized = _servers.map((s) => s.toJsonForStorage()).toList();
+      final json = jsonEncode(sanitized);
       await prefs.setString(_serversKey, json);
       _serversController.add(_servers);
     } catch (e) {
@@ -441,12 +466,23 @@ class McpService {
     final path = source.config['path'] ?? '';
     if (path.isEmpty) return '';
 
-    final file = File(path);
-    if (!await file.exists()) {
+    final resolved = File(p.absolute(path));
+    if (!await resolved.exists()) {
       return '[File not found: $path]';
     }
 
-    final content = await file.readAsString();
+    final docsDir = await getApplicationDocumentsDirectory();
+    final sandboxRoot = p.absolute(docsDir.path);
+    final resolvedPath = p.absolute(resolved.path);
+
+    if (!resolvedPath.startsWith(sandboxRoot)) {
+      debugPrint(
+        'McpService: blocked file read outside sandbox: $resolvedPath',
+      );
+      return '[Access denied: file is outside app sandbox]';
+    }
+
+    final content = await resolved.readAsString();
     if (source.config['maxLength'] != null) {
       final maxLength = int.parse(source.config['maxLength']!);
       if (content.length > maxLength) {
@@ -463,6 +499,7 @@ class McpService {
     final client = HttpClient();
     try {
       final request = await client.getUrl(Uri.parse(url));
+      request.headers.set('Accept-Encoding', 'gzip');
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
 
@@ -484,6 +521,7 @@ class McpService {
     final client = HttpClient();
     try {
       final request = await client.getUrl(Uri.parse(url));
+      request.headers.set('Accept-Encoding', 'gzip');
       if (token.isNotEmpty) {
         request.headers.set('Authorization', 'Bearer $token');
       }
@@ -594,11 +632,19 @@ class DataSource {
   }
 
   factory DataSource.fromJson(Map<String, dynamic> json) {
+    final typeName = json['type'] as String?;
+    if (typeName == null) {
+      throw FormatException('Missing type in DataSource JSON');
+    }
+    final type = SourceType.values.firstWhere(
+      (t) => t.name == typeName,
+      orElse: () => throw FormatException('Unknown SourceType: $typeName'),
+    );
     return DataSource(
       id: json['id'] as String,
       name: json['name'] as String,
       description: json['description'] as String,
-      type: SourceType.values.firstWhere((t) => t.name == json['type']),
+      type: type,
       config: Map<String, String>.from(json['config'] as Map? ?? {}),
       enabled: json['enabled'] as bool? ?? true,
       createdAt: DateTime.parse(json['createdAt'] as String),

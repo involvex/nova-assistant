@@ -4,6 +4,8 @@ import 'package:nova_assistant/services/remote_inference_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('RemoteInferenceConfig', () {
     test('builds chat completions URI without trailing slash', () {
       const config = RemoteInferenceConfig(
@@ -46,7 +48,7 @@ void main() {
       await config.save(prefs);
       await RemoteInferenceConfig.saveBackend(prefs, InferenceBackend.remote);
 
-      final loaded = RemoteInferenceConfig.fromPrefs(prefs);
+      final loaded = await RemoteInferenceConfig.fromPrefsAsync();
       expect(loaded.baseUrl, 'http://10.0.0.5:8080');
       expect(loaded.modelId, 'llama');
       expect(loaded.apiToken, 'tok');

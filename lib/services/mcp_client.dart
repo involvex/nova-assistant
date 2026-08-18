@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:nova_assistant/services/mcp_oauth.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
+import 'package:nova_assistant/utils/secure_prefs.dart';
 
 enum McpTransport { httpSse, streamableHttp, stdio }
 
@@ -86,6 +87,12 @@ class McpServerConfig {
     'presetId': presetId,
     'enabled': enabled,
   };
+
+  Map<String, dynamic> toJsonForStorage() {
+    final json = Map<String, dynamic>.from(toJson());
+    json.remove('authToken');
+    return json;
+  }
 
   factory McpServerConfig.fromJson(Map<String, dynamic> json) {
     final modeRaw = json['authMode'] as String?;
@@ -245,6 +252,14 @@ class McpClient {
     if (config.authToken != null && config.authToken!.isNotEmpty) {
       return config.authToken;
     }
+
+    final secureToken = await SecurePrefs().read(
+      'mcp_server_token_${config.id}',
+    );
+    if (secureToken != null && secureToken.isNotEmpty) {
+      return secureToken;
+    }
+
     if (config.authMode == McpAuthMode.oauth || config.hasOAuth) {
       return McpOAuthService.instance.loadAccessToken(config.id);
     }
@@ -252,15 +267,49 @@ class McpClient {
     return null;
   }
 
+  static const _allowedStdioCommands = <String>{
+    'npx',
+    'node',
+    'python',
+    'python3',
+    'uv',
+    'uvx',
+    'bun',
+    'deno',
+    'java',
+    'kotlin',
+    'go',
+    'dotnet',
+    'mvn',
+    'gradle',
+    './mcp-server',
+  };
+
+  bool _isAllowedStdioCommand(String command, List<String> args) {
+    final base = command.split(Platform.pathSeparator).last.toLowerCase();
+    if (_allowedStdioCommands.contains(base)) return true;
+    if (base == 'mcp-server' || base.endsWith('-mcp-server')) return true;
+    if (config.presetId != null && config.presetId!.isNotEmpty) {
+      return true;
+    }
+    return false;
+  }
+
   Future<bool> _connectStdio() async {
     if (config.command == null) return false;
+
+    if (!_isAllowedStdioCommand(config.command!, config.args)) {
+      debugPrint(
+        'McpClient: blocked disallowed stdio command: ${config.command} ${config.args.join(' ')}',
+      );
+      return false;
+    }
 
     _process = await Process.start(
       config.command!,
       config.args,
       environment: {
-        // ignore: use_null_aware_elements
-        if (_resolvedToken != null) 'MCP_AUTH_TOKEN': _resolvedToken!,
+        if (_resolvedToken != null) 'MCP_AUTH_TOKEN': _resolvedToken as String,
       },
     );
 
@@ -295,6 +344,7 @@ class McpClient {
     final request = await _httpClient.getUrl(uri);
     _applyAuth(request);
     request.headers.set('Accept', 'text/event-stream');
+    request.headers.set('Accept-Encoding', 'gzip');
     final response = await request.close();
 
     await AgentDebugLog.log(
@@ -527,6 +577,7 @@ class McpClient {
     final request = await _httpClient.postUrl(uri);
     _applyAuth(request);
     request.headers.set('Content-Type', 'application/json');
+    request.headers.set('Accept-Encoding', 'gzip');
 
     final body = jsonEncode({
       'jsonrpc': '2.0',
@@ -559,6 +610,7 @@ class McpClient {
     _applyAuth(request);
     request.headers.set('Content-Type', 'application/json');
     request.headers.set('Accept', 'application/json, text/event-stream');
+    request.headers.set('Accept-Encoding', 'gzip');
     if (_sessionId != null) {
       request.headers.set('Mcp-Session-Id', _sessionId!);
     }
@@ -659,6 +711,7 @@ class McpClient {
     _applyAuth(request);
     request.headers.set('Content-Type', 'application/json');
     request.headers.set('Accept', 'application/json, text/event-stream');
+    request.headers.set('Accept-Encoding', 'gzip');
     if (_sessionId != null) {
       request.headers.set('Mcp-Session-Id', _sessionId!);
     }

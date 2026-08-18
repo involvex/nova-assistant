@@ -141,6 +141,15 @@ class HuggingfaceHubService {
     }).toList();
   }
 
+  /// Keeps only LiteRT diffusion assets (`.tflite`).
+  static List<HfRepoFile> filterTfliteFiles(Iterable<HfRepoFile> files) {
+    return files.where((f) {
+      if (!f.isFile || f.path.isEmpty) return false;
+      final lower = f.path.toLowerCase();
+      return lower.endsWith('.tflite');
+    }).toList();
+  }
+
   /// Prefer `.litertlm` over `.task` when both exist; otherwise keep order.
   static List<HfRepoFile> preferLitertlm(List<HfRepoFile> files) {
     final litertlm = files

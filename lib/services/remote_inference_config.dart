@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nova_assistant/models/inference_backend.dart';
+import 'package:nova_assistant/utils/secure_prefs.dart';
 
 /// Settings for OpenAI-compatible LAN remote inference.
 class RemoteInferenceConfig {
@@ -46,7 +47,16 @@ class RemoteInferenceConfig {
     return RemoteInferenceConfig(
       baseUrl: prefs.getString(baseUrlPrefsKey) ?? defaultBaseUrl,
       modelId: prefs.getString(modelIdPrefsKey) ?? defaultModelId,
-      apiToken: prefs.getString(tokenPrefsKey),
+      apiToken: null,
+    );
+  }
+
+  static Future<RemoteInferenceConfig> fromPrefsAsync() async {
+    final prefs = await SharedPreferences.getInstance();
+    return RemoteInferenceConfig(
+      baseUrl: prefs.getString(baseUrlPrefsKey) ?? defaultBaseUrl,
+      modelId: prefs.getString(modelIdPrefsKey) ?? defaultModelId,
+      apiToken: await SecurePrefs().read(tokenPrefsKey),
     );
   }
 
@@ -54,9 +64,9 @@ class RemoteInferenceConfig {
     await prefs.setString(baseUrlPrefsKey, baseUrl);
     await prefs.setString(modelIdPrefsKey, modelId);
     if (apiToken == null || apiToken!.isEmpty) {
-      await prefs.remove(tokenPrefsKey);
+      await SecurePrefs().delete(tokenPrefsKey);
     } else {
-      await prefs.setString(tokenPrefsKey, apiToken!);
+      await SecurePrefs().write(tokenPrefsKey, apiToken!);
     }
   }
 

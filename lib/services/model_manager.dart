@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
@@ -10,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/diffusion_model_info.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
+import 'package:nova_assistant/utils/secure_prefs.dart';
 
 class InstalledModel {
   final String id;
@@ -36,16 +38,23 @@ class InstalledModel {
     'fileSizeBytes': fileSizeBytes,
   };
 
-  factory InstalledModel.fromJson(Map<String, dynamic> json) => InstalledModel(
-    id: json['id'] as String,
-    fileName: json['fileName'] as String,
-    modelType: ModelType.values.firstWhere(
-      (e) => e.name == json['modelType'],
-      orElse: () => ModelType.general,
-    ),
-    installedAt: DateTime.parse(json['installedAt'] as String),
-    fileSizeBytes: json['fileSizeBytes'] as int,
-  );
+  factory InstalledModel.fromJson(Map<String, dynamic> json) {
+    final modelTypeName = json['modelType'] as String?;
+    if (modelTypeName == null) {
+      throw FormatException('Missing modelType in InstalledModel JSON');
+    }
+    final modelType = ModelType.values.firstWhere(
+      (e) => e.name == modelTypeName,
+      orElse: () => throw FormatException('Unknown ModelType: $modelTypeName'),
+    );
+    return InstalledModel(
+      id: json['id'] as String,
+      fileName: json['fileName'] as String,
+      modelType: modelType,
+      installedAt: DateTime.parse(json['installedAt'] as String),
+      fileSizeBytes: json['fileSizeBytes'] as int,
+    );
+  }
 }
 
 class DiffusionModelEntry {
@@ -73,17 +82,23 @@ class DiffusionModelEntry {
     'fileSizeBytes': fileSizeBytes,
   };
 
-  factory DiffusionModelEntry.fromJson(Map<String, dynamic> json) =>
-      DiffusionModelEntry(
-        id: json['id'] as String,
-        fileName: json['fileName'] as String,
-        model: DiffusionModel.values.firstWhere(
-          (e) => e.name == json['model'],
-          orElse: () => DiffusionModel.zImageTurbo,
-        ),
-        installedAt: DateTime.parse(json['installedAt'] as String),
-        fileSizeBytes: json['fileSizeBytes'] as int,
-      );
+  factory DiffusionModelEntry.fromJson(Map<String, dynamic> json) {
+    final modelName = json['model'] as String?;
+    if (modelName == null) {
+      throw FormatException('Missing model in DiffusionModelEntry JSON');
+    }
+    final model = DiffusionModel.values.firstWhere(
+      (e) => e.name == modelName,
+      orElse: () => throw FormatException('Unknown DiffusionModel: $modelName'),
+    );
+    return DiffusionModelEntry(
+      id: json['id'] as String,
+      fileName: json['fileName'] as String,
+      model: model,
+      installedAt: DateTime.parse(json['installedAt'] as String),
+      fileSizeBytes: json['fileSizeBytes'] as int,
+    );
+  }
 }
 
 class ModelManager {
@@ -213,13 +228,13 @@ class ModelManager {
       final fileName = p.basename(uri.path);
 
       // #region agent log
-      await AgentDebugLog.log(
+      unawaited(AgentDebugLog.log(
         hypothesisId: 'H1-H3',
         location: 'model_manager.dart:installFromNetwork:start',
         message: 'installFromNetwork started',
         data: {'url': url, 'fileName': fileName, 'modelType': modelType.name},
         runId: 'post-fix',
-      );
+      ));
       // #endregion
 
       final dir = await getApplicationDocumentsDirectory();
@@ -245,7 +260,7 @@ class ModelManager {
             _findCanonicalName(fileName, modelType) ?? fileName;
 
         // #region agent log
-        await AgentDebugLog.log(
+        unawaited(AgentDebugLog.log(
           hypothesisId: 'H1',
           location: 'model_manager.dart:installFromNetwork:foundOnDisk',
           message: 'Early disk path with deferInstall=true',
@@ -256,7 +271,7 @@ class ModelManager {
             'fileOnDiskExists': await fileOnDisk.exists(),
           },
           runId: 'post-fix',
-        );
+        ));
         // #endregion
 
         onProgress?.call(90);
@@ -299,13 +314,13 @@ class ModelManager {
           'Add your HF token in Settings.',
         );
         // #region agent log
-        await AgentDebugLog.log(
+        unawaited(AgentDebugLog.log(
           hypothesisId: 'F',
           location: 'model_manager.dart:installFromNetwork:noToken',
           message: 'Blocked gated download without HF token',
           data: {'fileName': fileName, 'url': url},
           runId: 'post-fix',
-        );
+        ));
         // #endregion
 
         return null;
@@ -319,13 +334,14 @@ class ModelManager {
       final client = _singletonHttpClient;
       try {
         final request = await client.getUrl(uri);
+        request.headers.set('Accept-Encoding', 'gzip');
         if (hfToken != null && hfToken.isNotEmpty) {
           request.headers.set('Authorization', 'Bearer $hfToken');
         }
         final response = await request.close();
 
         // #region agent log
-        await AgentDebugLog.log(
+        unawaited(AgentDebugLog.log(
           hypothesisId: 'F',
           location: 'model_manager.dart:installFromNetwork:http',
           message: 'Download HTTP response',
@@ -336,7 +352,7 @@ class ModelManager {
             'hasToken': hfToken != null && hfToken.isNotEmpty,
           },
           runId: 'post-fix',
-        );
+        ));
         // #endregion
 
         if (response.statusCode == 401 || response.statusCode == 403) {
@@ -381,7 +397,7 @@ class ModelManager {
             'Download incomplete: expected $totalBytes bytes, got $receivedBytes',
           );
           // #region agent log
-          await AgentDebugLog.log(
+          unawaited(AgentDebugLog.log(
             hypothesisId: 'F',
             location: 'model_manager.dart:installFromNetwork:incomplete',
             message: 'Download incomplete',
@@ -391,7 +407,7 @@ class ModelManager {
               'received': receivedBytes,
             },
             runId: 'post-fix',
-          );
+          ));
           // #endregion
           try {
             await tempFile.delete();
@@ -407,6 +423,23 @@ class ModelManager {
       }
 
       onProgress?.call(92);
+      _statusController.add('Verifying $fileName...');
+
+      final hashValid = await verifyModelHash(tempFile.path, fileName);
+      if (!hashValid) {
+        _statusController.add(
+          'Downloaded file hash verification failed for $fileName',
+        );
+        try {
+          await tempFile.delete();
+        } catch (e) {
+          debugPrint(
+            'ModelManager: failed to delete temp file after hash mismatch: $e',
+          );
+        }
+        return null;
+      }
+
       _statusController.add('Installing $fileName...');
 
       // Delegate to installFromFile — copies to docs dir, registers with
@@ -425,7 +458,7 @@ class ModelManager {
       }
 
       // #region agent log
-      await AgentDebugLog.log(
+      unawaited(AgentDebugLog.log(
         hypothesisId: 'H3',
         location: 'model_manager.dart:installFromNetwork:done',
         message: 'installFromNetwork finished',
@@ -437,7 +470,7 @@ class ModelManager {
           'prefsNames': _installedModels.map((m) => m.fileName).toList(),
         },
         runId: 'post-fix',
-      );
+      ));
       // #endregion
 
       // Clean up temp file
@@ -456,16 +489,46 @@ class ModelManager {
       _statusController.add('Install failed: $e');
       debugPrint('ModelManager: installFromNetwork failed: $e');
       // #region agent log
-      await AgentDebugLog.log(
+      unawaited(AgentDebugLog.log(
         hypothesisId: 'F',
         location: 'model_manager.dart:installFromNetwork:error',
         message: 'installFromNetwork exception',
         data: {'error': e.toString()},
         runId: 'post-fix',
-      );
+      ));
       // #endregion
       return null;
     }
+  }
+
+  static Future<String?> _computeSha256(String filePath) async {
+    try {
+      final bytes = await File(filePath).readAsBytes();
+      final digest = sha256.convert(bytes);
+      return digest.toString();
+    } catch (e) {
+      debugPrint('ModelManager: failed to compute SHA-256 for $filePath: $e');
+      return null;
+    }
+  }
+
+  static Future<bool> verifyModelHash(String filePath, String fileName) async {
+    final actualHash = await _computeSha256(filePath);
+    if (actualHash == null) return false;
+
+    final novaModel = ModelHuggingFaceURLs.modelFromFileName(fileName);
+    if (novaModel == null) return true;
+
+    final expectedHash = ModelHashes.hashFor(novaModel);
+    if (expectedHash == null) return true;
+
+    if (actualHash != expectedHash) {
+      debugPrint(
+        'ModelManager: hash mismatch for $fileName — expected $expectedHash, got $actualHash',
+      );
+      return false;
+    }
+    return true;
   }
 
   /// Find a model file on disk using consistent basename matching.
@@ -614,6 +677,15 @@ class ModelManager {
   }) async {
     String canonicalPath = '';
 
+    final fileName = p.basename(filePath);
+    final hashValid = await verifyModelHash(filePath, fileName);
+    if (!hashValid) {
+      _statusController.add(
+        'Model file hash verification failed for $fileName',
+      );
+      return null;
+    }
+
     // Validate the file before attempting installation
     final validationError = await validateModelFile(filePath);
     if (validationError != null) {
@@ -654,7 +726,7 @@ class ModelManager {
       canonicalPath = '${docsDir.path}/$canonicalName';
 
       // #region agent log
-      await AgentDebugLog.log(
+      unawaited(AgentDebugLog.log(
         hypothesisId: 'H2-H4',
         location: 'model_manager.dart:installFromFile:canonical',
         message: 'Resolved canonical install name',
@@ -665,7 +737,7 @@ class ModelManager {
           'modelType': modelType.name,
         },
         runId: 'post-fix',
-      );
+      ));
       // #endregion
 
       bool copied = false;
@@ -1131,18 +1203,14 @@ class ModelManager {
   }
 
   static Future<String?> getHuggingFaceToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(_hfTokenKey);
-    if (token != null && token.isNotEmpty) return token;
-    return null;
+    return SecurePrefs().read(_hfTokenKey);
   }
 
   static Future<void> setHuggingFaceToken(String? token) async {
-    final prefs = await SharedPreferences.getInstance();
     if (token == null || token.isEmpty) {
-      await prefs.remove(_hfTokenKey);
+      await SecurePrefs().delete(_hfTokenKey);
     } else {
-      await prefs.setString(_hfTokenKey, token);
+      await SecurePrefs().write(_hfTokenKey, token);
     }
   }
 
@@ -1270,13 +1338,13 @@ class ModelManager {
         await _saveToPrefs();
 
         // #region agent log
-        await AgentDebugLog.log(
+        unawaited(AgentDebugLog.log(
           hypothesisId: 'H2-H4',
           location: 'model_manager.dart:_repairMisnamedTempDownloads',
           message: 'Repaired misnamed temp download',
           data: {'from': name, 'to': canonical, 'size': size},
           runId: 'post-fix',
-        );
+        ));
         // #endregion
       }
     } catch (e) {
@@ -1334,17 +1402,17 @@ class ModelManager {
 
   Future<DiffusionModelEntry?> installDiffusionModel({
     required DiffusionModel model,
-    required String filePath,
+    required String sourceDirectory,
     void Function(int progress)? onProgress,
   }) async {
     try {
-      final sourceFile = File(filePath);
-      if (!await sourceFile.exists()) {
-        _statusController.add('File not found: $filePath');
+      final sourceDir = Directory(sourceDirectory);
+      if (!await sourceDir.exists()) {
+        _statusController.add('Source directory not found: $sourceDirectory');
         return null;
       }
 
-      final fileName = p.basename(filePath);
+      final modelDirName = model.fileName;
       final docsDir = await getApplicationDocumentsDirectory();
       final diffusionDir = Directory('${docsDir.path}/diffusion_models');
 
@@ -1352,25 +1420,34 @@ class ModelManager {
         await diffusionDir.create(recursive: true);
       }
 
-      final destPath = '${diffusionDir.path}/$fileName';
-      if (!await File(destPath).exists()) {
-        _statusController.add('Copying diffusion model to app storage...');
-        await sourceFile.copy(destPath);
+      final destDir = Directory('${diffusionDir.path}/$modelDirName');
+      if (!await destDir.exists()) {
+        await destDir.create(recursive: true);
       }
 
-      final fileSize = await File(destPath).length();
+      int totalBytes = 0;
+      await for (final entity in sourceDir.list()) {
+        if (entity is File) {
+          final destFile = File('${destDir.path}/${p.basename(entity.path)}');
+          if (!await destFile.exists()) {
+            await entity.copy(destFile.path);
+          }
+          totalBytes += await entity.length();
+        }
+      }
+
       final entry = DiffusionModelEntry(
         id: model.name,
-        fileName: fileName,
+        fileName: modelDirName,
         model: model,
         installedAt: DateTime.now(),
-        fileSizeBytes: fileSize,
+        fileSizeBytes: totalBytes,
       );
 
       _diffusionModels.removeWhere((m) => m.model == model);
       _diffusionModels.add(entry);
       await _saveDiffusionModelsToPrefs();
-      _statusController.add('Diffusion model installed: $fileName');
+      _statusController.add('Diffusion model installed: $modelDirName');
       return entry;
     } catch (e) {
       _statusController.add('Diffusion model install failed: $e');
@@ -1387,10 +1464,11 @@ class ModelManager {
       );
 
       final docsDir = await getApplicationDocumentsDirectory();
-      final modelPath = '${docsDir.path}/diffusion_models/${entry.fileName}';
-      final file = File(modelPath);
-      if (await file.exists()) {
-        await file.delete();
+      final modelDir = Directory(
+        '${docsDir.path}/diffusion_models/${entry.fileName}',
+      );
+      if (await modelDir.exists()) {
+        await modelDir.delete(recursive: true);
       }
 
       _diffusionModels.removeWhere((m) => m.model == model);
@@ -1409,13 +1487,11 @@ class ModelManager {
 
   Future<String?> findDiffusionModelPath(DiffusionModel model) async {
     final docsDir = await getApplicationDocumentsDirectory();
-    final diffusionDir = Directory('${docsDir.path}/diffusion_models');
-    if (!await diffusionDir.exists()) return null;
-
-    await for (final entity in diffusionDir.list()) {
-      if (entity is File && p.basename(entity.path).contains(model.fileName)) {
-        return entity.path;
-      }
+    final modelDir = Directory(
+      '${docsDir.path}/diffusion_models/${model.fileName}',
+    );
+    if (await modelDir.exists()) {
+      return modelDir.path;
     }
     return null;
   }

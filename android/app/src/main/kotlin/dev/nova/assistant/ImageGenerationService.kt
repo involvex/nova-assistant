@@ -4,20 +4,9 @@ import android.content.Context
 import android.util.Log
 import io.flutter.plugin.common.MethodChannel
 
-/**
- * ImageGenerationService — on-device diffusion via LiteRT multi-graph pipeline.
- *
- * This is a Phase 1 skeleton. Real inference requires Phase 0 feasibility
- * verification (LiteRT CompiledModel multi-graph API on the target device).
- *
- * Methods throw UnsupportedOperationException until the native pipeline
- * is implemented and the LiteRT TFLite dependency is added.
- */
 object ImageGenerationService {
   private const val TAG = "ImageGenerationService"
   private const val CHANNEL = "dev.nova.assistant/image_gen"
-
-  private var modelLoaded = false
 
   fun registerWith(messenger: io.flutter.plugin.common.BinaryMessenger, context: Context) {
     MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
@@ -28,9 +17,9 @@ object ImageGenerationService {
               ?: throw IllegalArgumentException("prompt required")
             val size = call.argument<Int>("size") ?: 512
             val seed = call.argument<Int>("seed")
-            val model = call.argument<String>("model")
+            val modelName = call.argument<String>("model")
 
-            result.success(generateImage(context, prompt, size, seed, model))
+            result.success(generateImage(context, prompt, size, seed, modelName))
           }
           "isModelInstalled" -> {
             val model = call.argument<String>("model")
@@ -53,40 +42,89 @@ object ImageGenerationService {
     prompt: String,
     size: Int,
     seed: Int?,
-    model: String?,
+    modelName: String?,
   ): ByteArray? {
-    if (!modelLoaded) {
-      throw UnsupportedOperationException(
-        "Image generation pipeline not initialized. " +
-            "Phase 0 LiteRT multi-graph feasibility verification required."
-      )
+    if (modelName == null) {
+      throw IllegalArgumentException("model name required")
     }
-    throw UnsupportedOperationException(
-      "Diffusion inference not yet implemented. " +
-          "Requires LiteRT CompiledModel multi-graph API + NNAPI delegate."
+
+    val modelType = when {
+      modelName.contains(ImageGenerationModels.MODEL_Z_IMAGE_TURBO, ignoreCase = true) ->
+        DiffusionPipeline.ModelType.Z_IMAGE_TURBO
+      modelName.contains(ImageGenerationModels.MODEL_FLUX_2_KLEIN, ignoreCase = true) ->
+        DiffusionPipeline.ModelType.FLUX_2_KLEIN
+      else -> throw IllegalArgumentException("Unsupported model: $modelName")
+    }
+
+    val supportedSizes = listOf(256, 512, 1024)
+    if (size !in supportedSizes) {
+      throw IllegalArgumentException("Unsupported size: $size. Supported: $supportedSizes")
+    }
+
+    val modelDir = DiffusionPipeline.getModelDir(context, modelType)
+    if (!modelDir.exists() || !modelDir.listFiles()?.any { it.extension.equals("tflite", ignoreCase = true) }!!) {
+      throw IllegalStateException("Model not installed: $modelName. Install it from Settings.")
+    }
+
+    val spec = when (modelType) {
+      DiffusionPipeline.ModelType.Z_IMAGE_TURBO ->
+        ImageGenerationModels.MODEL_SPECS[ImageGenerationModels.MODEL_Z_IMAGE_TURBO]
+      DiffusionPipeline.ModelType.FLUX_2_KLEIN ->
+        ImageGenerationModels.MODEL_SPECS[ImageGenerationModels.MODEL_FLUX_2_KLEIN]
+    } ?: throw IllegalStateException("No model spec for $modelName")
+
+    val config = DiffusionPipeline.GenerationConfig(
+      modelType = modelType,
+      size = size,
+      seed = seed,
+      steps = spec.defaultSteps,
+      guidanceScale = spec.defaultGuidanceScale,
     )
+
+    return try {
+      val result = DiffusionPipeline.generateImage(context, config)
+      result.imageBytes
+    } catch (oom: OutOfMemoryError) {
+      Log.e(TAG, "OOM during image generation", oom)
+      DiffusionPipeline.unloadModel()
+      throw IllegalStateException(
+        "Out of memory during image generation. Try a smaller size (256x256) or restart the app."
+      )
+    } catch (e: Exception) {
+      Log.e(TAG, "Image generation failed", e)
+      throw IllegalStateException("Image generation failed: ${e.message}")
+    }
   }
 
   private fun isModelInstalled(context: Context, model: String?): Boolean {
     if (model == null) return false
-    val docsDir = context.getExternalFilesDir(null) ?: context.filesDir
-    val modelDir = java.io.File(docsDir, "diffusion_models")
-    if (!modelDir.exists()) return false
-    val expectedFile = java.io.File(modelDir, "$model.tflite")
-    return expectedFile.exists()
+    val modelType = when {
+      model.contains(ImageGenerationModels.MODEL_Z_IMAGE_TURBO, ignoreCase = true) ->
+        DiffusionPipeline.ModelType.Z_IMAGE_TURBO
+      model.contains(ImageGenerationModels.MODEL_FLUX_2_KLEIN, ignoreCase = true) ->
+        DiffusionPipeline.ModelType.FLUX_2_KLEIN
+      else -> return false
+    }
+    val modelDir = DiffusionPipeline.getModelDir(context, modelType)
+    if (!modelDir.exists() || !modelDir.isDirectory) return false
+    return modelDir.listFiles()?.any { file ->
+      file.isFile && file.extension.equals("tflite", ignoreCase = true)
+    } == true
   }
 
   private fun getInstalledModels(context: Context): List<String> {
     val docsDir = context.getExternalFilesDir(null) ?: context.filesDir
-    val modelDir = java.io.File(docsDir, "diffusion_models")
-    if (!modelDir.exists()) return emptyList()
+    val diffusionDir = java.io.File(docsDir, "diffusion_models")
+    if (!diffusionDir.exists() || !diffusionDir.isDirectory) return emptyList()
 
     val installed = mutableListOf<String>()
-    modelDir.listFiles()?.forEach { file ->
-      if (file.extension.equals("tflite", ignoreCase = true)) {
-        val baseName = file.nameWithoutExtension
-        if (ImageGenerationModels.isSupportedModel(baseName)) {
-          installed.add(baseName)
+    diffusionDir.listFiles()?.forEach { dir ->
+      if (dir.isDirectory) {
+        val hasTflite = dir.listFiles()?.any { file ->
+          file.isFile && file.extension.equals("tflite", ignoreCase = true)
+        } == true
+        if (hasTflite && ImageGenerationModels.isSupportedModel(dir.name)) {
+          installed.add(dir.name)
         }
       }
     }

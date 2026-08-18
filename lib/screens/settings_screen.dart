@@ -29,6 +29,7 @@ import 'package:nova_assistant/screens/conversation_search_screen.dart';
 import 'package:nova_assistant/screens/model_browser_screen.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/huggingface_hub_service.dart';
 import 'package:nova_assistant/services/download_network_gate.dart';
 import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
@@ -1940,9 +1941,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final catalog = DiffusionModelCatalog.forModel(model);
     if (catalog == null) return;
 
-    final url =
-        'https://huggingface.co/${catalog.repoId}/resolve/main/${catalog.fileName}';
-
     if (catalog.gated && !await ModelManager.hasHuggingFaceToken()) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1967,50 +1965,103 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (!allowed || !context.mounted) return;
 
-    setState(() => _installStatus = 'Downloading ${model.displayName}...');
+    setState(() => _installStatus = 'Preparing ${model.displayName}...');
 
     try {
-      final tempDir = await getTemporaryDirectory();
-      final tempFile = File(
-        '${tempDir.path}/nova_download_${DateTime.now().millisecondsSinceEpoch}_${catalog.fileName}',
-      );
-
       final hfToken = await ModelManager.getHuggingFaceToken();
-      final client = ModelManager.httpClient;
-      final uri = Uri.parse(url);
-      final request = await client.getUrl(uri);
-      if (hfToken != null && hfToken.isNotEmpty) {
-        request.headers.set('Authorization', 'Bearer $hfToken');
-      }
-      final response = await request.close();
+      final repoFiles = await HuggingfaceHubService.instance.listRepoFiles(
+        catalog.repoId,
+      );
+      final tfliteFiles = HuggingfaceHubService.filterTfliteFiles(repoFiles);
 
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
+      if (tfliteFiles.isEmpty) {
+        throw Exception('No .tflite files found in ${catalog.repoId}');
       }
 
-      final totalBytes = response.contentLength;
-      var receivedBytes = 0;
+      final tempDir = await getTemporaryDirectory();
+      final downloadDir = Directory(
+        '${tempDir.path}/nova_download_${DateTime.now().millisecondsSinceEpoch}_${model.fileName}',
+      );
+      await downloadDir.create(recursive: true);
+
+      int totalBytes = 0;
+      for (final file in tfliteFiles) {
+        totalBytes += file.size ?? 0;
+      }
+
+      int receivedBytes = 0;
       var lastReportedPct = -1;
-      final sink = tempFile.openWrite();
+      final client = ModelManager.httpClient;
+      const concurrentDownloads = 3;
 
-      await for (final chunk in response) {
-        sink.add(chunk);
-        receivedBytes += chunk.length;
-        if (totalBytes > 0) {
-          final pct = ((receivedBytes * 90) / totalBytes).floor().clamp(0, 90);
-          if (pct != lastReportedPct) {
-            lastReportedPct = pct;
-            if (mounted) {
-              setState(() => _installStatus = 'Downloading: $pct%');
-            }
+      Future<void> downloadFileToDir({
+        required String url,
+        required String destPath,
+        required void Function(int chunkLength) onBytesReceived,
+      }) async {
+        final uri = Uri.parse(url);
+        final request = await client.getUrl(uri);
+        if (hfToken != null && hfToken.isNotEmpty) {
+          request.headers.set('Authorization', 'Bearer $hfToken');
+        }
+        final response = await request.close();
+
+        if (response.statusCode != 200) {
+          throw Exception('HTTP ${response.statusCode} downloading $url');
+        }
+
+        final sink = File(destPath).openWrite();
+        try {
+          await for (final chunk in response) {
+            sink.add(chunk);
+            onBytesReceived(chunk.length);
           }
+        } finally {
+          await sink.close();
         }
       }
-      await sink.close();
+
+      for (var i = 0; i < tfliteFiles.length; i += concurrentDownloads) {
+        final end = (i + concurrentDownloads).clamp(0, tfliteFiles.length);
+        final chunk = tfliteFiles.sublist(i, end);
+
+        await Future.wait(
+          chunk.map((repoFile) {
+            final fileUrl = HuggingfaceHubService.resolveDownloadUrl(
+              catalog.repoId,
+              path: repoFile.path,
+            );
+            return downloadFileToDir(
+              url: fileUrl,
+              destPath: '${downloadDir.path}/${repoFile.fileName}',
+              onBytesReceived: (chunkLength) {
+                receivedBytes += chunkLength;
+                if (totalBytes > 0 && mounted) {
+                  final pct = ((receivedBytes * 90) / totalBytes).floor().clamp(
+                    0,
+                    90,
+                  );
+                  if (pct != lastReportedPct) {
+                    lastReportedPct = pct;
+                    setState(() => _installStatus = 'Downloading: $pct%');
+                  }
+                }
+              },
+            );
+          }),
+        );
+
+        if (mounted) {
+          setState(
+            () =>
+                _installStatus = 'Downloaded $end/${tfliteFiles.length} files',
+          );
+        }
+      }
 
       await ModelManager.instance.installDiffusionModel(
         model: model,
-        filePath: tempFile.path,
+        sourceDirectory: downloadDir.path,
       );
 
       if (mounted) {
@@ -2024,7 +2075,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
 
       try {
-        await tempFile.delete();
+        await downloadDir.delete(recursive: true);
       } catch (_) {}
     } catch (e) {
       if (mounted) {

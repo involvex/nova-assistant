@@ -300,23 +300,31 @@ class CustomModel {
         ? rawCtx
         : (rawCtx is num ? rawCtx.round() : 4096);
 
+    final modelTypeName = json['modelType'] as String?;
+    if (modelTypeName == null) {
+      throw FormatException('Missing modelType in CustomModel JSON');
+    }
+    final modelType = ModelType.values.firstWhere(
+      (e) => e.name == modelTypeName,
+      orElse: () => throw FormatException('Unknown ModelType: $modelTypeName'),
+    );
+
+    final fileTypeName = json['fileType'] as String?;
+    if (fileTypeName == null) {
+      throw FormatException('Missing fileType in CustomModel JSON');
+    }
+    final fileType = ModelFileType.values.firstWhere(
+      (e) => e.name == fileTypeName,
+      orElse: () =>
+          throw FormatException('Unknown ModelFileType: $fileTypeName'),
+    );
+
     return CustomModel(
       id: json['id'] as String,
       displayName: json['displayName'] as String,
       fileName: json['fileName'] as String,
-      modelType: ModelType.values.firstWhere(
-        (e) => e.name == json['modelType'],
-        orElse: () => ModelType.general,
-      ),
-      fileType: isGguf
-          ? ModelFileType.values.firstWhere(
-              (e) => e.name == 'binary',
-              orElse: () => ModelFileType.binary,
-            )
-          : ModelFileType.values.firstWhere(
-              (e) => e.name == json['fileType'],
-              orElse: () => ModelFileType.litertlm,
-            ),
+      modelType: modelType,
+      fileType: fileType,
       hasVision: json['hasVision'] as bool? ?? false,
       hasThinking: json['hasThinking'] as bool? ?? false,
       supportsFunctionCalling: json['supportsFunctionCalling'] as bool? ?? true,

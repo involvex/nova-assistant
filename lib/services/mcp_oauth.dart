@@ -4,8 +4,8 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:nova_assistant/utils/secure_prefs.dart';
 
 /// Minimal OAuth 2.0 Authorization Code + PKCE helper for MCP servers.
 class McpOAuthService {
@@ -30,14 +30,11 @@ class McpOAuthService {
   }
 
   Future<void> savePkceVerifier(String serverId, String verifier) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('$_pkceKeyPrefix$serverId', verifier);
+    await SecurePrefs().write('$_pkceKeyPrefix$serverId', verifier);
   }
 
   Future<String?> loadPkceVerifier(String serverId) async {
-    final prefs = await SharedPreferences.getInstance();
-
-    return prefs.getString('$_pkceKeyPrefix$serverId');
+    return SecurePrefs().read('$_pkceKeyPrefix$serverId');
   }
 
   Future<void> saveTokens({
@@ -45,24 +42,20 @@ class McpOAuthService {
     required String accessToken,
     String? refreshToken,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('$_tokenKeyPrefix$serverId', accessToken);
+    await SecurePrefs().write('$_tokenKeyPrefix$serverId', accessToken);
     if (refreshToken != null) {
-      await prefs.setString('$_refreshKeyPrefix$serverId', refreshToken);
+      await SecurePrefs().write('$_refreshKeyPrefix$serverId', refreshToken);
     }
   }
 
   Future<String?> loadAccessToken(String serverId) async {
-    final prefs = await SharedPreferences.getInstance();
-
-    return prefs.getString('$_tokenKeyPrefix$serverId');
+    return SecurePrefs().read('$_tokenKeyPrefix$serverId');
   }
 
   Future<void> clearTokens(String serverId) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('$_tokenKeyPrefix$serverId');
-    await prefs.remove('$_refreshKeyPrefix$serverId');
-    await prefs.remove('$_pkceKeyPrefix$serverId');
+    await SecurePrefs().delete('$_tokenKeyPrefix$serverId');
+    await SecurePrefs().delete('$_refreshKeyPrefix$serverId');
+    await SecurePrefs().delete('$_pkceKeyPrefix$serverId');
   }
 
   /// Build an authorization URL with PKCE and open it in the browser.

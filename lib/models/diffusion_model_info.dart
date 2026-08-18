@@ -3,13 +3,13 @@ enum DiffusionModel {
     'Z-Image-Turbo-LiteRT',
     'Z-Image-Turbo',
     'litert-community/Z-Image-Turbo-LiteRT',
-    800,
+    9400,
   ),
   flux2Klein(
     'FLUX.2-klein-4B-LiteRT',
     'FLUX.2-klein-4B',
     'litert-community/FLUX.2-klein-4B-LiteRT',
-    2400,
+    9600,
   );
 
   final String fileName;
@@ -81,7 +81,7 @@ class DiffusionModelCatalog {
       model: DiffusionModel.zImageTurbo,
       fileName: 'Z-Image-Turbo-LiteRT',
       repoId: 'litert-community/Z-Image-Turbo-LiteRT',
-      approxSizeMB: 800,
+      approxSizeMB: 9400,
       gated: false,
       tags: ['z-image-turbo', 'fast', 'diffusion'],
       pipelineTag: 'text-to-image',
@@ -90,7 +90,7 @@ class DiffusionModelCatalog {
       model: DiffusionModel.flux2Klein,
       fileName: 'FLUX.2-klein-4B-LiteRT',
       repoId: 'litert-community/FLUX.2-klein-4B-LiteRT',
-      approxSizeMB: 2400,
+      approxSizeMB: 9600,
       gated: true,
       tags: ['flux', 'high-quality', 'diffusion'],
       pipelineTag: 'text-to-image',

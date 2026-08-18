@@ -360,19 +360,21 @@ class ModelOrchestrator {
     _lastChatSessionKey = null;
     setPendingReplayMessages(retained);
     // #region agent log
-    await AgentDebugLog.log(
-      hypothesisId: 'A',
-      location: 'model_orchestrator.dart:_autoCompactForBudget',
-      message: 'Auto-compacted live chat due to budget overflow',
-      data: {
-        'estimatedTokens': preflight.estimatedTokens,
-        'kvLimit': preflight.kvLimit,
-        'usageRatio': preflight.usageRatio.toStringAsFixed(3),
-        'keptPairs': historyKeepPairs,
-        'retainedTurns': retained.length,
-        'model': model.name,
-      },
-      runId: 'post-fix',
+    unawaited(
+      AgentDebugLog.log(
+        hypothesisId: 'A',
+        location: 'model_orchestrator.dart:_autoCompactForBudget',
+        message: 'Auto-compacted live chat due to budget overflow',
+        data: {
+          'estimatedTokens': preflight.estimatedTokens,
+          'kvLimit': preflight.kvLimit,
+          'usageRatio': preflight.usageRatio.toStringAsFixed(3),
+          'keptPairs': historyKeepPairs,
+          'retainedTurns': retained.length,
+          'model': model.name,
+        },
+        runId: 'post-fix',
+      ),
     );
     // #endregion
     _statusController.add(
@@ -664,7 +666,7 @@ class ModelOrchestrator {
       _adultModeEnabled = adultMode;
     }
     _inferenceBackend = RemoteInferenceConfig.backendFromPrefs(prefs);
-    _remoteConfig = RemoteInferenceConfig.fromPrefs(prefs);
+    _remoteConfig = await RemoteInferenceConfig.fromPrefsAsync();
     _batteryAwareSwitching =
         prefs.getBool('settings_battery_aware_switching') ?? true;
 
@@ -779,14 +781,16 @@ class ModelOrchestrator {
     if (_isReleasing) {
       debugPrint('Release already in progress, awaiting…');
       // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'H6',
-        location: 'model_orchestrator.dart:_releaseIdleResources:await',
-        message: 'Awaiting in-progress release',
-        data: {
-          'activeModelType': _activeModelType?.name,
-          'isStreaming': _isStreaming,
-        },
+      unawaited(
+        AgentDebugLog.log(
+          hypothesisId: 'H6',
+          location: 'model_orchestrator.dart:_releaseIdleResources:await',
+          message: 'Awaiting in-progress release',
+          data: {
+            'activeModelType': _activeModelType?.name,
+            'isStreaming': _isStreaming,
+          },
+        ),
       );
       // #endregion
       await _releaseCompleter?.future;
@@ -807,11 +811,16 @@ class ModelOrchestrator {
       debugPrint('Deferring idle release until stream ends');
       _pendingIdleRelease = true;
       // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'H6',
-        location: 'model_orchestrator.dart:_releaseIdleResources:defer',
-        message: 'Idle release deferred while streaming',
-        data: {'activeModelType': _activeModelType?.name, 'isStreaming': true},
+      unawaited(
+        AgentDebugLog.log(
+          hypothesisId: 'H6',
+          location: 'model_orchestrator.dart:_releaseIdleResources:defer',
+          message: 'Idle release deferred while streaming',
+          data: {
+            'activeModelType': _activeModelType?.name,
+            'isStreaming': true,
+          },
+        ),
       );
       // #endregion
 
@@ -824,15 +833,17 @@ class ModelOrchestrator {
     _pendingIdleRelease = false;
 
     // #region agent log
-    await AgentDebugLog.log(
-      hypothesisId: 'H6',
-      location: 'model_orchestrator.dart:_releaseIdleResources:start',
-      message: 'Idle release started',
-      data: {
-        'activeModelType': _activeModelType?.name,
-        'hasActiveModel': _activeModel != null,
-        'flutterHasActive': FlutterGemma.hasActiveModel(),
-      },
+    unawaited(
+      AgentDebugLog.log(
+        hypothesisId: 'H6',
+        location: 'model_orchestrator.dart:_releaseIdleResources:start',
+        message: 'Idle release started',
+        data: {
+          'activeModelType': _activeModelType?.name,
+          'hasActiveModel': _activeModel != null,
+          'flutterHasActive': FlutterGemma.hasActiveModel(),
+        },
+      ),
     );
     // #endregion
 
@@ -854,14 +865,16 @@ class ModelOrchestrator {
       _stopModelKeepAlive();
 
       // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'H6',
-        location: 'model_orchestrator.dart:_releaseIdleResources:done',
-        message: 'Idle release finished',
-        data: {
-          'elapsedMs': DateTime.now().millisecondsSinceEpoch - releaseStarted,
-          'flutterHasActive': FlutterGemma.hasActiveModel(),
-        },
+      unawaited(
+        AgentDebugLog.log(
+          hypothesisId: 'H6',
+          location: 'model_orchestrator.dart:_releaseIdleResources:done',
+          message: 'Idle release finished',
+          data: {
+            'elapsedMs': DateTime.now().millisecondsSinceEpoch - releaseStarted,
+            'flutterHasActive': FlutterGemma.hasActiveModel(),
+          },
+        ),
       );
       // #endregion
 
@@ -1194,51 +1207,45 @@ class ModelOrchestrator {
   Future<void> _registerInstalledModels() async {
     final dir = await getApplicationDocumentsDirectory();
 
+    final modelsDir = Directory('${dir.path}/models');
+    final fileIndex = <String, File>{};
+
+    if (await modelsDir.exists()) {
+      await for (final entity in modelsDir.list()) {
+        if (entity is File) {
+          final entityName = p.basename(entity.path);
+          final baseName = entityName
+              .replaceAll('.litertlm', '')
+              .replaceAll('.task', '');
+          fileIndex[baseName] = entity;
+        }
+      }
+    }
+
     for (final model in NovaModel.values) {
       final fileName = ModelHuggingFaceURLs.fileNameFor(model);
 
-      // Find the file on disk using the unified search
       File? foundFile;
       final directFile = File('${dir.path}/$fileName');
       if (await directFile.exists()) {
         foundFile = directFile;
       } else {
-        final modelsDir = Directory('${dir.path}/models');
-        if (await modelsDir.exists()) {
-          final baseName = fileName
-              .replaceAll('.litertlm', '')
-              .replaceAll('.task', '');
-          await for (final entity in modelsDir.list()) {
-            if (entity is File) {
-              final entityName = p.basename(entity.path);
-              if (entityName
-                  .replaceAll('.litertlm', '')
-                  .replaceAll('.task', '')
-                  .contains(baseName)) {
-                foundFile = entity;
-                break;
-              }
-            }
-          }
-        }
+        final baseName = fileName
+            .replaceAll('.litertlm', '')
+            .replaceAll('.task', '');
+        foundFile = fileIndex[baseName];
       }
 
       if (foundFile != null) {
-        // Already tracked but file exists - try to verify it's not corrupted
         if (ModelManager.instance.isModelInstalled(fileName)) {
           try {
-            // Verify by trying to create a chat (this validates the model loads)
-            // Don't call install() as it may re-register an already registered model
-            // Instead, just verify the file can be read and is non-empty
             final fileSize = await foundFile.length();
             if (fileSize == 0) {
               throw Exception('Model file is empty');
             }
-            // File exists and has content - assume valid until flutter_gemma says otherwise
             _statusController.add('Model ${model.displayName} verified');
             ModelManager.instance.cacheModelPath(fileName, foundFile.path);
           } catch (e) {
-            // Model health check failed - remove from installed and delete file
             debugPrint('Model health check failed for $fileName: $e');
             await ModelManager.instance.uninstallModel(fileName);
             try {
@@ -1251,7 +1258,6 @@ class ModelOrchestrator {
             }
           }
         } else {
-          // Not tracked yet - register it (lazy, don't load into GPU)
           await ModelManager.instance.registerDiskModel(
             filePath: foundFile.path,
             fileName: fileName,
@@ -1262,7 +1268,6 @@ class ModelOrchestrator {
           );
         }
       } else if (ModelManager.instance.isModelInstalled(fileName)) {
-        // Model is tracked but file doesn't exist - remove from tracking
         debugPrint('Model file missing for $fileName, removing from installed');
         await ModelManager.instance.uninstallModel(fileName);
       }
@@ -1315,16 +1320,18 @@ class ModelOrchestrator {
       modelToLoad,
     );
     // #region agent log
-    await AgentDebugLog.log(
-      hypothesisId: 'C',
-      location: 'model_orchestrator.dart:_getOrCreateModel:ramGate',
-      message: 'RAM gate decision',
-      data: {
-        'requested': model.displayName,
-        'blocked': ramBlock != null,
-        'blockMsg': ramBlock,
-        'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
-      },
+    unawaited(
+      AgentDebugLog.log(
+        hypothesisId: 'C',
+        location: 'model_orchestrator.dart:_getOrCreateModel:ramGate',
+        message: 'RAM gate decision',
+        data: {
+          'requested': model.displayName,
+          'blocked': ramBlock != null,
+          'blockMsg': ramBlock,
+          'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
+        },
+      ),
     );
     // #endregion
     if (ramBlock != null) {
@@ -1347,18 +1354,20 @@ class ModelOrchestrator {
       final fallback = await _pickRamFallback(modelToLoad);
       if (fallback != null) {
         // #region agent log
-        await AgentDebugLog.log(
-          hypothesisId: 'C',
-          location: 'model_orchestrator.dart:_getOrCreateModel:fallback',
-          message: 'RAM gate fallback',
-          data: {
-            'from': modelToLoad.displayName,
-            'to': fallback.displayName,
-            'fileName': ModelHuggingFaceURLs.fileNameFor(fallback),
-            'onDisk': await ModelManager.instance.isInstalledOnDisk(
-              ModelHuggingFaceURLs.fileNameFor(fallback),
-            ),
-          },
+        unawaited(
+          AgentDebugLog.log(
+            hypothesisId: 'C',
+            location: 'model_orchestrator.dart:_getOrCreateModel:fallback',
+            message: 'RAM gate fallback',
+            data: {
+              'from': modelToLoad.displayName,
+              'to': fallback.displayName,
+              'fileName': ModelHuggingFaceURLs.fileNameFor(fallback),
+              'onDisk': await ModelManager.instance.isInstalledOnDisk(
+                ModelHuggingFaceURLs.fileNameFor(fallback),
+              ),
+            },
+          ),
         );
         // #endregion
         _statusController.add(
@@ -1420,16 +1429,18 @@ class ModelOrchestrator {
       final prefsInstalled = ModelManager.instance.isModelInstalled(fileName);
 
       // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'H2-H4',
-        location: 'model_orchestrator.dart:_getOrCreateModel:check',
-        message: 'Model availability check before load',
-        data: {
-          'model': modelToLoad.name,
-          'fileName': fileName,
-          'existsOnDisk': existsOnDisk,
-          'prefsInstalled': prefsInstalled,
-        },
+      unawaited(
+        AgentDebugLog.log(
+          hypothesisId: 'H2-H4',
+          location: 'model_orchestrator.dart:_getOrCreateModel:check',
+          message: 'Model availability check before load',
+          data: {
+            'model': modelToLoad.name,
+            'fileName': fileName,
+            'existsOnDisk': existsOnDisk,
+            'prefsInstalled': prefsInstalled,
+          },
+        ),
       );
       // #endregion
 
@@ -1461,16 +1472,19 @@ class ModelOrchestrator {
             final backend = PlatformAdaptationService.instance
                 .preferredBackendFor(modelToLoad);
             // #region agent log
-            await AgentDebugLog.log(
-              hypothesisId: 'F',
-              location: 'model_orchestrator.dart:_getOrCreateModel:backend',
-              message: 'Preferred backend for load',
-              data: {
-                'model': modelToLoad.name,
-                'backend': backend.name,
-                'totalMemMb': MemoryDiagnosticsService.instance.lastTotalMemMb,
-              },
-              runId: 'post-fix',
+            unawaited(
+              AgentDebugLog.log(
+                hypothesisId: 'F',
+                location: 'model_orchestrator.dart:_getOrCreateModel:backend',
+                message: 'Preferred backend for load',
+                data: {
+                  'model': modelToLoad.name,
+                  'backend': backend.name,
+                  'totalMemMb':
+                      MemoryDiagnosticsService.instance.lastTotalMemMb,
+                },
+                runId: 'post-fix',
+              ),
             );
             // #endregion
             _activeModel = await _loadActiveModelWithTimeout(
@@ -1702,15 +1716,17 @@ class ModelOrchestrator {
     if (selector.primaryHeavy != recommended) {
       selector.primaryHeavy = recommended;
       // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'E',
-        location: 'model_orchestrator.dart:applyRamAwareModelDefaults',
-        message: 'Adjusted Auto primaryHeavy for free RAM',
-        data: {
-          'primaryHeavy': recommended.displayName,
-          'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
-        },
-        runId: 'post-fix',
+      unawaited(
+        AgentDebugLog.log(
+          hypothesisId: 'E',
+          location: 'model_orchestrator.dart:applyRamAwareModelDefaults',
+          message: 'Adjusted Auto primaryHeavy for free RAM',
+          data: {
+            'primaryHeavy': recommended.displayName,
+            'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
+          },
+          runId: 'post-fix',
+        ),
       );
       // #endregion
     }
@@ -1842,17 +1858,19 @@ class ModelOrchestrator {
           ? PreferredBackend.cpu
           : PreferredBackend.gpu;
       // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'F',
-        location: 'model_orchestrator.dart:_processWithCustomModel:load',
-        message: 'Loading custom model after register',
-        data: {
-          'fileName': customModel.fileName,
-          'backend': backend.name,
-          'totalMemMb': total,
-          'hasActive': FlutterGemma.hasActiveModel(),
-        },
-        runId: 'post-fix',
+      unawaited(
+        AgentDebugLog.log(
+          hypothesisId: 'F',
+          location: 'model_orchestrator.dart:_processWithCustomModel:load',
+          message: 'Loading custom model after register',
+          data: {
+            'fileName': customModel.fileName,
+            'backend': backend.name,
+            'totalMemMb': total,
+            'hasActive': FlutterGemma.hasActiveModel(),
+          },
+          runId: 'post-fix',
+        ),
       );
       // #endregion
       inferenceModel = await _loadActiveModelWithTimeout(
@@ -2673,20 +2691,22 @@ class ModelOrchestrator {
         }
       }
       // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'E',
-        location: 'model_orchestrator.dart:processMessage:modelResolved',
-        message: 'Resolved inference model for turn',
-        data: {
-          'model': model.name,
-          'forcePrimary': forcePrimaryModel,
-          'preferred': _preferredModelOverride?.name,
-          'dirty': _modelOverrideDirty,
-          'primaryHeavy': selector.primaryHeavy.name,
-          'visionForced': visionForced,
-          'needsVision': needsVision,
-        },
-        runId: 'post-fix',
+      unawaited(
+        AgentDebugLog.log(
+          hypothesisId: 'E',
+          location: 'model_orchestrator.dart:processMessage:modelResolved',
+          message: 'Resolved inference model for turn',
+          data: {
+            'model': model.name,
+            'forcePrimary': forcePrimaryModel,
+            'preferred': _preferredModelOverride?.name,
+            'dirty': _modelOverrideDirty,
+            'primaryHeavy': selector.primaryHeavy.name,
+            'visionForced': visionForced,
+            'needsVision': needsVision,
+          },
+          runId: 'post-fix',
+        ),
       );
       // #endregion
 
@@ -2771,32 +2791,34 @@ class ModelOrchestrator {
       final wasNull = _activeChat == null;
       final pendingCount = _pendingReplay.length;
       // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'A',
-        location: 'model_orchestrator.dart:processMessage:chatPrep',
-        message: 'Chat session prep before create/replay',
-        data: {
-          'wasNull': wasNull,
-          'pendingReplay': pendingCount,
-          'model': model.name,
-          'queryLen': query.length,
-          'tools': tools.length,
-          'chatTools': chatTools.length,
-          'kvLimit': _tokenLimitFor(model),
-          'systemPromptLen': systemInstruction.length,
-          'textToolPrompt': textToolPrompt,
-          'adultMode': _adultModeEnabled,
-          'sessionKeyChanged': wasNull && _lastChatSessionKey != sessionKey,
-          'computedOverhead': MessageLimits.computedOverheadFor(
-            model,
-            systemPromptChars: systemInstruction.length,
-            toolsCount: chatTools.length,
-            textToolPrompt: textToolPrompt,
-            hasRag: ragContext.trim().isNotEmpty,
-            hasAttachments: attachmentContext.trim().isNotEmpty,
-          ),
-        },
-        runId: 'post-fix',
+      unawaited(
+        AgentDebugLog.log(
+          hypothesisId: 'A',
+          location: 'model_orchestrator.dart:processMessage:chatPrep',
+          message: 'Chat session prep before create/replay',
+          data: {
+            'wasNull': wasNull,
+            'pendingReplay': pendingCount,
+            'model': model.name,
+            'queryLen': query.length,
+            'tools': tools.length,
+            'chatTools': chatTools.length,
+            'kvLimit': _tokenLimitFor(model),
+            'systemPromptLen': systemInstruction.length,
+            'textToolPrompt': textToolPrompt,
+            'adultMode': _adultModeEnabled,
+            'sessionKeyChanged': wasNull && _lastChatSessionKey != sessionKey,
+            'computedOverhead': MessageLimits.computedOverheadFor(
+              model,
+              systemPromptChars: systemInstruction.length,
+              toolsCount: chatTools.length,
+              textToolPrompt: textToolPrompt,
+              hasRag: ragContext.trim().isNotEmpty,
+              hasAttachments: attachmentContext.trim().isNotEmpty,
+            ),
+          },
+          runId: 'post-fix',
+        ),
       );
       // #endregion
       if (wasNull) {
@@ -2842,17 +2864,19 @@ class ModelOrchestrator {
           _lastReplaySource = List<ChatMessage>.from(_pendingReplay);
           _pendingReplay = const [];
           // #region agent log
-          await AgentDebugLog.log(
-            hypothesisId: 'A',
-            location: 'model_orchestrator.dart:processMessage:reinject',
-            message: 'Reinjecting history into new chat session',
-            data: {
-              'replayMessages': replay.length,
-              'budget': budget,
-              'rawBudget': rawBudget,
-              'emptyTexts': replay.where((m) => m.text.trim().isEmpty).length,
-            },
-            runId: 'post-fix',
+          unawaited(
+            AgentDebugLog.log(
+              hypothesisId: 'A',
+              location: 'model_orchestrator.dart:processMessage:reinject',
+              message: 'Reinjecting history into new chat session',
+              data: {
+                'replayMessages': replay.length,
+                'budget': budget,
+                'rawBudget': rawBudget,
+                'emptyTexts': replay.where((m) => m.text.trim().isEmpty).length,
+              },
+              runId: 'post-fix',
+            ),
           );
           // #endregion
           if (replay.isNotEmpty) {
@@ -3328,17 +3352,19 @@ class ModelOrchestrator {
         }
 
         // #region agent log
-        await AgentDebugLog.log(
-          hypothesisId: 'B',
-          location: 'model_orchestrator.dart:processMessage:streamError',
-          message: 'Inference stream failed — dropping dead session',
-          data: {
-            'error': streamError.toString(),
-            'model': model.name,
-            'partialLen': fullResponse.length,
-            'isTokenOverflow': isTokenOverflow,
-          },
-          runId: 'post-fix',
+        unawaited(
+          AgentDebugLog.log(
+            hypothesisId: 'B',
+            location: 'model_orchestrator.dart:processMessage:streamError',
+            message: 'Inference stream failed — dropping dead session',
+            data: {
+              'error': streamError.toString(),
+              'model': model.name,
+              'partialLen': fullResponse.length,
+              'isTokenOverflow': isTokenOverflow,
+            },
+            runId: 'post-fix',
+          ),
         );
         // #endregion
         inferenceStopwatch.stop();
@@ -3408,12 +3434,14 @@ class ModelOrchestrator {
           : fullResponse;
       // #region agent log
       if (fullResponse.trim().isEmpty) {
-        await AgentDebugLog.log(
-          hypothesisId: 'C',
-          location: 'model_orchestrator.dart:processMessage:emptyReply',
-          message: 'Model finished with empty text',
-          data: {'model': model.name, 'toolRounds': toolRounds},
-          runId: 'post-fix',
+        unawaited(
+          AgentDebugLog.log(
+            hypothesisId: 'C',
+            location: 'model_orchestrator.dart:processMessage:emptyReply',
+            message: 'Model finished with empty text',
+            data: {'model': model.name, 'toolRounds': toolRounds},
+            runId: 'post-fix',
+          ),
         );
         // Drop polluted session so the next turn recreates cleanly.
         _activeChat = null;
@@ -3625,18 +3653,20 @@ class ModelOrchestrator {
       Uint8List? imageBytes = await ScreenshotService.instance
           .getLatestScreenshot();
       // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'H12',
-        location: 'model_orchestrator.dart:_sendToolResponse',
-        message: 'take_screenshot after requestCapture+getLatest',
-        data: {
-          'toolSuccess': toolResult['success'],
-          'toolHasScreenshot': toolResult['hasScreenshot'],
-          'toolBytes': toolResult['bytes'],
-          'channelBytes': imageBytes?.length ?? 0,
-          'supportsImage': _activeModelSupportsImage,
-        },
-        runId: 'post-fix',
+      unawaited(
+        AgentDebugLog.log(
+          hypothesisId: 'H12',
+          location: 'model_orchestrator.dart:_sendToolResponse',
+          message: 'take_screenshot after requestCapture+getLatest',
+          data: {
+            'toolSuccess': toolResult['success'],
+            'toolHasScreenshot': toolResult['hasScreenshot'],
+            'toolBytes': toolResult['bytes'],
+            'channelBytes': imageBytes?.length ?? 0,
+            'supportsImage': _activeModelSupportsImage,
+          },
+          runId: 'post-fix',
+        ),
       );
       // #endregion
 
@@ -3662,12 +3692,14 @@ class ModelOrchestrator {
         );
         await _activeChat!.addQuery(imageMessage);
         // #region agent log
-        await AgentDebugLog.log(
-          hypothesisId: 'H8',
-          location: 'model_orchestrator.dart:_sendToolResponse',
-          message: 'vision image attached to chat',
-          data: {'imageBytes': visionBytes.length},
-          runId: 'post-fix',
+        unawaited(
+          AgentDebugLog.log(
+            hypothesisId: 'H8',
+            location: 'model_orchestrator.dart:_sendToolResponse',
+            message: 'vision image attached to chat',
+            data: {'imageBytes': visionBytes.length},
+            runId: 'post-fix',
+          ),
         );
         // #endregion
       }

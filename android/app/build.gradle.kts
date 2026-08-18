@@ -61,6 +61,17 @@ android {
             )
         }
     }
+
+    packaging {
+        resources {
+            excludes += listOf(
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+            )
+        }
+    }
 }
 
 kotlin {
@@ -78,4 +89,9 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    // TFLite LiteRT for diffusion inference on device
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
 }

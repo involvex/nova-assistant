@@ -1,8 +1,6 @@
 include: package:flutter_lints/flutter.yaml
 
 analyzer:
-  plugins:
-    - dart_code_linter
   language:
     strict-casts: true
     strict-raw-types: true

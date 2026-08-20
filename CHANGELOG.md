@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.4.7] - 2026-08-20
+
+### Changed
+
+- Activate keyword-triggered on-device image generation in chat flow
 ### Added
 
 - Keyword-triggered image generation: ask "generate an image of a sunset over mountains" and Nova will use an on-device diffusion model (Z-Image-Turbo or FLUX.2-klein) to create and display the result inline in the chat. Image generation is now reachable from the Flutter chat layer — the tool wires through `_wantsGenerateImage`, `_toolsForQuery`, `generate_image` aliases, and the `imageData` rendering path.

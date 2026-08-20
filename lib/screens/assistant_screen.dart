@@ -814,6 +814,28 @@ class _AssistantScreenState extends State<AssistantScreen>
                 q.contains('what')));
   }
 
+  /// Whether the query asks to generate an image via the diffusion tool.
+  bool _wantsGenerateImage(String query, {required bool hasImage}) {
+    if (hasImage) return false;
+    final q = query.toLowerCase();
+
+    return q.contains('generate image') ||
+        q.contains('generate a image') ||
+        q.contains('generate an image') ||
+        q.contains('create image') ||
+        q.contains('create a image') ||
+        q.contains('create an image') ||
+        q.contains('draw image') ||
+        q.contains('draw a image') ||
+        q.contains('draw an image') ||
+        q.contains('make image') ||
+        q.contains('make a image') ||
+        q.contains('make an image') ||
+        q.contains('picture of') ||
+        q.contains('image of') ||
+        q.contains('artwork of');
+  }
+
   Future<void> _checkModelAvailability() async {
     final manager = ModelManager.instance;
     bool anyInstalled = false;
@@ -1258,6 +1280,12 @@ class _AssistantScreenState extends State<AssistantScreen>
       tools.add(NovaTools.takeScreenshot);
     }
 
+    // Only offer image generation when the user explicitly asks to create,
+    // draw, or generate an image — and no image is already attached.
+    if (_wantsGenerateImage(query, hasImage: hasImage)) {
+      tools.add(NovaTools.generateImage);
+    }
+
     // Weather only if explicitly asked
     if (q.contains('weather') ||
         q.contains('temperature') ||
@@ -1479,6 +1507,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                 thinking: result.thinking,
                 inferenceTimeMs:
                     result.inferenceTimeMs ?? prior.inferenceTimeMs,
+                imageData: result.imageBytes,
               );
             });
           }

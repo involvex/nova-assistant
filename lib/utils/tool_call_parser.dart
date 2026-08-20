@@ -31,6 +31,13 @@ class ToolCallParser {
     'force_stop': 'force_stop_app',
     'kill_app': 'force_stop_app',
     'stop_app': 'force_stop_app',
+    'draw_image': 'generate_image',
+    'create_image': 'generate_image',
+    'make_image': 'generate_image',
+    'generate_picture': 'generate_image',
+    'create_picture': 'generate_image',
+    'draw_picture': 'generate_image',
+    'make_picture': 'generate_image',
   };
 
   /// Returns normalized tool calls, or null if none found.

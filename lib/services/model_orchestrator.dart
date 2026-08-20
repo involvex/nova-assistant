@@ -124,6 +124,7 @@ class InferenceResult {
   final String? thinking;
   final List<Map<String, dynamic>>? toolCalls;
   final int? inferenceTimeMs;
+  final Uint8List? imageBytes;
 
   InferenceResult({
     required this.text,
@@ -132,6 +133,7 @@ class InferenceResult {
     this.thinking,
     this.toolCalls,
     this.inferenceTimeMs,
+    this.imageBytes,
   });
 }
 
@@ -1104,6 +1106,7 @@ class ModelOrchestrator {
     'open_settings',
     'search_web',
     'take_screenshot',
+    'generate_image',
   };
 
   /// When Auto lands on SmolLM but the turn has tools and Gemma 3 fits free
@@ -3622,6 +3625,7 @@ class ModelOrchestrator {
       isStreaming: true,
       thinking: thinkingMode ? currentThinking : null,
       toolCalls: allToolCalls.isNotEmpty ? allToolCalls : null,
+      imageBytes: toolResult['imageBytes'] as Uint8List?,
     );
 
     await _sendToolResponse(
@@ -3847,7 +3851,7 @@ class ModelOrchestrator {
         .where((n) => n.isNotEmpty)
         .toList();
     final listed = names.isEmpty
-        ? 'get_time, set_alarm, cancel_alarm, open_app, open_settings, search_web'
+        ? 'get_time, set_alarm, cancel_alarm, open_app, open_settings, search_web, generate_image'
         : names.join(', ');
 
     return ' You control this Android device via tools: $listed. '

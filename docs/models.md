@@ -63,7 +63,7 @@ it cannot load for chat.
 
 Android idle unload is shorter (~2 minutes) to reduce LMK pressure.
 
-## On-device image generation (not in this build)
+## On-device image generation
 
 Repos such as
 [FLUX.2-klein-4B-LiteRT](https://huggingface.co/litert-community/FLUX.2-klein-4B-LiteRT)
@@ -73,8 +73,11 @@ are **LiteRT `CompiledModel` multi-graph diffusion pipelines** (many `.tflite`
 chunks + host tokenizer/scheduler), not `flutter_gemma` / LiteRT-LM chat
 (`.litertlm` / `.task`) models.
 
-Nova’s stack only runs LLM/VLM chat via `flutter_gemma`. Shipping those image
-models would mean a separate native LiteRT GPU pipeline, multi‑GB downloads, and
-phones in the Pixel 8a / 8 GB+ class for usable demos — out of scope for the
-current APK (and unsuitable for POCO F1). Prefer **remote LAN** or a PC host
-for image generation for now.
+Nova ships a separate native LiteRT GPU diffusion pipeline for on-device image
+generation. Ask "generate an image of a sunset over mountains" and Nova will
+run the selected diffusion model (Z-Image-Turbo or FLUX.2-klein) entirely on
+device, then display the result inline in the chat. Diffusion models are
+large (~800 MB – 2.4 GB); download them via Settings → Models.
+
+This feature is **Android-only** in the current build (web and other platforms
+fall back to remote LAN).

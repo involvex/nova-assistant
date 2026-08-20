@@ -17,6 +17,7 @@ title: Tools and MCP
 | `send_sms` | SMS compose/send |
 | `open_settings` | System settings |
 | `take_screenshot` | Capture via MediaProjection |
+| `generate_image` | On-device diffusion image generation (Android) |
 
 Definitions: `lib/tools/tool_definitions.dart`  
 Native: `android/.../ToolExecutor.kt`

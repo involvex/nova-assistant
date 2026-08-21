@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -32,6 +33,18 @@ class ChatHistoryService {
   static SharedPreferences? _prefs;
   static List<Conversation>? _cachedConversations;
   static File? _file;
+  static Timer? _writeTimer;
+  static int _appendCount = 0;
+  static const _writeDebounceMs = 300;
+  static const _compactAfterAppends = 50;
+
+  static void reset() {
+    _cachedConversations = null;
+    _file = null;
+    _writeTimer?.cancel();
+    _writeTimer = null;
+    _appendCount = 0;
+  }
 
   static Future<SharedPreferences> get _p async =>
       _prefs ??= await SharedPreferences.getInstance();
@@ -42,6 +55,19 @@ class ChatHistoryService {
     _file = File('${dir.path}/$_fileName');
 
     return _file!;
+  }
+
+  static Future<void> _scheduleWrite(List<Conversation> conversations) async {
+    _writeTimer?.cancel();
+    _writeTimer = Timer(
+      const Duration(milliseconds: _writeDebounceMs),
+      () async {
+        _writeTimer = null;
+        if (_cachedConversations != null) {
+          await _saveConversationsInternal(_cachedConversations!);
+        }
+      },
+    );
   }
 
   /// Strips screenshot bytes — they bloated prefs to 100MB+ and crash startup.
@@ -208,6 +234,9 @@ class ChatHistoryService {
       final file = await _conversationsFile();
       await file.writeAsString(encoded);
       _cachedConversations = capped;
+      _appendCount = 0;
+      _writeTimer?.cancel();
+      _writeTimer = null;
 
       // Ensure prefs never holds the blob again.
       try {
@@ -270,7 +299,14 @@ class ChatHistoryService {
         messages: updatedMessages,
         updatedAt: DateTime.now(),
       );
-      await _saveConversationsInternal(updated);
+      _cachedConversations = updated;
+      _appendCount++;
+      if (_appendCount >= _compactAfterAppends) {
+        _appendCount = 0;
+        await _saveConversationsInternal(updated);
+      } else {
+        await _scheduleWrite(updated);
+      }
     }
   }
 
@@ -307,6 +343,9 @@ class ChatHistoryService {
 
   static Future<void> clear() async {
     _cachedConversations = [];
+    _writeTimer?.cancel();
+    _writeTimer = null;
+    _appendCount = 0;
     try {
       final file = await _conversationsFile();
       if (await file.exists()) await file.delete();

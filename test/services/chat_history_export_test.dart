@@ -88,4 +88,45 @@ void main() {
     expect(raw, contains('[Screenshot]'));
     expect(raw.length, lessThan(2000));
   });
+
+  test('appendMessage persists messages and triggers debounced save', () async {
+    ChatHistoryService.reset();
+    SharedPreferences.setMockInitialValues({});
+    await SharedPreferences.getInstance();
+
+    final convo = Conversation(
+      id: 'debounce',
+      title: 'Debounce Test',
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+    await ChatHistoryService.saveConversations([convo]);
+
+    await ChatHistoryService.appendMessage(
+      'debounce',
+      ChatMessage(
+        id: 'm1',
+        text: 'Hello',
+        isUser: true,
+        timestamp: DateTime.now(),
+      ),
+    );
+    await ChatHistoryService.appendMessage(
+      'debounce',
+      ChatMessage(
+        id: 'm2',
+        text: 'World',
+        isUser: false,
+        timestamp: DateTime.now(),
+      ),
+    );
+
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    final loaded = await ChatHistoryService.getConversation('debounce');
+    expect(loaded, isNotNull);
+    expect(loaded!.messages, hasLength(2));
+    expect(loaded.messages[0].text, 'Hello');
+    expect(loaded.messages[1].text, 'World');
+  });
 }

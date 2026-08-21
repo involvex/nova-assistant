@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'dart:math' as math;
+
+import 'package:crypto/crypto.dart';
 
 /// TF-IDF based semantic search for conversation memory.
 ///
@@ -171,6 +174,19 @@ class SemanticSearch {
   /// Cached IDF corpus — reused across searches with same document set.
   static _CachedCorpus? _corpusCache;
 
+  static void clearCache() {
+    _corpusCache = null;
+  }
+
+  static String _computeCorpusHash(List<List<String>> documents) {
+    final buffer = StringBuffer();
+    for (final doc in documents) {
+      buffer.writeAll(doc, '\x00');
+      buffer.write('\x01');
+    }
+    return sha256.convert(utf8.encode(buffer.toString())).toString();
+  }
+
   /// Rank documents by relevance to the query.
   ///
   /// Each entry in [documents] is a list of tokens representing one document.
@@ -191,24 +207,16 @@ class SemanticSearch {
     if (idf != null) {
       actualIdf = idf;
     } else {
-      final docCount = documents.length;
-      if (_corpusCache != null && _corpusCache!.documents.length == docCount) {
-        bool match = true;
-        for (var i = 0; i < docCount; i++) {
-          if (_corpusCache!.documents[i].length != documents[i].length) {
-            match = false;
-            break;
-          }
-        }
-        if (match) {
-          actualIdf = _corpusCache!.idf;
-        } else {
-          actualIdf = inverseDocumentFrequency(documents);
-          _corpusCache = _CachedCorpus(documents: documents, idf: actualIdf);
-        }
+      final newHash = _computeCorpusHash(documents);
+      if (_corpusCache != null && _corpusCache!.contentHash == newHash) {
+        actualIdf = _corpusCache!.idf;
       } else {
         actualIdf = inverseDocumentFrequency(documents);
-        _corpusCache = _CachedCorpus(documents: documents, idf: actualIdf);
+        _corpusCache = _CachedCorpus(
+          documents: documents,
+          idf: actualIdf,
+          contentHash: newHash,
+        );
       }
     }
 
@@ -241,6 +249,11 @@ class ScoredEntry {
 class _CachedCorpus {
   final List<List<String>> documents;
   final Map<String, double> idf;
+  final String contentHash;
 
-  _CachedCorpus({required this.documents, required this.idf});
+  _CachedCorpus({
+    required this.documents,
+    required this.idf,
+    required this.contentHash,
+  });
 }

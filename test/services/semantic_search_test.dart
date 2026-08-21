@@ -136,6 +136,33 @@ void main() {
     });
   });
 
+  group('SemanticSearch.search cache validation', () {
+    test('recomputes IDF when token counts match but content differs', () {
+      SemanticSearch.clearCache();
+
+      final docsA = [
+        SemanticSearch.tokenize('the cat sat on the mat'),
+        SemanticSearch.tokenize('a dog played with a ball'),
+      ];
+      SemanticSearch.search(
+        queryTokens: SemanticSearch.tokenize('cat'),
+        documents: docsA,
+      );
+
+      final docsB = [
+        SemanticSearch.tokenize('the fox jumped over the fence'),
+        SemanticSearch.tokenize('a bird sang with a song'),
+      ];
+      final results = SemanticSearch.search(
+        queryTokens: SemanticSearch.tokenize('cat'),
+        documents: docsB,
+        topK: 2,
+      );
+
+      expect(results, isEmpty);
+    });
+  });
+
   group('ScoredEntry', () {
     test('toString shows formatted score', () {
       const entry = ScoredEntry(index: 0, score: 1.23456);

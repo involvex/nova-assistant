@@ -24,9 +24,7 @@ import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:nova_assistant/platform/overlay_service.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
-import 'package:nova_assistant/widgets/chat_bubble.dart';
 import 'package:nova_assistant/widgets/in_chat_search_bar.dart';
-import 'package:nova_assistant/widgets/voice_input.dart';
 import 'package:nova_assistant/screens/chat_history_screen.dart';
 import 'package:nova_assistant/screens/settings_screen.dart';
 import 'package:nova_assistant/screens/model_selector_sheet.dart';
@@ -38,7 +36,9 @@ import 'package:nova_assistant/services/prompt_presets_service.dart';
 import 'package:nova_assistant/services/shizuku_service.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
-import 'package:nova_assistant/widgets/suggestion_chip.dart';
+import 'package:nova_assistant/widgets/message_list_view.dart';
+import 'package:nova_assistant/widgets/chat_input_bar.dart';
+import 'package:nova_assistant/widgets/chat_overlays.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -2015,6 +2015,17 @@ class _AssistantScreenState extends State<AssistantScreen>
   @override
   Widget build(BuildContext context) {
     final isLoadingModel = ModelOrchestrator.instance.isLoadingModel;
+    final budget = _contextBudget;
+    final percent = budget == null
+        ? null
+        : (budget.usageRatio * 100).clamp(0, 999).round();
+    final meterColor = percent == null
+        ? null
+        : percent >= 85
+        ? Colors.redAccent
+        : percent >= 70
+        ? Colors.amber
+        : const Color(0xFF6C63FF);
 
     return Scaffold(
       backgroundColor: _chatTheme.backgroundColor,
@@ -2025,96 +2036,108 @@ class _AssistantScreenState extends State<AssistantScreen>
               children: [
                 _buildAppBar(),
                 if (ModelOrchestrator.instance.isPreparingChat)
-                  _buildChatPrepOverlay(),
+                  ChatPrepOverlay(status: _status),
                 if (_currentScreenshot != null) _buildScreenshotIndicator(),
                 if (_attachmentManager.hasAttachments)
                   _buildAttachmentIndicator(),
                 if (_offlineMode) _buildOfflineBanner(),
                 Expanded(
-                  child: _messages.isEmpty
-                      ? _buildEmptyState()
-                      : ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.only(top: 8, bottom: 8),
-                          itemCount: _messages.length,
-                          itemBuilder: (context, index) {
-                            final msg = _messages[index];
-
-                            return RepaintBoundary(
-                              child: ChatBubble(
-                                message: msg,
-                                theme: _chatTheme,
-                                onScreenshotTap: msg.imageData != null
-                                    ? () => _showFullScreenshot(msg.imageData!)
-                                    : null,
-                                onRetry: msg.isError && !msg.isUser
-                                    ? () => _retryFromError(index)
-                                    : null,
-                                onSettingsTap: msg.isError && !msg.isUser
-                                    ? () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute<void>(
-                                            builder: (context) =>
-                                                const SettingsScreen(),
-                                          ),
-                                        );
-                                      }
-                                    : null,
-                                onCopy: () {
-                                  final attribution = msg.isUser
-                                      ? ''
-                                      : '\n\n— ${msg.modelName ?? "Nova"} · ${_formatTimestamp(msg.timestamp)}';
-                                  Clipboard.setData(
-                                    ClipboardData(
-                                      text: '${msg.text}$attribution',
-                                    ),
-                                  );
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Copied to clipboard'),
-                                      duration: Duration(seconds: 2),
-                                    ),
-                                  );
-                                },
-                                onReactionRequest: () =>
-                                    _showReactionPicker(index),
-                                onReactionChipTap: (emoji) =>
-                                    _toggleReaction(index, emoji),
-                                onRegenerate:
-                                    !msg.isUser &&
-                                        !msg.isError &&
-                                        !msg.isStreaming
-                                    ? () => _regenerateResponse(index)
-                                    : null,
-                                onSpeak:
-                                    !msg.isUser &&
-                                        !msg.isError &&
-                                        !msg.isStreaming &&
-                                        TtsService.instance.isEnabled
-                                    ? () => _speakMessage(msg.text)
-                                    : null,
-                                onEdit: msg.isUser && !_isGenerating
-                                    ? () => _editUserMessage(index)
-                                    : null,
-                                onBranchFromHere:
-                                    widget.conversationId != null &&
-                                        !_isGenerating &&
-                                        !msg.isStreaming &&
-                                        !msg.isError
-                                    ? () => unawaited(_branchFromMessage(index))
-                                    : null,
-                              ),
-                            );
-                          },
+                  child: MessageListView(
+                    messages: _messages,
+                    scrollController: _scrollController,
+                    chatTheme: _chatTheme,
+                    isGenerating: _isGenerating,
+                    hasConversationId: widget.conversationId != null,
+                    onShowFullScreenshot: _showFullScreenshot,
+                    onRetry: _retryFromError,
+                    onOpenSettings: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (context) => const SettingsScreen(),
                         ),
+                      );
+                    },
+                    onCopy: (msg) {
+                      final attribution = msg.isUser
+                          ? ''
+                          : '\n\n— ${msg.modelName ?? "Nova"} · ${_formatTimestamp(msg.timestamp)}';
+                      Clipboard.setData(
+                        ClipboardData(text: '${msg.text}$attribution'),
+                      );
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Copied to clipboard'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    onReactionRequest: (index) =>
+                        unawaited(_showReactionPicker(index)),
+                    onReactionChipTap: _toggleReaction,
+                    onRegenerate: _regenerateResponse,
+                    onSpeak: (text) => unawaited(_speakMessage(text)),
+                    onEdit: (index) => unawaited(_editUserMessage(index)),
+                    onBranchFromHere: (index) =>
+                        unawaited(_branchFromMessage(index)),
+                    ttsEnabled: TtsService.instance.isEnabled,
+                    starters: PromptPresetsService.instance.emptyStateStarters,
+                    onFillComposer: _fillComposer,
+                    onApplySuggestion: _applySuggestion,
+                    formatTimestamp: _formatTimestamp,
+                  ),
                 ),
-                _buildStatusBar(),
-                _buildInputBar(),
+                StatusBar(
+                  contextPercent: percent,
+                  meterColor: meterColor,
+                  isGenerating: _isGenerating,
+                  status: _status,
+                  thinkingMode: _thinkingMode,
+                  onContextBudgetTap: _showContextBudgetSheet,
+                ),
+                ChatInputBar(
+                  inputController: _inputController,
+                  inputFocus: _inputFocus,
+                  isGenerating: _isGenerating,
+                  isLoadingSuggestions: _isLoadingSuggestions,
+                  followUpSuggestions: _followUpSuggestions,
+                  messageHardLimit: _messageHardLimit,
+                  messageSoftLimit: _messageSoftLimit,
+                  effectiveModelLabel: _effectiveModelLabel,
+                  selectedCustomModel: _selectedCustomModel,
+                  canSendFor: _canSendFor,
+                  isOverHardLimitFor: _isOverHardLimitFor,
+                  onAttachPressed: _showAttachSheet,
+                  onScreenshotPressed: _captureAndAttachScreenshot,
+                  onClipboardPressed: _showClipboardActions,
+                  onBulbPressed: _onBulbPressed,
+                  onRerollPressed: _rerollSuggestions,
+                  onSuggestionTap: _applySuggestion,
+                  onSendPressed: _sendMessage,
+                  onStopPressed: _stopGeneration,
+                  isBusy: ModelOrchestrator.instance.isBusy,
+                  ttsEnabled: TtsService.instance.isEnabled,
+                ),
               ],
             ),
-            if (_debugMode) _buildDebugBanner(),
-            if (isLoadingModel) _buildModelLoadingOverlay(),
+            if (_debugMode)
+              DebugBanner(
+                ram: _debugMemoryMb != null ? '$_debugMemoryMb MB' : '…',
+                modelState: ModelOrchestrator.instance.isLoadingModel
+                    ? 'loading'
+                    : ModelOrchestrator.instance.isModelLoaded
+                    ? 'loaded'
+                    : 'idle',
+                streamState: ModelOrchestrator.instance.isStreaming
+                    ? 'streaming'
+                    : 'idle',
+                effectiveModelLabel: _effectiveModelLabel,
+                contextUsage: _contextBudget == null
+                    ? 'ctx: idle'
+                    : 'ctx: ${(_contextBudget!.usageRatio * 100).round()}% '
+                          '(${_contextBudget!.estimatedTokens}/${_contextBudget!.kvLimit})',
+              ),
+            if (isLoadingModel) ModelLoadingOverlay(status: _status),
             if (_showSearch)
               Positioned(
                 top: 0,
@@ -2130,100 +2153,6 @@ class _AssistantScreenState extends State<AssistantScreen>
                 ),
               ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModelLoadingOverlay() {
-    return Positioned.fill(
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.55),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(color: Color(0xFF6C63FF)),
-                const SizedBox(height: 16),
-                Text(
-                  _status,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'First compile can take 1–2 minutes. Do not send yet.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildChatPrepOverlay() {
-    return Container(
-      color: Colors.black.withValues(alpha: 0.4),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Color(0xFF6C63FF),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Text(
-            _status,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70, fontSize: 13),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDebugBanner() {
-    final orchestrator = ModelOrchestrator.instance;
-    final ram = _debugMemoryMb != null ? '$_debugMemoryMb MB' : '…';
-    final modelState = orchestrator.isLoadingModel
-        ? 'loading'
-        : orchestrator.isModelLoaded
-        ? 'loaded'
-        : 'idle';
-    final streamState = orchestrator.isStreaming ? 'streaming' : 'idle';
-    final contextUsage = _contextBudget == null
-        ? 'ctx: idle'
-        : 'ctx: ${(_contextBudget!.usageRatio * 100).round()}% '
-              '(${_contextBudget!.estimatedTokens}/${_contextBudget!.kvLimit})';
-
-    return Positioned(
-      left: 8,
-      right: 8,
-      bottom: 4,
-      child: IgnorePointer(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.72),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            'DEBUG  RAM: $ram  |  Model: $modelState  |  Stream: $streamState  |  '
-            '$_effectiveModelLabel  |  $contextUsage',
-            style: const TextStyle(color: Colors.white60, fontSize: 10),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
         ),
       ),
     );
@@ -2744,430 +2673,6 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
 
     return buffer.toString();
-  }
-
-  Widget _buildEmptyState() {
-    final starters = PromptPresetsService.instance.emptyStateStarters;
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: constraints.maxHeight),
-            child: IntrinsicHeight(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF6C63FF), Color(0xFF9D4EDD)],
-                      ),
-                      borderRadius: BorderRadius.circular(22),
-                    ),
-                    child: const Icon(
-                      Icons.auto_awesome,
-                      color: Colors.white,
-                      size: 36,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Hi, I\'m Nova',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Your on-device AI assistant, powered by Gemma.\n'
-                    'Tap the mic or type to start.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey[400], height: 1.5),
-                  ),
-                  const SizedBox(height: 24),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Try a prompt',
-                      style: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    height: 40,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: starters.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (context, index) {
-                        final starter = starters[index];
-
-                        return SuggestionChip(
-                          label: starter.label,
-                          onTap: () => _fillComposer(starter.prompt),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      SuggestionChip(
-                        label: "What's on my screen?",
-                        onTap: () => _applySuggestion("What's on my screen?"),
-                      ),
-                      SuggestionChip(
-                        label: 'Set an alarm for 7:00 PM',
-                        onTap: () =>
-                            _applySuggestion('Set an alarm for 7:00 PM'),
-                      ),
-                      SuggestionChip(
-                        label: 'Open Settings',
-                        onTap: () => _applySuggestion('Open Settings'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildStatusBar() {
-    final budget = _contextBudget;
-    final percent = budget == null
-        ? null
-        : (budget.usageRatio * 100).clamp(0, 999).round();
-    final meterColor = percent == null
-        ? Colors.grey
-        : percent >= 85
-        ? Colors.redAccent
-        : percent >= 70
-        ? Colors.amber
-        : const Color(0xFF6C63FF);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: _isGenerating ? Colors.orange : Colors.green,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _status,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-            ),
-          ),
-          if (percent != null) ...[
-            const SizedBox(width: 8),
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _showContextBudgetSheet,
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: meterColor.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: meterColor.withValues(alpha: 0.45),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 28,
-                        height: 4,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
-                          child: LinearProgressIndicator(
-                            value: (percent / 100).clamp(0.0, 1.0),
-                            backgroundColor: Colors.white.withValues(
-                              alpha: 0.12,
-                            ),
-                            color: meterColor,
-                            minHeight: 4,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Context $percent%',
-                        style: TextStyle(fontSize: 10, color: meterColor),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-          if (_thinkingMode) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0xFF6C63FF).withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.psychology, size: 10, color: Color(0xFF6C63FF)),
-                  SizedBox(width: 4),
-                  Text(
-                    'Thinking',
-                    style: TextStyle(fontSize: 10, color: Color(0xFF6C63FF)),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInputBar() {
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: _inputController,
-      builder: (context, value, child) {
-        final text = value.text;
-        final charCount = text.length;
-        final canSend = _canSendFor(text);
-        final counterColor = _isOverHardLimitFor(text)
-            ? Colors.redAccent
-            : charCount > _messageSoftLimit
-            ? Colors.amber
-            : Colors.grey[600];
-        final busy = ModelOrchestrator.instance.isBusy;
-
-        return Container(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0D0D1A),
-            border: Border(
-              top: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_isLoadingSuggestions || _followUpSuggestions.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _isLoadingSuggestions
-                            ? const SizedBox(
-                                height: 32,
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                ),
-                              )
-                            : SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  children: [
-                                    for (final suggestion
-                                        in _followUpSuggestions)
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                          right: 8,
-                                        ),
-                                        child: SuggestionChip(
-                                          label: suggestion,
-                                          onTap: () {
-                                            if (!busy) {
-                                              _applySuggestion(suggestion);
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                      ),
-                      if (!_isLoadingSuggestions &&
-                          _followUpSuggestions.isNotEmpty)
-                        IconButton(
-                          onPressed: busy ? null : _rerollSuggestions,
-                          icon: const Icon(Icons.refresh, color: Colors.grey),
-                          tooltip: 'More suggestions',
-                        ),
-                    ],
-                  ),
-                ),
-              Row(
-                children: [
-                  IconButton(
-                    onPressed: _showAttachSheet,
-                    icon: const Icon(Icons.attach_file, color: Colors.grey),
-                    tooltip: 'Attach',
-                  ),
-                  IconButton(
-                    onPressed: _captureAndAttachScreenshot,
-                    icon: const Icon(Icons.screenshot, color: Colors.grey),
-                    tooltip: 'Capture screenshot',
-                  ),
-                  IconButton(
-                    onPressed: _showClipboardActions,
-                    icon: const Icon(Icons.content_paste, color: Colors.grey),
-                    tooltip: 'Paste / analyze clipboard',
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: busy || _isGenerating ? null : _onBulbPressed,
-                    icon: const Icon(
-                      Icons.lightbulb_outline,
-                      color: Colors.grey,
-                    ),
-                    tooltip: 'Suggested follow-ups',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _inputController,
-                      focusNode: _inputFocus,
-                      maxLength: _messageHardLimit,
-                      maxLengthEnforcement: MaxLengthEnforcement.none,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: 'Ask Nova anything...',
-                        hintStyle: TextStyle(color: Colors.grey[600]),
-                        filled: true,
-                        fillColor: const Color(0xFF1A1A2E),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 12,
-                        ),
-                        counterText: '',
-                      ),
-                      textInputAction: TextInputAction.send,
-                      contextMenuBuilder: (context, editableTextState) {
-                        return AdaptiveTextSelectionToolbar.buttonItems(
-                          anchors: editableTextState.contextMenuAnchors,
-                          buttonItems: [
-                            ...editableTextState.contextMenuButtonItems,
-                            ContextMenuButtonItem(
-                              label: 'Analyze clipboard',
-                              onPressed: () {
-                                ContextMenuController.removeAny();
-                                unawaited(_showClipboardActions());
-                              },
-                            ),
-                          ],
-                        );
-                      },
-                      onSubmitted: (_) {
-                        if (canSend) _sendMessage();
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  VoiceInputButton(
-                    onPartial: (partial) {
-                      if (!mounted) return;
-                      _inputController.text = partial;
-                      _inputController.selection = TextSelection.collapsed(
-                        offset: partial.length,
-                      );
-                    },
-                    onTranscription: (transcript) {
-                      if (!mounted || transcript.isEmpty) return;
-                      _inputController.text = transcript;
-                      if (_isGenerating || ModelOrchestrator.instance.isBusy) {
-                        // Leave full text in the field for the user to send.
-                        return;
-                      }
-                      unawaited(_sendMessage());
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    child: IconButton(
-                      onPressed: _isGenerating
-                          ? _stopGeneration
-                          : (canSend ? _sendMessage : null),
-                      icon: Icon(
-                        _isGenerating ? Icons.stop_circle : Icons.send_rounded,
-                        color: _isGenerating
-                            ? Colors.redAccent
-                            : (canSend ? const Color(0xFF6C63FF) : Colors.grey),
-                      ),
-                      tooltip: _isGenerating ? 'Stop' : 'Send',
-                    ),
-                  ),
-                ],
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '$charCount / $_messageHardLimit',
-                      style: TextStyle(fontSize: 11, color: counterColor),
-                    ),
-                    if (_selectedCustomModel == null)
-                      Text(
-                        _effectiveModelLabel,
-                        style: TextStyle(fontSize: 10, color: Colors.grey[700]),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
   }
 
   static const _reactionEmojis = ['👍', '👎', '😄', '❤️', '🤔'];

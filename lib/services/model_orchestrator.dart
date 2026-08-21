@@ -2277,7 +2277,7 @@ class ModelOrchestrator {
 
     int estimatedTokens = 0;
     for (final msg in history) {
-      estimatedTokens += _estimateTokens(msg);
+      estimatedTokens += _estimateRealTokens(msg, model);
       if (estimatedTokens > budget) break;
     }
 
@@ -2294,7 +2294,7 @@ class ModelOrchestrator {
       int cutoffIndex = keepMessages.length;
 
       for (var i = keepMessages.length - 1; i >= 0; i--) {
-        tokenSum += _estimateTokens(keepMessages[i]);
+        tokenSum += _estimateRealTokens(keepMessages[i], model);
         if (tokenSum > recentLimit) {
           cutoffIndex = i;
           break;
@@ -2316,12 +2316,6 @@ class ModelOrchestrator {
         return;
       }
     }
-  }
-
-  int _estimateTokens(Message message) {
-    if (message.hasImage) return MessageLimits.visionImageTokenEstimate;
-
-    return (message.text.length / 4).round();
   }
 
   /// Real-token estimate for a chat message — uses the per-model tokenizer

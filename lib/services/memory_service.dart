@@ -22,6 +22,7 @@ class MemoryService {
   static List<Map<String, dynamic>>? _customMemoriesCache;
   static Timer? _writeTimer;
   static bool _writeScheduled = false;
+  static bool _cacheLoaded = false;
 
   static Future<File> get _dataFile async {
     if (_file != null) return _file!;
@@ -62,11 +63,13 @@ class MemoryService {
   }
 
   static Future<void> _loadFromDisk() async {
+    if (_cacheLoaded) return;
     try {
       final file = await _dataFile;
       if (!await file.exists()) {
         _conversationCache = null;
         _customMemoriesCache = null;
+        _cacheLoaded = true;
         return;
       }
       final json = await file.readAsString();
@@ -79,10 +82,12 @@ class MemoryService {
       _customMemoriesCache = custom
           ?.map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
+      _cacheLoaded = true;
     } catch (e) {
       debugPrint('MemoryService load error: $e');
       _conversationCache = null;
       _customMemoriesCache = null;
+      _cacheLoaded = true;
     }
   }
 
@@ -95,7 +100,7 @@ class MemoryService {
     if (!isEnabled) return;
 
     try {
-      await _loadFromDisk();
+      if (!_cacheLoaded) await _loadFromDisk();
       final entries = _conversationCache ?? <Map<String, String>>[];
 
       final truncatedQuery = query.length > _maxEntryLength
@@ -139,7 +144,7 @@ class MemoryService {
     String source = 'manual',
   }) async {
     try {
-      await _loadFromDisk();
+      if (!_cacheLoaded) await _loadFromDisk();
       final memories = _customMemoriesCache ?? <Map<String, dynamic>>[];
 
       memories.add({
@@ -177,7 +182,7 @@ class MemoryService {
     required String time,
   }) async {
     try {
-      await _loadFromDisk();
+      if (!_cacheLoaded) await _loadFromDisk();
       final entries = _conversationCache ?? <Map<String, String>>[];
       entries.removeWhere((e) => e['query'] == query && e['time'] == time);
       _conversationCache = entries;
@@ -194,7 +199,7 @@ class MemoryService {
     String content,
   ) async {
     try {
-      await _loadFromDisk();
+      if (!_cacheLoaded) await _loadFromDisk();
       final memories = _customMemoriesCache ?? <Map<String, dynamic>>[];
 
       final index = memories.indexWhere((m) => m['id'] == id);
@@ -215,7 +220,7 @@ class MemoryService {
 
   static Future<void> deleteCustomMemory(String id) async {
     try {
-      await _loadFromDisk();
+      if (!_cacheLoaded) await _loadFromDisk();
       final memories = _customMemoriesCache ?? <Map<String, dynamic>>[];
 
       memories.removeWhere((m) => m['id'] == id);

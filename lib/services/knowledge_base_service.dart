@@ -57,6 +57,10 @@ class KnowledgeBaseService {
       _instance ??= KnowledgeBaseService._();
   KnowledgeBaseService._();
 
+  static void reset() {
+    _instance = null;
+  }
+
   static const _prefsKey = 'knowledge_base_documents';
   static const _enabledKey = 'settings_knowledge_base';
   static const enabledPrefsKey = _enabledKey;
@@ -65,6 +69,9 @@ class KnowledgeBaseService {
 
   SharedPreferences? _prefs;
   List<KnowledgeDocument>? _cache;
+  final Map<String, List<String>> _cachedChunkTokens = {};
+
+  String _chunkTokenKey(String docId, int index) => '$docId:$index';
 
   Future<SharedPreferences> get _p async =>
       _prefs ??= await SharedPreferences.getInstance();
@@ -150,6 +157,13 @@ class KnowledgeBaseService {
       createdAt: DateTime.now(),
       charCount: truncated.length,
     );
+
+    for (var i = 0; i < doc.chunks.length; i++) {
+      _cachedChunkTokens[_chunkTokenKey(doc.id, i)] = SemanticSearch.tokenize(
+        doc.chunks[i],
+      );
+    }
+
     docs.add(doc);
     await _save(docs);
 
@@ -159,10 +173,12 @@ class KnowledgeBaseService {
   Future<void> deleteDocument(String id) async {
     final docs = List<KnowledgeDocument>.from(await listDocuments());
     docs.removeWhere((d) => d.id == id);
+    _cachedChunkTokens.removeWhere((key, _) => key.startsWith('$id:'));
     await _save(docs);
   }
 
   Future<void> clear() async {
+    _cachedChunkTokens.clear();
     await _save([]);
   }
 
@@ -177,16 +193,26 @@ class KnowledgeBaseService {
       final queryTokens = SemanticSearch.tokenize(query);
       if (queryTokens.isEmpty) return null;
 
-      final chunkEntries = <({String docName, String chunk})>[];
+      final chunkEntries =
+          <({String docId, String docName, String chunk, int chunkIndex})>[];
       for (final doc in docs) {
-        for (final chunk in doc.chunks) {
-          chunkEntries.add((docName: doc.name, chunk: chunk));
+        for (var i = 0; i < doc.chunks.length; i++) {
+          chunkEntries.add((
+            docId: doc.id,
+            docName: doc.name,
+            chunk: doc.chunks[i],
+            chunkIndex: i,
+          ));
         }
       }
       if (chunkEntries.isEmpty) return null;
 
       final docTokensList = chunkEntries
-          .map((e) => SemanticSearch.tokenize(e.chunk))
+          .map(
+            (e) =>
+                _cachedChunkTokens[_chunkTokenKey(e.docId, e.chunkIndex)] ??
+                SemanticSearch.tokenize(e.chunk),
+          )
           .toList();
 
       final results = SemanticSearch.search(

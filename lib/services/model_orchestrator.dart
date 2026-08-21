@@ -1469,22 +1469,17 @@ class ModelOrchestrator {
             await MemoryDiagnosticsService.instance.readTotalMemMb();
             final backend = PlatformAdaptationService.instance
                 .preferredBackendFor(modelToLoad);
-            // #region agent log
-            unawaited(
-              AgentDebugLog.log(
-                hypothesisId: 'F',
-                location: 'model_orchestrator.dart:_getOrCreateModel:backend',
-                message: 'Preferred backend for load',
-                data: {
-                  'model': modelToLoad.name,
-                  'backend': backend.name,
-                  'totalMemMb':
-                      MemoryDiagnosticsService.instance.lastTotalMemMb,
-                },
-                runId: 'post-fix',
-              ),
+            _debugLog(
+              hypothesisId: 'F',
+              location: 'model_orchestrator.dart:_getOrCreateModel:backend',
+              message: 'Preferred backend for load',
+              data: {
+                'model': modelToLoad.name,
+                'backend': backend.name,
+                'totalMemMb': MemoryDiagnosticsService.instance.lastTotalMemMb,
+              },
+              runId: 'post-fix',
             );
-            // #endregion
             _activeModel = await _loadActiveModelWithTimeout(
               modelToLoad: modelToLoad,
               supportImage: supportImage,
@@ -2847,20 +2842,17 @@ class ModelOrchestrator {
           // prompt is already over-budget.
           _lastReplaySource = List<ChatMessage>.from(_pendingReplay);
           _pendingReplay = const [];
-          // #region agent log
-          unawaited(
-            AgentDebugLog.log(
-              hypothesisId: 'A',
-              location: 'model_orchestrator.dart:processMessage:reinject',
-              message: 'Reinjecting history into new chat session',
-              data: {
-                'replayMessages': replay.length,
-                'budget': budget,
-                'rawBudget': rawBudget,
-                'emptyTexts': replay.where((m) => m.text.trim().isEmpty).length,
-              },
-              runId: 'post-fix',
-            ),
+          _debugLog(
+            hypothesisId: 'A',
+            location: 'model_orchestrator.dart:processMessage:reinject',
+            message: 'Reinjecting history into new chat session',
+            data: {
+              'replayMessages': replay.length,
+              'budget': budget,
+              'rawBudget': rawBudget,
+              'emptyTexts': replay.where((m) => m.text.trim().isEmpty).length,
+            },
+            runId: 'post-fix',
           );
           // #endregion
           if (replay.isNotEmpty) {

@@ -70,4 +70,17 @@ void main() {
       expect(model.hasThinking, false);
     });
   });
+
+  group('ModelOrchestrator debug mode', () {
+    test('defaults to disabled', () {
+      expect(ModelOrchestrator.instance.isDebugMode, false);
+    });
+
+    test('setDebugMode toggles state', () {
+      ModelOrchestrator.instance.setDebugMode(true);
+      expect(ModelOrchestrator.instance.isDebugMode, true);
+      ModelOrchestrator.instance.setDebugMode(false);
+      expect(ModelOrchestrator.instance.isDebugMode, false);
+    });
+  });
 }

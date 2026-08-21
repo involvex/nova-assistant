@@ -99,6 +99,19 @@ class _AssistantScreenState extends State<AssistantScreen>
   int _currentSearchMatch = 0;
   List<int> _searchMatchIndices = [];
   ChatBubbleTheme _chatTheme = ChatBubbleTheme.defaultTheme;
+  int _messageVersion = 0;
+  int? _cachedHistoryTokenEstimate;
+  int? _cachedHistoryTokenEstimateVersion;
+  ContextBudgetEstimate? _cachedContextBudget;
+  int? _cachedContextBudgetVersion;
+
+  void _invalidateHistoryTokenEstimate() {
+    _messageVersion++;
+    _cachedHistoryTokenEstimate = null;
+    _cachedHistoryTokenEstimateVersion = null;
+    _cachedContextBudget = null;
+    _cachedContextBudgetVersion = null;
+  }
 
   @override
   void initState() {
@@ -124,6 +137,7 @@ class _AssistantScreenState extends State<AssistantScreen>
             _messages.clear();
             _contextBudget = null;
             _lastContextBudgetWarnPercent = 0;
+            _invalidateHistoryTokenEstimate();
           });
         }
       },
@@ -177,6 +191,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         setState(() {
           _messages.addAll(conversation.messages);
           _refreshLocalContextBudget();
+          _invalidateHistoryTokenEstimate();
         });
         ConversationSummaryService.instance.activeSummary =
             conversation.summary;
@@ -190,6 +205,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         setState(() {
           _messages.addAll(history);
           _refreshLocalContextBudget();
+          _invalidateHistoryTokenEstimate();
         });
         WidgetsBinding.instance.addPostFrameCallback(
           (_) => _scrollToBottom(force: true),
@@ -357,12 +373,17 @@ class _AssistantScreenState extends State<AssistantScreen>
       _currentScreenshot != null || _attachmentManager.attachments.isNotEmpty;
 
   int get _historyTokenEstimate {
+    if (_cachedHistoryTokenEstimate != null &&
+        _cachedHistoryTokenEstimateVersion == _messageVersion) {
+      return _cachedHistoryTokenEstimate!;
+    }
     final text = _messages
         .where((m) => !m.isStreaming && !m.isError)
         .map((m) => m.text)
         .join(' ');
-
-    return MessageLimits.estimateTokens(text);
+    _cachedHistoryTokenEstimate = MessageLimits.estimateTokens(text);
+    _cachedHistoryTokenEstimateVersion = _messageVersion;
+    return _cachedHistoryTokenEstimate!;
   }
 
   int get _messageHardLimit {
@@ -461,6 +482,7 @@ class _AssistantScreenState extends State<AssistantScreen>
           ..clear()
           ..addAll(result.retainedMessages);
         _refreshLocalContextBudget();
+        _invalidateHistoryTokenEstimate();
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Context compacted to free space')),
@@ -469,8 +491,15 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   void _refreshLocalContextBudget() {
+    if (_cachedContextBudget != null &&
+        _cachedContextBudgetVersion == _messageVersion) {
+      _contextBudget = _cachedContextBudget;
+      return;
+    }
     if (_messages.isEmpty) {
       _contextBudget = null;
+      _cachedContextBudget = null;
+      _cachedContextBudgetVersion = _messageVersion;
       return;
     }
     final model =
@@ -509,6 +538,8 @@ class _AssistantScreenState extends State<AssistantScreen>
     } else {
       _contextBudget = estimate;
     }
+    _cachedContextBudget = _contextBudget;
+    _cachedContextBudgetVersion = _messageVersion;
   }
 
   Future<void> _showContextBudgetSheet() async {
@@ -1115,6 +1146,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     // Remove the error message and any following messages
     setState(() {
       _messages.removeRange(errorIndex, _messages.length);
+      _invalidateHistoryTokenEstimate();
     });
     ModelOrchestrator.instance.invalidateSessionForReplay(
       _messages.where((m) => !m.isStreaming).toList(),
@@ -1139,6 +1171,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     // Remove the assistant message and any following messages
     setState(() {
       _messages.removeRange(assistantIndex, _messages.length);
+      _invalidateHistoryTokenEstimate();
     });
     ModelOrchestrator.instance.invalidateSessionForReplay(
       _messages.where((m) => !m.isStreaming).toList(),
@@ -1196,6 +1229,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     if (!mounted) return;
     setState(() {
       _messages.removeRange(userIndex, _messages.length);
+      _invalidateHistoryTokenEstimate();
     });
     ModelOrchestrator.instance.invalidateSessionForReplay(
       _messages.where((m) => !m.isStreaming).toList(),
@@ -1424,6 +1458,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     setState(() {
       _messages.add(userMessage);
       _isGenerating = true;
+      _invalidateHistoryTokenEstimate();
     });
 
     if (TtsService.instance.isSpeaking) {
@@ -1445,7 +1480,10 @@ class _AssistantScreenState extends State<AssistantScreen>
       isStreaming: true,
     );
 
-    setState(() => _messages.add(assistantMsg));
+    setState(() {
+      _messages.add(assistantMsg);
+      _invalidateHistoryTokenEstimate();
+    });
 
     // Enable wakelock during streaming if setting is on
     final prefs = await SharedPreferences.getInstance();
@@ -1538,6 +1576,7 @@ class _AssistantScreenState extends State<AssistantScreen>
             isStreaming: false,
             isError: true,
           );
+          _invalidateHistoryTokenEstimate();
         });
       }
     } finally {

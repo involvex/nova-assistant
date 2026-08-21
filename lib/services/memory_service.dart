@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/services/knowledge_base_service.dart';
 import 'package:nova_assistant/services/semantic_search.dart';
@@ -8,17 +11,24 @@ import 'package:nova_assistant/services/semantic_search.dart';
 class MemoryService {
   static const _key = 'rag_conversations';
   static const _customMemoriesKey = 'custom_memories';
-  static SharedPreferences? _prefs;
   static const _maxEntries = 50;
   static const _maxEntryLength = 1000;
 
   static List<List<String>>? _cachedCustomMemoryTokens;
   static List<List<String>>? _cachedConversationTokens;
 
-  static Future<void> initialize() async {}
+  static File? _file;
+  static List<Map<String, String>>? _conversationCache;
+  static List<Map<String, dynamic>>? _customMemoriesCache;
+  static Timer? _writeTimer;
+  static bool _writeScheduled = false;
 
-  static Future<SharedPreferences> get _p async =>
-      _prefs ??= await SharedPreferences.getInstance();
+  static Future<File> get _dataFile async {
+    if (_file != null) return _file!;
+    final dir = await getApplicationDocumentsDirectory();
+    _file = File('${dir.path}/memory_service_data.json');
+    return _file!;
+  }
 
   static void _invalidateCustomMemoryTokens() {
     _cachedCustomMemoryTokens = null;
@@ -28,20 +38,65 @@ class MemoryService {
     _cachedConversationTokens = null;
   }
 
+  static Future<void> _scheduleWrite() async {
+    if (_writeScheduled) return;
+    _writeScheduled = true;
+    _writeTimer?.cancel();
+    _writeTimer = Timer(const Duration(milliseconds: 300), () async {
+      _writeScheduled = false;
+      await _flushToDisk();
+    });
+  }
+
+  static Future<void> _flushToDisk() async {
+    try {
+      final file = await _dataFile;
+      final data = <String, dynamic>{
+        _key: _conversationCache ?? const [],
+        _customMemoriesKey: _customMemoriesCache ?? const [],
+      };
+      await file.writeAsString(jsonEncode(data));
+    } catch (e) {
+      debugPrint('MemoryService write error: $e');
+    }
+  }
+
+  static Future<void> _loadFromDisk() async {
+    try {
+      final file = await _dataFile;
+      if (!await file.exists()) {
+        _conversationCache = null;
+        _customMemoriesCache = null;
+        return;
+      }
+      final json = await file.readAsString();
+      final data = jsonDecode(json) as Map<String, dynamic>;
+      final conv = data[_key] as List<dynamic>?;
+      _conversationCache = conv
+          ?.map((e) => Map<String, String>.from(e as Map))
+          .toList();
+      final custom = data[_customMemoriesKey] as List<dynamic>?;
+      _customMemoriesCache = custom
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      debugPrint('MemoryService load error: $e');
+      _conversationCache = null;
+      _customMemoriesCache = null;
+    }
+  }
+
+  static Future<void> initialize() async {
+    await _loadFromDisk();
+  }
+
   static Future<void> storeConversation(String query, String response) async {
     final isEnabled = await _isConversationMemoryEnabled();
     if (!isEnabled) return;
 
     try {
-      final p = await _p;
-      final existing = p.getString(_key);
-      final List<Map<String, String>> entries = existing != null
-          ? List<Map<String, String>>.from(
-              (jsonDecode(existing) as List<dynamic>).map(
-                (e) => Map<String, String>.from(e as Map),
-              ),
-            )
-          : [];
+      await _loadFromDisk();
+      final entries = _conversationCache ?? <Map<String, String>>[];
 
       final truncatedQuery = query.length > _maxEntryLength
           ? query.substring(0, _maxEntryLength)
@@ -60,8 +115,9 @@ class MemoryService {
         entries.removeRange(0, entries.length - _maxEntries);
       }
 
-      await p.setString(_key, jsonEncode(entries));
+      _conversationCache = entries;
       _invalidateConversationTokens();
+      await _scheduleWrite();
     } catch (e) {
       debugPrint('MemoryService.storeConversation error: $e');
     }
@@ -69,15 +125,11 @@ class MemoryService {
 
   static Future<List<Map<String, dynamic>>> getCustomMemories() async {
     try {
-      final p = await _p;
-      final existing = p.getString(_customMemoriesKey);
-      if (existing == null) return [];
-      return (jsonDecode(existing) as List<dynamic>)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
+      await _loadFromDisk();
+      return _customMemoriesCache ?? const [];
     } catch (e) {
       debugPrint('MemoryService.getCustomMemories error: $e');
-      return [];
+      return const [];
     }
   }
 
@@ -87,13 +139,8 @@ class MemoryService {
     String source = 'manual',
   }) async {
     try {
-      final p = await _p;
-      final existing = p.getString(_customMemoriesKey);
-      final List<Map<String, dynamic>> memories = existing != null
-          ? (jsonDecode(existing) as List<dynamic>)
-                .map((e) => Map<String, dynamic>.from(e as Map))
-                .toList()
-          : [];
+      await _loadFromDisk();
+      final memories = _customMemoriesCache ?? <Map<String, dynamic>>[];
 
       memories.add({
         'id': DateTime.now().millisecondsSinceEpoch.toString(),
@@ -103,51 +150,39 @@ class MemoryService {
         'source': source,
       });
 
-      await p.setString(_customMemoriesKey, jsonEncode(memories));
+      _customMemoriesCache = memories;
       _invalidateCustomMemoryTokens();
+      await _scheduleWrite();
     } catch (e) {
       debugPrint('MemoryService.addCustomMemory error: $e');
     }
   }
 
-  /// Returns all RAG conversation memory entries (newest last).
   static Future<List<Map<String, String>>>
   getConversationMemoryEntries() async {
     try {
-      final p = await _p;
-      final existing = p.getString(_key);
-      if (existing == null) return [];
-
-      return List<Map<String, String>>.from(
-        (jsonDecode(existing) as List<dynamic>).map(
-          (e) => Map<String, String>.from(e as Map),
-        ),
-      );
+      await _loadFromDisk();
+      return _conversationCache
+              ?.map((e) => Map<String, String>.from(e))
+              .toList() ??
+          const [];
     } catch (e) {
       debugPrint('MemoryService.getConversationMemoryEntries error: $e');
-
-      return [];
+      return const [];
     }
   }
 
-  /// Deletes a RAG entry by matching query+time (stable enough for UI).
   static Future<void> deleteConversationMemoryEntry({
     required String query,
     required String time,
   }) async {
     try {
-      final p = await _p;
-      final existing = p.getString(_key);
-      if (existing == null) return;
-
-      final entries = List<Map<String, String>>.from(
-        (jsonDecode(existing) as List<dynamic>).map(
-          (e) => Map<String, String>.from(e as Map),
-        ),
-      );
+      await _loadFromDisk();
+      final entries = _conversationCache ?? <Map<String, String>>[];
       entries.removeWhere((e) => e['query'] == query && e['time'] == time);
-      await p.setString(_key, jsonEncode(entries));
+      _conversationCache = entries;
       _invalidateConversationTokens();
+      await _scheduleWrite();
     } catch (e) {
       debugPrint('MemoryService.deleteConversationMemoryEntry error: $e');
     }
@@ -159,13 +194,8 @@ class MemoryService {
     String content,
   ) async {
     try {
-      final p = await _p;
-      final existing = p.getString(_customMemoriesKey);
-      if (existing == null) return;
-
-      final memories = (jsonDecode(existing) as List<dynamic>)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
+      await _loadFromDisk();
+      final memories = _customMemoriesCache ?? <Map<String, dynamic>>[];
 
       final index = memories.indexWhere((m) => m['id'] == id);
       if (index != -1) {
@@ -174,8 +204,9 @@ class MemoryService {
           'title': title,
           'content': content,
         };
-        await p.setString(_customMemoriesKey, jsonEncode(memories));
+        _customMemoriesCache = memories;
         _invalidateCustomMemoryTokens();
+        await _scheduleWrite();
       }
     } catch (e) {
       debugPrint('MemoryService.updateCustomMemory error: $e');
@@ -184,39 +215,33 @@ class MemoryService {
 
   static Future<void> deleteCustomMemory(String id) async {
     try {
-      final p = await _p;
-      final existing = p.getString(_customMemoriesKey);
-      if (existing == null) return;
-
-      final memories = (jsonDecode(existing) as List<dynamic>)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
+      await _loadFromDisk();
+      final memories = _customMemoriesCache ?? <Map<String, dynamic>>[];
 
       memories.removeWhere((m) => m['id'] == id);
-      await p.setString(_customMemoriesKey, jsonEncode(memories));
+      _customMemoriesCache = memories;
       _invalidateCustomMemoryTokens();
+      await _scheduleWrite();
     } catch (e) {
       debugPrint('MemoryService.deleteCustomMemory error: $e');
     }
   }
 
-  /// Deletes every custom memory entry.
   static Future<void> clearAllCustomMemories() async {
     try {
-      final p = await _p;
-      await p.remove(_customMemoriesKey);
+      _customMemoriesCache = const [];
       _invalidateCustomMemoryTokens();
+      await _scheduleWrite();
     } catch (e) {
       debugPrint('MemoryService.clearAllCustomMemories error: $e');
     }
   }
 
-  /// Deletes every RAG conversation memory entry.
   static Future<void> clearConversationMemory() async {
     try {
-      final p = await _p;
-      await p.remove(_key);
+      _conversationCache = const [];
       _invalidateConversationTokens();
+      await _scheduleWrite();
     } catch (e) {
       debugPrint('MemoryService.clearConversationMemory error: $e');
     }
@@ -286,15 +311,9 @@ class MemoryService {
     if (!isEnabled) return null;
 
     try {
-      final p = await _p;
-      final existing = p.getString(_key);
-      if (existing == null) return null;
-
-      final entries = (jsonDecode(existing) as List<dynamic>)
-          .map((e) => Map<String, String>.from(e as Map))
-          .toList();
-
-      if (entries.isEmpty) return null;
+      await _loadFromDisk();
+      final entries = _conversationCache;
+      if (entries == null || entries.isEmpty) return null;
 
       final queryTokens = SemanticSearch.tokenize(query);
       if (queryTokens.isEmpty) return null;
@@ -315,7 +334,6 @@ class MemoryService {
 
       if (results.isEmpty) return null;
 
-      // Apply recency bonus to TF-IDF scores
       final scored = results.map((r) {
         final entry = entries[r.index];
         final ageInDays = DateTime.now()
@@ -341,33 +359,25 @@ class MemoryService {
   }
 
   static Future<bool> _isConversationMemoryEnabled() async {
-    final p = await _p;
+    final p = await SharedPreferences.getInstance();
     return p.getBool('settings_rag_memory') ?? false;
   }
 
   static Future<bool> _isCustomMemoryEnabled() async {
-    final p = await _p;
+    final p = await SharedPreferences.getInstance();
     return p.getBool('settings_custom_memory') ?? true;
   }
 
   static Future<void> clearConversationHistory() async {
-    try {
-      final p = await _p;
-      await p.remove(_key);
-      _invalidateConversationTokens();
-    } catch (e) {
-      debugPrint('MemoryService.clearConversationHistory error: $e');
-    }
+    _conversationCache = const [];
+    _invalidateConversationTokens();
+    await _scheduleWrite();
   }
 
   static Future<void> clearCustomMemories() async {
-    try {
-      final p = await _p;
-      await p.remove(_customMemoriesKey);
-      _invalidateCustomMemoryTokens();
-    } catch (e) {
-      debugPrint('MemoryService.clearCustomMemories error: $e');
-    }
+    _customMemoriesCache = const [];
+    _invalidateCustomMemoryTokens();
+    await _scheduleWrite();
   }
 
   static Future<void> clear() async {

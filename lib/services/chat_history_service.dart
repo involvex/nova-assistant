@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/conversation.dart';
+import 'package:nova_assistant/services/generated_image_store.dart';
 
 List<Conversation> _parseConversationsJson(String json) {
   final list = jsonDecode(json) as List<dynamic>;
@@ -88,6 +89,7 @@ class ChatHistoryService {
         text: text,
         isUser: m.isUser,
         timestamp: m.timestamp,
+        imagePath: m.imagePath,
         modelName: m.modelName,
         isStreaming: m.isStreaming,
         isError: m.isError,
@@ -197,6 +199,7 @@ class ChatHistoryService {
         conversations = _parseConversationsJson(json);
       }
       conversations = _capConversations(conversations);
+      await _hydrateStoredImages(conversations);
       _cachedConversations = conversations;
 
       if (length > _maxFileBytes) {
@@ -209,6 +212,39 @@ class ChatHistoryService {
       _cachedConversations = [];
 
       return [];
+    }
+  }
+
+  /// Restores [ChatMessage.imageData] from disk for messages whose raw
+  /// bytes were stripped at persist time (see [_messageToPersistJson]) but
+  /// that carry a [ChatMessage.imagePath] reference.
+  static Future<void> _hydrateStoredImages(List<Conversation> list) async {
+    for (var i = 0; i < list.length; i++) {
+      final conversation = list[i];
+      var changed = false;
+      final messages = <ChatMessage>[];
+
+      for (final m in conversation.messages) {
+        final path = m.imagePath;
+        final needsHydration =
+            m.imageData == null &&
+            GeneratedImageStore.looksLikeStoredImage(path);
+
+        if (needsHydration) {
+          final bytes = await GeneratedImageStore.instance.read(path!);
+          if (bytes != null) {
+            messages.add(m.copyWith(imageData: bytes));
+            changed = true;
+
+            continue;
+          }
+        }
+        messages.add(m);
+      }
+
+      if (changed) {
+        list[i] = conversation.copyWith(messages: messages);
+      }
     }
   }
 

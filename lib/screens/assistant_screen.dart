@@ -15,6 +15,7 @@ import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
 import 'package:nova_assistant/services/export_service.dart';
+import 'package:nova_assistant/services/generated_image_store.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_release_policy.dart';
 import 'package:nova_assistant/services/tts_service.dart';
@@ -1678,12 +1679,20 @@ class _AssistantScreenState extends State<AssistantScreen>
     final result = await showImageGenerationSheet(context);
     if (!mounted || result == null) return;
 
+    String? savedPath;
+    try {
+      savedPath = await GeneratedImageStore.instance.save(result.bytes);
+    } catch (e) {
+      debugPrint('Failed to persist generated image: $e');
+    }
+
     final generated = ChatMessage(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       text: 'Generated image for "${result.prompt}"',
       isUser: false,
       timestamp: DateTime.now(),
       imageData: result.bytes,
+      imagePath: savedPath,
       modelName: 'Diffusion',
     );
 

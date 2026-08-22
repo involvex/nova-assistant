@@ -63,6 +63,27 @@ void main() {
       expect(restored.wasCancelled, isTrue);
     });
 
+    test('round-trips imagePath in JSON', () {
+      const path = 'generated_images/abc-123.png';
+      final original = ChatMessage(
+        id: 'img-1',
+        text: 'Generated image for "a cat"',
+        isUser: false,
+        timestamp: testTime,
+        imagePath: path,
+      );
+
+      expect(original.imagePath, path);
+
+      final json = original.toJson();
+      expect(json['imageFile'], path);
+      expect(json['imageData'], isNull);
+
+      final restored = ChatMessage.fromJson(json);
+      expect(restored.imagePath, path);
+      expect(restored.imageData, isNull);
+    });
+
     group('copyWith', () {
       test('returns identical copy when no arguments provided', () {
         final copy = message.copyWith();
@@ -106,6 +127,15 @@ void main() {
         final image = Uint8List.fromList([4, 5, 6]);
         final copy = message.copyWith(imageData: image);
         expect(copy.imageData, image);
+      });
+
+      test('preserves imagePath through copyWith', () {
+        const path = 'generated_images/xyz.png';
+        final withPath = message.copyWith(imagePath: path);
+        expect(withPath.imagePath, path);
+
+        final touched = withPath.copyWith(text: 'edited');
+        expect(touched.imagePath, path);
       });
 
       test('preserves identity of unmodified fields', () {

@@ -7,6 +7,11 @@ class ChatMessage {
   final bool isUser;
   final DateTime timestamp;
   final Uint8List? imageData;
+
+  /// Relative path (under the app documents dir) of an image persisted to
+  /// disk; lets [imageData] be restored after restarts without bloating
+  /// the history file.
+  final String? imagePath;
   final String? modelName;
   final bool isStreaming;
   final bool isError;
@@ -26,6 +31,7 @@ class ChatMessage {
     required this.isUser,
     required this.timestamp,
     this.imageData,
+    this.imagePath,
     this.modelName,
     this.isStreaming = false,
     this.isError = false,
@@ -100,6 +106,7 @@ class ChatMessage {
     bool? isUser,
     DateTime? timestamp,
     Uint8List? imageData,
+    String? imagePath,
     String? modelName,
     bool? isStreaming,
     bool? isError,
@@ -118,6 +125,7 @@ class ChatMessage {
       isUser: isUser ?? this.isUser,
       timestamp: timestamp ?? this.timestamp,
       imageData: imageData ?? this.imageData,
+      imagePath: imagePath ?? this.imagePath,
       modelName: modelName ?? this.modelName,
       isStreaming: isStreaming ?? this.isStreaming,
       isError: isError ?? this.isError,
@@ -143,6 +151,7 @@ class ChatMessage {
     'isUser': isUser,
     'timestamp': timestamp.toIso8601String(),
     'imageData': imageData != null ? base64Encode(imageData!) : null,
+    'imageFile': imagePath,
     'modelName': modelName,
     'isStreaming': isStreaming,
     'isError': isError,
@@ -162,6 +171,7 @@ class ChatMessage {
     imageData: json['imageData'] != null
         ? base64Decode(json['imageData'] as String)
         : null,
+    imagePath: json['imageFile'] as String?,
     modelName: json['modelName'] as String?,
     isStreaming: json['isStreaming'] as bool? ?? false,
     isError: json['isError'] as bool? ?? false,

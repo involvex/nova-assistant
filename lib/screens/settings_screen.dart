@@ -37,6 +37,7 @@ import 'package:nova_assistant/services/settings_backup_service.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/memory_service.dart';
 import 'package:nova_assistant/services/shizuku_service.dart';
+import 'package:nova_assistant/services/diffusion_download_service.dart';
 import 'package:nova_assistant/screens/prompt_presets_screen.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -495,7 +496,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _actionTile(
         icon: Icons.folder_open,
         title: 'Install model from file',
-        subtitle: 'Select a .litertlm, .task, or .gguf file from your device',
+        subtitle: 'Select a .litertlm or .task file from your device',
         onTap: () => _pickAndInstallModel(context),
       ),
       _actionTile(
@@ -1334,7 +1335,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['litertlm', 'task', 'gguf'],
+        allowedExtensions: ['litertlm', 'task'],
         dialogTitle: 'Select a model file',
       );
 
@@ -1978,90 +1979,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
         throw Exception('No .tflite files found in ${catalog.repoId}');
       }
 
-      final tempDir = await getTemporaryDirectory();
-      final downloadDir = Directory(
-        '${tempDir.path}/nova_download_${DateTime.now().millisecondsSinceEpoch}_${model.fileName}',
-      );
-      await downloadDir.create(recursive: true);
-
-      int totalBytes = 0;
-      for (final file in tfliteFiles) {
-        totalBytes += file.size ?? 0;
+      final docsDir = await getApplicationDocumentsDirectory();
+      final diffusionDir = Directory('${docsDir.path}/diffusion_models');
+      if (!await diffusionDir.exists()) {
+        await diffusionDir.create(recursive: true);
+      }
+      final modelDir = Directory('${diffusionDir.path}/${model.fileName}');
+      if (!await modelDir.exists()) {
+        await modelDir.create(recursive: true);
       }
 
-      int receivedBytes = 0;
       var lastReportedPct = -1;
-      final client = ModelManager.httpClient;
-      const concurrentDownloads = 3;
-
-      Future<void> downloadFileToDir({
-        required String url,
-        required String destPath,
-        required void Function(int chunkLength) onBytesReceived,
-      }) async {
-        final uri = Uri.parse(url);
-        final request = await client.getUrl(uri);
-        if (hfToken != null && hfToken.isNotEmpty) {
-          request.headers.set('Authorization', 'Bearer $hfToken');
-        }
-        final response = await request.close();
-
-        if (response.statusCode != 200) {
-          throw Exception('HTTP ${response.statusCode} downloading $url');
-        }
-
-        final sink = File(destPath).openWrite();
-        try {
-          await for (final chunk in response) {
-            sink.add(chunk);
-            onBytesReceived(chunk.length);
+      await DiffusionDownloadService.instance.downloadModel(
+        model: model,
+        files: tfliteFiles,
+        destDir: modelDir,
+        hfToken: hfToken,
+        onProgress: (received, total) {
+          if (total > 0 && mounted) {
+            final pct = ((received * 90) / total).floor().clamp(0, 90);
+            if (pct != lastReportedPct) {
+              lastReportedPct = pct;
+              setState(() => _installStatus = 'Downloading: $pct%');
+            }
           }
-        } finally {
-          await sink.close();
-        }
-      }
-
-      for (var i = 0; i < tfliteFiles.length; i += concurrentDownloads) {
-        final end = (i + concurrentDownloads).clamp(0, tfliteFiles.length);
-        final chunk = tfliteFiles.sublist(i, end);
-
-        await Future.wait(
-          chunk.map((repoFile) {
-            final fileUrl = HuggingfaceHubService.resolveDownloadUrl(
-              catalog.repoId,
-              path: repoFile.path,
-            );
-            return downloadFileToDir(
-              url: fileUrl,
-              destPath: '${downloadDir.path}/${repoFile.fileName}',
-              onBytesReceived: (chunkLength) {
-                receivedBytes += chunkLength;
-                if (totalBytes > 0 && mounted) {
-                  final pct = ((receivedBytes * 90) / totalBytes).floor().clamp(
-                    0,
-                    90,
-                  );
-                  if (pct != lastReportedPct) {
-                    lastReportedPct = pct;
-                    setState(() => _installStatus = 'Downloading: $pct%');
-                  }
-                }
-              },
-            );
-          }),
-        );
-
-        if (mounted) {
-          setState(
-            () =>
-                _installStatus = 'Downloaded $end/${tfliteFiles.length} files',
-          );
-        }
-      }
+        },
+      );
 
       await ModelManager.instance.installDiffusionModel(
         model: model,
-        sourceDirectory: downloadDir.path,
+        sourceDirectory: modelDir.path,
       );
 
       if (mounted) {
@@ -2073,10 +2020,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       }
-
-      try {
-        await downloadDir.delete(recursive: true);
-      } catch (_) {}
     } catch (e) {
       if (mounted) {
         setState(() => _installStatus = '');

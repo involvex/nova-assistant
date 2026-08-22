@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nova_assistant/models/inference_backend.dart';
@@ -64,9 +65,17 @@ class RemoteInferenceConfig {
     await prefs.setString(baseUrlPrefsKey, baseUrl);
     await prefs.setString(modelIdPrefsKey, modelId);
     if (apiToken == null || apiToken!.isEmpty) {
-      await SecurePrefs().delete(tokenPrefsKey);
+      try {
+        await SecurePrefs().delete(tokenPrefsKey);
+      } catch (e) {
+        debugPrint('RemoteInferenceConfig: failed to delete token: $e');
+      }
     } else {
-      await SecurePrefs().write(tokenPrefsKey, apiToken!);
+      try {
+        await SecurePrefs().write(tokenPrefsKey, apiToken!);
+      } catch (e) {
+        debugPrint('RemoteInferenceConfig: failed to save token: $e');
+      }
     }
   }
 

@@ -862,9 +862,84 @@ class _AssistantScreenState extends State<AssistantScreen>
         q.contains('make image') ||
         q.contains('make a image') ||
         q.contains('make an image') ||
+        q.contains('show image') ||
+        q.contains('show a image') ||
+        q.contains('show an image') ||
+        q.contains('display image') ||
+        q.contains('display a image') ||
+        q.contains('display an image') ||
+        q.contains('view image') ||
+        q.contains('view a image') ||
+        q.contains('view an image') ||
+        q.contains('render image') ||
+        q.contains('render a image') ||
+        q.contains('render an image') ||
+        q.contains('produce image') ||
+        q.contains('produce a image') ||
+        q.contains('produce an image') ||
+        q.contains('generate picture') ||
+        q.contains('generate a picture') ||
+        q.contains('generate an picture') ||
+        q.contains('create picture') ||
+        q.contains('create a picture') ||
+        q.contains('create an picture') ||
+        q.contains('draw picture') ||
+        q.contains('draw a picture') ||
+        q.contains('draw an picture') ||
+        q.contains('make picture') ||
+        q.contains('make a picture') ||
+        q.contains('make an picture') ||
+        q.contains('show picture') ||
+        q.contains('show a picture') ||
+        q.contains('show an picture') ||
+        q.contains('display picture') ||
+        q.contains('display a picture') ||
+        q.contains('display an picture') ||
+        q.contains('view picture') ||
+        q.contains('view a picture') ||
+        q.contains('view an picture') ||
+        q.contains('render picture') ||
+        q.contains('render a picture') ||
+        q.contains('render an picture') ||
+        q.contains('produce picture') ||
+        q.contains('produce a picture') ||
+        q.contains('produce an picture') ||
+        q.contains('make me a picture') ||
+        q.contains('create me a picture') ||
+        q.contains('draw me a picture') ||
+        q.contains('generate me a picture') ||
+        q.contains('generate artwork') ||
+        q.contains('generate an artwork') ||
+        q.contains('create artwork') ||
+        q.contains('create an artwork') ||
+        q.contains('draw artwork') ||
+        q.contains('draw an artwork') ||
+        q.contains('make artwork') ||
+        q.contains('make an artwork') ||
+        q.contains('show artwork') ||
+        q.contains('show an artwork') ||
+        q.contains('display artwork') ||
+        q.contains('display an artwork') ||
+        q.contains('render artwork') ||
+        q.contains('render an artwork') ||
+        q.contains('produce artwork') ||
+        q.contains('produce an artwork') ||
+        q.contains('generate illustration') ||
+        q.contains('create illustration') ||
+        q.contains('draw illustration') ||
+        q.contains('make illustration') ||
+        q.contains('show illustration') ||
+        q.contains('show an illustration') ||
+        q.contains('display illustration') ||
+        q.contains('display an illustration') ||
+        q.contains('render illustration') ||
+        q.contains('render an illustration') ||
+        q.contains('produce illustration') ||
+        q.contains('produce an illustration') ||
         q.contains('picture of') ||
         q.contains('image of') ||
-        q.contains('artwork of');
+        q.contains('artwork of') ||
+        q.contains('illustration of');
   }
 
   Future<void> _checkModelAvailability() async {
@@ -1862,7 +1937,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['litertlm', 'task', 'gguf'],
+        allowedExtensions: ['litertlm', 'task'],
       );
 
       if (result == null) return;

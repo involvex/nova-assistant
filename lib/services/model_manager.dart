@@ -517,9 +517,29 @@ class ModelManager {
 
   static Future<String?> _computeSha256(String filePath) async {
     try {
-      final bytes = await File(filePath).readAsBytes();
-      final digest = sha256.convert(bytes);
-      return digest.toString();
+      final file = File(filePath);
+      final length = await file.length();
+      if (length == 0) return null;
+
+      final raf = await file.open();
+      try {
+        const chunkSize = 4 * 1024 * 1024;
+        var offset = 0;
+        final sink = _DigestSink();
+        final byteSink = sha256.startChunkedConversion(sink);
+        while (offset < length) {
+          final remaining = length - offset;
+          final read = remaining > chunkSize ? chunkSize : remaining;
+          final chunk = await raf.read(read);
+          if (chunk.isEmpty) break;
+          byteSink.add(chunk);
+          offset += chunk.length;
+        }
+        byteSink.close();
+        return sink.digest.toString();
+      } finally {
+        await raf.close();
+      }
     } catch (e) {
       debugPrint('ModelManager: failed to compute SHA-256 for $filePath: $e');
       return null;
@@ -654,8 +674,8 @@ class ModelManager {
 
       final fileName = p.basename(filePath);
       final ext = p.extension(fileName).toLowerCase();
-      if (ext != '.litertlm' && ext != '.task' && ext != '.gguf') {
-        return 'Unsupported file extension: $ext';
+      if (ext != '.litertlm' && ext != '.task') {
+        return 'Unsupported format: $ext — only .litertlm and .task are supported';
       }
 
       // File looks valid
@@ -1224,9 +1244,18 @@ class ModelManager {
 
   static Future<void> setHuggingFaceToken(String? token) async {
     if (token == null || token.isEmpty) {
-      await SecurePrefs().delete(_hfTokenKey);
+      try {
+        await SecurePrefs().delete(_hfTokenKey);
+      } catch (e) {
+        debugPrint('ModelManager: failed to delete HF token: $e');
+      }
     } else {
-      await SecurePrefs().write(_hfTokenKey, token);
+      try {
+        await SecurePrefs().write(_hfTokenKey, token);
+      } catch (e) {
+        debugPrint('ModelManager: failed to save HF token: $e');
+        rethrow;
+      }
     }
   }
 
@@ -1518,4 +1547,17 @@ class ModelManager {
   Future<void> dispose() async {
     await _statusController.close();
   }
+}
+
+class _DigestSink implements Sink<Digest> {
+  _DigestSink();
+  Digest? _digest;
+  @override
+  void add(Digest data) {
+    _digest = data;
+  }
+
+  @override
+  void close() {}
+  Digest get digest => _digest!;
 }

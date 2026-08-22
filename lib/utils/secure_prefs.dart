@@ -22,8 +22,13 @@ class SecurePrefs {
     final prefs = await SharedPreferences.getInstance();
     final legacy = prefs.getString(key);
     if (legacy != null) {
-      await write(key, legacy);
-      await prefs.remove(key);
+      debugPrint('SecurePrefs: migrating legacy plaintext value for $key');
+      try {
+        await write(key, legacy);
+        await prefs.remove(key);
+      } catch (e) {
+        debugPrint('SecurePrefs: failed to migrate $key to secure storage: $e');
+      }
     }
     return legacy;
   }
@@ -33,8 +38,7 @@ class SecurePrefs {
       await _secure.write(key: key, value: value);
     } catch (e) {
       debugPrint('SecurePrefs: failed to write $key to secure storage: $e');
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(key, value);
+      throw Exception('Secure storage unavailable for key: $key');
     }
   }
 
@@ -43,6 +47,7 @@ class SecurePrefs {
       await _secure.delete(key: key);
     } catch (e) {
       debugPrint('SecurePrefs: failed to delete $key from secure storage: $e');
+      throw Exception('Secure storage unavailable for key: $key');
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(key);

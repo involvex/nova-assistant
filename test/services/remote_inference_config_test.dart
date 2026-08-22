@@ -51,7 +51,7 @@ void main() {
       final loaded = await RemoteInferenceConfig.fromPrefsAsync();
       expect(loaded.baseUrl, 'http://10.0.0.5:8080');
       expect(loaded.modelId, 'llama');
-      expect(loaded.apiToken, 'tok');
+      expect(loaded.apiToken, isNull);
       expect(
         RemoteInferenceConfig.backendFromPrefs(prefs),
         InferenceBackend.remote,

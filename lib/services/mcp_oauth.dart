@@ -30,7 +30,12 @@ class McpOAuthService {
   }
 
   Future<void> savePkceVerifier(String serverId, String verifier) async {
-    await SecurePrefs().write('$_pkceKeyPrefix$serverId', verifier);
+    try {
+      await SecurePrefs().write('$_pkceKeyPrefix$serverId', verifier);
+    } catch (e) {
+      debugPrint('MCP OAuth: failed to save PKCE verifier: $e');
+      rethrow;
+    }
   }
 
   Future<String?> loadPkceVerifier(String serverId) async {
@@ -42,9 +47,14 @@ class McpOAuthService {
     required String accessToken,
     String? refreshToken,
   }) async {
-    await SecurePrefs().write('$_tokenKeyPrefix$serverId', accessToken);
-    if (refreshToken != null) {
-      await SecurePrefs().write('$_refreshKeyPrefix$serverId', refreshToken);
+    try {
+      await SecurePrefs().write('$_tokenKeyPrefix$serverId', accessToken);
+      if (refreshToken != null) {
+        await SecurePrefs().write('$_refreshKeyPrefix$serverId', refreshToken);
+      }
+    } catch (e) {
+      debugPrint('MCP OAuth: failed to save tokens: $e');
+      rethrow;
     }
   }
 
@@ -53,9 +63,14 @@ class McpOAuthService {
   }
 
   Future<void> clearTokens(String serverId) async {
-    await SecurePrefs().delete('$_tokenKeyPrefix$serverId');
-    await SecurePrefs().delete('$_refreshKeyPrefix$serverId');
-    await SecurePrefs().delete('$_pkceKeyPrefix$serverId');
+    try {
+      await SecurePrefs().delete('$_tokenKeyPrefix$serverId');
+      await SecurePrefs().delete('$_refreshKeyPrefix$serverId');
+      await SecurePrefs().delete('$_pkceKeyPrefix$serverId');
+    } catch (e) {
+      debugPrint('MCP OAuth: failed to clear tokens: $e');
+      rethrow;
+    }
   }
 
   /// Build an authorization URL with PKCE and open it in the browser.

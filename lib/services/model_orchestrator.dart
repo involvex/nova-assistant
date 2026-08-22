@@ -145,6 +145,11 @@ class ModelOrchestrator {
   static const _customPrefsKey = 'preferred_custom_model_id';
   SharedPreferences? _cachedPrefs;
 
+  Future<SharedPreferences> _getPrefs() async {
+    _cachedPrefs ??= await _getPrefs();
+    return _cachedPrefs!;
+  }
+
   final ModelSelector selector = ModelSelector(
     primaryHeavy: NovaModel.gemma4E2b,
     fastModel: NovaModel.smollm,
@@ -525,7 +530,11 @@ class ModelOrchestrator {
     }
     unawaited(_teardownActiveModel(keepIfSameType: model));
     _persistPreferredModel(model);
-    unawaited(_persistPreferredCustomModel(null));
+    unawaited(
+      _persistPreferredCustomModel(null).catchError((Object e) {
+        debugPrint('ModelOrchestrator: failed to persist custom model: $e');
+      }),
+    );
   }
 
   CustomModel? get preferredCustomModel => _preferredCustomModelOverride;
@@ -545,13 +554,29 @@ class ModelOrchestrator {
     _tryStopGeneration();
     if (_isStreaming) {
       _pendingModelTeardown = true;
-      unawaited(_persistPreferredCustomModel(model));
-      unawaited(_persistPreferredModel(null));
+      unawaited(
+        _persistPreferredCustomModel(model).catchError((Object e) {
+          debugPrint('ModelOrchestrator: failed to persist custom model: $e');
+        }),
+      );
+      unawaited(
+        _persistPreferredModel(null).catchError((Object e) {
+          debugPrint('ModelOrchestrator: failed to persist model: $e');
+        }),
+      );
       return;
     }
     unawaited(_teardownActiveModel());
-    unawaited(_persistPreferredCustomModel(model));
-    unawaited(_persistPreferredModel(null));
+    unawaited(
+      _persistPreferredCustomModel(model).catchError((Object e) {
+        debugPrint('ModelOrchestrator: failed to persist custom model: $e');
+      }),
+    );
+    unawaited(
+      _persistPreferredModel(null).catchError((Object e) {
+        debugPrint('ModelOrchestrator: failed to persist model: $e');
+      }),
+    );
   }
 
   Future<void> _teardownActiveModel({NovaModel? keepIfSameType}) async {
@@ -594,7 +619,7 @@ class ModelOrchestrator {
   }
 
   Future<void> _persistPreferredModel(NovaModel? model) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _getPrefs();
     if (model == null) {
       await prefs.remove(_prefsKey);
     } else {
@@ -604,7 +629,7 @@ class ModelOrchestrator {
   }
 
   Future<void> _persistPreferredCustomModel(CustomModel? model) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _getPrefs();
     if (model == null) {
       await prefs.remove(_customPrefsKey);
     } else {
@@ -613,7 +638,7 @@ class ModelOrchestrator {
   }
 
   Future<void> _loadPreferredModel() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _getPrefs();
     final customId = prefs.getString(_customPrefsKey);
     if (customId != null && customId.isNotEmpty) {
       final custom = ModelManager.instance.getCustomModelById(customId);
@@ -645,7 +670,7 @@ class ModelOrchestrator {
   Future<void> _loadRuntimeSettings({
     bool invalidateChatOnAdultChange = false,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _getPrefs();
     _keepModelWarm = prefs.getBool('settings_keep_model_warm') ?? true;
     final nextHighContext =
         prefs.getBool('settings_high_context') ??
@@ -688,8 +713,16 @@ class ModelOrchestrator {
     _preferredModelOverride = null;
     _preferredCustomModelOverride = null;
     _modelOverrideDirty = false;
-    unawaited(_persistPreferredModel(null));
-    unawaited(_persistPreferredCustomModel(null));
+    unawaited(
+      _persistPreferredModel(null).catchError((Object e) {
+        debugPrint('ModelOrchestrator: failed to clear model preference: $e');
+      }),
+    );
+    unawaited(
+      _persistPreferredCustomModel(null).catchError((Object e) {
+        debugPrint('ModelOrchestrator: failed to clear custom model: $e');
+      }),
+    );
   }
 
   void refreshModelOverride() {
@@ -1777,10 +1810,25 @@ class ModelOrchestrator {
     final dir = await getApplicationDocumentsDirectory();
     String? modelPath;
 
+    Future<String?> safeResolve(String fileName) async {
+      final normalized = p.normalize(fileName);
+      if (normalized.contains('..')) {
+        return null;
+      }
+      final resolved = p.absolute(dir.path, normalized);
+      if (!resolved.startsWith(p.absolute(dir.path))) {
+        return null;
+      }
+      return resolved;
+    }
+
     // Check direct path
-    final directFile = File('${dir.path}/${customModel.fileName}');
-    if (await directFile.exists()) {
-      modelPath = directFile.path;
+    final directPath = await safeResolve(customModel.fileName);
+    if (directPath != null) {
+      final directFile = File(directPath);
+      if (await directFile.exists()) {
+        modelPath = directPath;
+      }
     } else {
       // Check models subdirectory
       final modelsDir = Directory('${dir.path}/models');
@@ -1798,7 +1846,10 @@ class ModelOrchestrator {
                 .replaceAll('.gguf', '');
             if (entityBaseName.contains(baseName) ||
                 baseName.contains(entityBaseName)) {
-              modelPath = entity.path;
+              final safePath = await safeResolve(entity.path);
+              if (safePath != null) {
+                modelPath = safePath;
+              }
               break;
             }
           }
@@ -3717,7 +3768,7 @@ class ModelOrchestrator {
   }
 
   Future<String> _languageInstruction() async {
-    _cachedPrefs ??= await SharedPreferences.getInstance();
+    _cachedPrefs ??= await _getPrefs();
     final language = AssistantLanguage.fromString(
       _cachedPrefs!.getString(AssistantLanguage.prefsKey),
     );
@@ -3922,25 +3973,29 @@ class ModelOrchestrator {
     }
   }
 
-  static AgentIdentity? _cachedIdentity;
+  AgentIdentity? _cachedIdentity;
 
-  static AgentIdentity? _getCachedIdentity() => _cachedIdentity;
+  AgentIdentity? _getCachedIdentity() => _cachedIdentity;
 
-  static AssistantRole _getAssistantRole() {
+  AssistantRole _getAssistantRole() {
     return _cachedRole;
   }
 
-  static AssistantRole _cachedRole = AssistantRole.helpful;
+  AssistantRole _cachedRole = AssistantRole.helpful;
 
   Future<void> _loadAssistantRole() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _getPrefs();
     final roleName = prefs.getString('settings_assistant_role');
     _cachedRole = AssistantRole.fromString(roleName);
   }
 
   Future<String?> _findModelPath(String fileName) async {
     final dir = await getApplicationDocumentsDirectory();
-    final directFile = File('${dir.path}/$fileName');
+    final normalized = p.normalize(fileName);
+    if (normalized.contains('..')) {
+      return null;
+    }
+    final directFile = File('${dir.path}/$normalized');
     if (await directFile.exists()) {
       return directFile.path;
     }
@@ -4018,15 +4073,15 @@ class ModelOrchestrator {
   }
 
   Future<void> _loadIdentity() async {
-    _cachedIdentity = await IdentityService.getIdentity();
+    instance._cachedIdentity = await IdentityService.getIdentity();
   }
 
   /// Call this when assistant role or identity changes in settings
   static Future<void> refreshSettings() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await instance._getPrefs();
     final roleName = prefs.getString('settings_assistant_role');
-    _cachedRole = AssistantRole.fromString(roleName);
-    _cachedIdentity = await IdentityService.getIdentity();
+    instance._cachedRole = AssistantRole.fromString(roleName);
+    instance._cachedIdentity = await IdentityService.getIdentity();
     await instance._loadRuntimeSettings(invalidateChatOnAdultChange: true);
   }
 
@@ -4034,7 +4089,7 @@ class ModelOrchestrator {
   /// Loads the model into memory so the first response is instant.
   /// Does not create a chat session — that happens on first message.
   static Future<void> warmUpDefaultModel() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await instance._getPrefs();
     final enabled = prefs.getBool('settings_prewarm_model') ?? false;
     if (!enabled) return;
 

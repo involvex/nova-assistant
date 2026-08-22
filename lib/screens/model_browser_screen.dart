@@ -162,6 +162,49 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
     return go == true && await ModelManager.hasHuggingFaceToken();
   }
 
+  /// Shared tail of every download flow: network gate → status/loading
+  /// state → install with progress → result snackbar. Callers handle their
+  /// own token gates and confirmation dialogs beforehand.
+  Future<void> _installWithFeedback({
+    required String sizeHint,
+    required String startLabel,
+    required Future<Object?> Function() install,
+    required String Function(Object installed) successLabel,
+    String failureLabel = 'Download failed. Check connection or token.',
+  }) async {
+    final allowed = await DownloadNetworkGate.instance.confirmDownloadAllowed(
+      context,
+      sizeHint: sizeHint,
+    );
+    if (!allowed || !mounted) return;
+
+    setState(() {
+      _status = startLabel;
+      _isLoading = true;
+    });
+    try {
+      final installed = await install();
+      if (!mounted) return;
+      setState(() => _status = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            installed != null ? successLabel(installed) : failureLabel,
+          ),
+          backgroundColor: installed != null ? Colors.green : Colors.red,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _downloadRecommended(RecommendedLiteRtModel entry) async {
     if (!await _ensureTokenIfNeeded(gated: entry.gated)) return;
     if (!mounted) return;
@@ -191,46 +234,21 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
     );
     if (confirmed != true || !mounted) return;
 
-    final allowed = await DownloadNetworkGate.instance.confirmDownloadAllowed(
-      context,
+    await _installWithFeedback(
       sizeHint: '~${entry.approxSizeMB}MB',
-    );
-    if (!allowed || !mounted) return;
-
-    setState(() {
-      _status = 'Downloading ${entry.displayName}...';
-      _isLoading = true;
-    });
-    try {
-      final installed = await ModelManager.instance.installFromNetwork(
+      startLabel: 'Downloading ${entry.displayName}...',
+      install: () => ModelManager.instance.installFromNetwork(
         url: entry.downloadUrl,
         modelType: entry.modelType,
         fileType: entry.fileType,
         onProgress: (p) {
           if (mounted) setState(() => _status = 'Downloading: $p%');
         },
-      );
-      if (!mounted) return;
-      setState(() => _status = '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            installed != null
-                ? 'Installed: ${installed.fileName}'
-                : 'Download failed. Check Settings > HuggingFace Token.',
-          ),
-          backgroundColor: installed != null ? Colors.green : Colors.red,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _status = '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+      ),
+      successLabel: (installed) =>
+          'Installed: ${(installed as InstalledModel).fileName}',
+      failureLabel: 'Download failed. Check Settings > HuggingFace Token.',
+    );
   }
 
   Future<void> _openHubRepo(HfModelHit hit) async {
@@ -395,18 +413,10 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
     );
     if (confirmed != true || !mounted) return;
 
-    final allowed = await DownloadNetworkGate.instance.confirmDownloadAllowed(
-      context,
+    await _installWithFeedback(
       sizeHint: sizeLabel,
-    );
-    if (!allowed || !mounted) return;
-
-    setState(() {
-      _status = 'Downloading ${file.fileName}...';
-      _isLoading = true;
-    });
-    try {
-      final custom = await ModelManager.instance.installHubCustomModel(
+      startLabel: 'Downloading ${file.fileName}...',
+      install: () => ModelManager.instance.installHubCustomModel(
         url: url,
         displayName: hints.displayName,
         modelType: hints.modelType,
@@ -417,28 +427,11 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         onProgress: (p) {
           if (mounted) setState(() => _status = 'Downloading: $p%');
         },
-      );
-      if (!mounted) return;
-      setState(() => _status = '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            custom != null
-                ? 'Installed: ${custom.displayName}'
-                : 'Download failed. Check URL or HuggingFace token.',
-          ),
-          backgroundColor: custom != null ? Colors.green : Colors.red,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _status = '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+      ),
+      successLabel: (custom) =>
+          'Installed: ${(custom as CustomModel).displayName}',
+      failureLabel: 'Download failed. Check URL or HuggingFace token.',
+    );
   }
 
   String _formatBytes(int bytes) {
@@ -660,18 +653,10 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
     if (!await _ensureTokenIfNeeded(gated: entry.gated)) return;
     if (!mounted) return;
 
-    final allowed = await DownloadNetworkGate.instance.confirmDownloadAllowed(
-      context,
+    await _installWithFeedback(
       sizeHint: '${entry.displayName} (${entry.sizeLabel})',
-    );
-    if (!allowed || !mounted) return;
-
-    setState(() {
-      _status = 'Downloading ${entry.displayName}...';
-      _isLoading = true;
-    });
-    try {
-      final custom = await ModelManager.instance.installHubCustomModel(
+      startLabel: 'Downloading ${entry.displayName}...',
+      install: () => ModelManager.instance.installHubCustomModel(
         url: entry.downloadUrl,
         displayName: entry.displayName,
         modelType: entry.modelType,
@@ -682,28 +667,10 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         onProgress: (p) {
           if (mounted) setState(() => _status = 'Downloading: $p%');
         },
-      );
-      if (!mounted) return;
-      setState(() => _status = '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            custom != null
-                ? 'Installed: ${custom.displayName}'
-                : 'Download failed. Check connection or HuggingFace token.',
-          ),
-          backgroundColor: custom != null ? Colors.green : Colors.red,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _status = '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+      ),
+      successLabel: (custom) =>
+          'Installed: ${(custom as CustomModel).displayName}',
+    );
   }
 
   Widget _sectionHeader(String title) {

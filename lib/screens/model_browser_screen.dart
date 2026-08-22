@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/litert_model_catalog.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/models/uncensored_model_catalog.dart';
 import 'package:nova_assistant/screens/custom_model_import_sheet.dart';
 import 'package:nova_assistant/services/download_network_gate.dart';
 import 'package:nova_assistant/services/huggingface_hub_service.dart';
@@ -15,9 +16,12 @@ class ModelBrowserScreen extends StatefulWidget {
   State<ModelBrowserScreen> createState() => _ModelBrowserScreenState();
 }
 
+enum _BrowserCategory { recommended, uncensored }
+
 class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
   String _status = '';
   bool _isLoading = false;
+  _BrowserCategory _category = _BrowserCategory.recommended;
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounce;
   List<HfModelHit> _communityResults = [];
@@ -502,6 +506,16 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
               ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                _categoryChip(_BrowserCategory.recommended, 'Recommended'),
+                const SizedBox(width: 8),
+                _categoryChip(_BrowserCategory.uncensored, 'Uncensored'),
+              ],
+            ),
+          ),
           if (_status.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -519,6 +533,9 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
 
   Widget _buildBody() {
     final queryEmpty = _searchController.text.trim().isEmpty;
+    if (_category == _BrowserCategory.uncensored) {
+      return _buildUncensoredBody(queryEmpty);
+    }
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -552,6 +569,141 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         const SizedBox(height: 24),
       ],
     );
+  }
+
+  Widget _buildUncensoredBody(bool queryEmpty) {
+    final hits = _communityResults
+        .where(
+          (h) =>
+              UncensoredModelCatalog.byRepoId(h.id) == null &&
+              HuggingfaceHubService.isUncensoredBlob(
+                '${h.id} ${h.tags.join(' ')}',
+              ),
+        )
+        .toList();
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      children: [
+        _sectionHeader('Curated uncensored · LiteRT'),
+        ...UncensoredModelCatalog.recommended.map(_uncensoredTile),
+        const SizedBox(height: 4),
+        Text(
+          'GGUF models cannot run on flutter_gemma — only LiteRT '
+          '(.litertlm / .task) conversions are listed.',
+          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+        ),
+        const SizedBox(height: 12),
+        if (!queryEmpty) ...[
+          _sectionHeader('Matching Hub repos'),
+          if (hits.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'No uncensored repos in the current results.\n'
+                'Try searching e.g. "uncensored litertlm".',
+                style: TextStyle(color: Colors.grey[500], fontSize: 12),
+              ),
+            )
+          else
+            ...hits.map(_hubTile),
+        ] else
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              'Search above to discover more uncensored LiteRT repos.',
+              style: TextStyle(color: Colors.grey[500], fontSize: 12),
+            ),
+          ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _categoryChip(_BrowserCategory value, String label) {
+    final selected = _category == value;
+
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => setState(() => _category = value),
+      selectedColor: const Color(0xFF6C63FF),
+      backgroundColor: Colors.white.withValues(alpha: 0.06),
+      labelStyle: TextStyle(color: selected ? Colors.white : Colors.white70),
+      showCheckmark: false,
+    );
+  }
+
+  Widget _uncensoredTile(UncensoredModelEntry entry) {
+    final installed = ModelManager.instance.isCustomModelInstalled(
+      entry.fileName,
+    );
+
+    return _tileShell(
+      title: entry.displayName,
+      subtitle: entry.description,
+      meta:
+          '${entry.sizeLabel} · ${entry.modelType.name}'
+          '${entry.hasVision ? ' · vision' : ''}'
+          '${entry.gated ? ' · gated' : ''}',
+      hasVision: entry.hasVision,
+      hasThinking: entry.hasThinking,
+      gated: entry.gated,
+      installed: installed,
+      onDownload: _isLoading
+          ? null
+          : () => unawaited(_downloadUncensored(entry)),
+    );
+  }
+
+  Future<void> _downloadUncensored(UncensoredModelEntry entry) async {
+    if (!await _ensureTokenIfNeeded(gated: entry.gated)) return;
+    if (!mounted) return;
+
+    final allowed = await DownloadNetworkGate.instance.confirmDownloadAllowed(
+      context,
+      sizeHint: '${entry.displayName} (${entry.sizeLabel})',
+    );
+    if (!allowed || !mounted) return;
+
+    setState(() {
+      _status = 'Downloading ${entry.displayName}...';
+      _isLoading = true;
+    });
+    try {
+      final custom = await ModelManager.instance.installHubCustomModel(
+        url: entry.downloadUrl,
+        displayName: entry.displayName,
+        modelType: entry.modelType,
+        fileType: entry.fileType,
+        hasVision: entry.hasVision,
+        hasThinking: entry.hasThinking,
+        maxContextTokens: entry.maxContextTokens,
+        onProgress: (p) {
+          if (mounted) setState(() => _status = 'Downloading: $p%');
+        },
+      );
+      if (!mounted) return;
+      setState(() => _status = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            custom != null
+                ? 'Installed: ${custom.displayName}'
+                : 'Download failed. Check connection or HuggingFace token.',
+          ),
+          backgroundColor: custom != null ? Colors.green : Colors.red,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Widget _sectionHeader(String title) {

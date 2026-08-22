@@ -89,6 +89,7 @@ class HubInstallHints {
     required this.hasVision,
     required this.hasThinking,
     required this.maxContextTokens,
+    this.isUncensored = false,
   });
 
   final String displayName;
@@ -97,6 +98,9 @@ class HubInstallHints {
   final bool hasVision;
   final bool hasThinking;
   final int maxContextTokens;
+
+  /// True when the repo/filename/tags indicate an uncensored fine-tune.
+  final bool isUncensored;
 }
 
 /// Thin Hugging Face Hub REST client for LiteRT model discovery.
@@ -148,6 +152,22 @@ class HuggingfaceHubService {
       final lower = f.path.toLowerCase();
       return lower.endsWith('.tflite');
     }).toList();
+  }
+
+  static const _uncensoredKeywords = [
+    'uncensored',
+    'abliterated',
+    'dolphin',
+    'unaligned',
+    'unfiltered',
+  ];
+
+  /// True when [blob] (repo id / filename / tags text) indicates an
+  /// uncensored fine-tune.
+  static bool isUncensoredBlob(String blob) {
+    final lower = blob.toLowerCase();
+
+    return _uncensoredKeywords.any(lower.contains);
   }
 
   /// Prefer `.litertlm` over `.task` when both exist; otherwise keep order.
@@ -211,6 +231,7 @@ class HuggingfaceHubService {
       hasVision: hasVision,
       hasThinking: hasThinking,
       maxContextTokens: isGemma4 ? 8192 : 4096,
+      isUncensored: isUncensoredBlob(blob),
     );
   }
 

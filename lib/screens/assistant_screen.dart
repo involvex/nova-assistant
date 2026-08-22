@@ -39,6 +39,7 @@ import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/widgets/message_list_view.dart';
 import 'package:nova_assistant/widgets/chat_input_bar.dart';
 import 'package:nova_assistant/widgets/chat_overlays.dart';
+import 'package:nova_assistant/widgets/image_generation_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -1673,6 +1674,27 @@ class _AssistantScreenState extends State<AssistantScreen>
     }
   }
 
+  Future<void> _showImageGenerationSheet() async {
+    final result = await showImageGenerationSheet(context);
+    if (!mounted || result == null) return;
+
+    final generated = ChatMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      text: 'Generated image for "${result.prompt}"',
+      isUser: false,
+      timestamp: DateTime.now(),
+      imageData: result.bytes,
+      modelName: 'Diffusion',
+    );
+
+    setState(() {
+      _messages.add(generated);
+      _invalidateHistoryTokenEstimate();
+    });
+    _scheduleSave();
+    _scrollToBottom(force: true);
+  }
+
   Future<void> _captureAndAttachScreenshot() async {
     if (widget.overlayMode) {
       // Hide the overlay so the capture shows the app underneath, and give
@@ -2332,6 +2354,8 @@ class _AssistantScreenState extends State<AssistantScreen>
                   setState(() => _thinkingMode = !_thinkingMode);
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setBool('settings_thinking_mode', _thinkingMode);
+                case 'generate_image':
+                  await _showImageGenerationSheet();
                 case 'export_text':
                 case 'export_json':
                   final content = value == 'export_text'
@@ -2473,6 +2497,20 @@ class _AssistantScreenState extends State<AssistantScreen>
                 value: 'thinking',
                 child: Text(
                   _thinkingMode ? 'Thinking mode: On' : 'Thinking mode: Off',
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'generate_image',
+                enabled: !_isGenerating,
+                child: const Row(
+                  children: [
+                    Icon(Icons.auto_awesome, color: Colors.white70, size: 20),
+                    SizedBox(width: 12),
+                    Text(
+                      'Generate image',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ],
                 ),
               ),
               const PopupMenuItem<String>(

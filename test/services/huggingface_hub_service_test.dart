@@ -83,6 +83,55 @@ void main() {
       expect(hints.modelType, ModelType.general);
       expect(hints.hasVision, isTrue);
     });
+
+    test('flags uncensored repos', () {
+      final hints = HuggingfaceHubService.inferInstallHints(
+        repoId: 'PeppX/gemma-4-e2b-uncensored-litertlm',
+        filePath: 'gemma4_uncensored_INT4_8192.litertlm',
+      );
+      expect(hints.isUncensored, isTrue);
+      expect(hints.modelType, ModelType.gemma4);
+      expect(hints.fileType, ModelFileType.litertlm);
+    });
+
+    test('clean repos are not flagged uncensored', () {
+      final hints = HuggingfaceHubService.inferInstallHints(
+        repoId: 'litert-community/SmolLM-135M-Instruct',
+        filePath: 'SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task',
+      );
+      expect(hints.isUncensored, isFalse);
+    });
+  });
+
+  group('HuggingfaceHubService.isUncensoredBlob', () {
+    test('matches known keywords', () {
+      expect(
+        HuggingfaceHubService.isUncensoredBlob(
+          'PeppX/gemma-4-e2b-uncensored-litertlm uncensored gemma4',
+        ),
+        isTrue,
+      );
+      expect(
+        HuggingfaceHubService.isUncensoredBlob(
+          'nqd145/Gemma-4-E2B-abliterated',
+        ),
+        isTrue,
+      );
+      expect(HuggingfaceHubService.isUncensoredBlob('dolphin-mistral'), isTrue);
+      expect(
+        HuggingfaceHubService.isUncensoredBlob('qwen2.5-unaligned-heretic'),
+        isTrue,
+      );
+    });
+
+    test('ignores clean names', () {
+      expect(
+        HuggingfaceHubService.isUncensoredBlob(
+          'litert-community/gemma-4-E2B-it-litert-lm vision thinking',
+        ),
+        isFalse,
+      );
+    });
   });
 
   group('HfModelHit / HfRepoFile parsing', () {
@@ -127,6 +176,44 @@ void main() {
       );
       expect(
         ModelHuggingFaceURLs.requiresHuggingFaceAuth(NovaModel.smollm),
+        isFalse,
+      );
+    });
+  });
+
+  group('ModelHuggingFaceURLs.urlRequiresHuggingFaceAuth', () {
+    test('official litert-community gemma assets require auth', () {
+      expect(
+        ModelHuggingFaceURLs.urlRequiresHuggingFaceAuth(
+          'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm'
+          '/resolve/main/gemma-4-E2B-it.litertlm',
+        ),
+        isTrue,
+      );
+      expect(
+        ModelHuggingFaceURLs.urlRequiresHuggingFaceAuth(
+          'https://huggingface.co/litert-community/Gemma3-1B-IT'
+          '/resolve/main/gemma3-1b-it-int4.litertlm',
+        ),
+        isTrue,
+      );
+    });
+
+    test('community uncensored mirrors stay token-free', () {
+      expect(
+        ModelHuggingFaceURLs.urlRequiresHuggingFaceAuth(
+          'https://huggingface.co/PeppX/gemma-4-e2b-uncensored-litertlm'
+          '/resolve/main/gemma4_uncensored_INT4_8192.litertlm',
+        ),
+        isFalse,
+      );
+    });
+
+    test('non-litert-community repos are never gated', () {
+      expect(
+        ModelHuggingFaceURLs.urlRequiresHuggingFaceAuth(
+          'https://huggingface.co/some-org/gemma-4-copy/resolve/main/m.task',
+        ),
         isFalse,
       );
     });

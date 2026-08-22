@@ -92,7 +92,6 @@ class ModelHashes {
       'c0e5f4d3b2a1c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0';
   static const gemma4E2b =
       'd1f6a5b4c3d2e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1';
-
   static String? hashFor(NovaModel model) {
     switch (model) {
       case NovaModel.smollm:
@@ -121,8 +120,12 @@ class ModelHuggingFaceURLs {
   }
 
   /// True when [url] points at a known gated Gemma asset.
+  ///
+  /// Only official `litert-community` repos are gated; community mirrors of
+  /// uncensored fine-tunes must stay token-free.
   static bool urlRequiresHuggingFaceAuth(String url) {
     final lower = url.toLowerCase();
+    if (!lower.contains('litert-community')) return false;
 
     return lower.contains('gemma3-1b') ||
         lower.contains('gemma-4') ||

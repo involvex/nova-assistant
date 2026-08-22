@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/diffusion_model_info.dart';
+import 'package:nova_assistant/models/uncensored_model_catalog.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/secure_prefs.dart';
 
@@ -551,9 +552,10 @@ class ModelManager {
     if (actualHash == null) return false;
 
     final novaModel = ModelHuggingFaceURLs.modelFromFileName(fileName);
-    if (novaModel == null) return true;
+    var expectedHash = novaModel != null
+        ? ModelHashes.hashFor(novaModel)
+        : UncensoredModelCatalog.expectedSha256For(fileName);
 
-    final expectedHash = ModelHashes.hashFor(novaModel);
     if (expectedHash == null) return true;
 
     if (actualHash != expectedHash) {
@@ -743,8 +745,13 @@ class ModelManager {
       final ext = p.extension(fileName).toLowerCase();
 
       if (ext != '.litertlm' && ext != '.task') {
+        final hint = ext == '.gguf'
+            ? ' — GGUF cannot run on flutter_gemma; find a LiteRT '
+                  '(.litertlm/.task) conversion'
+            : '';
         _statusController.add(
-          'Unsupported format: $ext — only .litertlm and .task are supported',
+          'Unsupported format: $ext — only .litertlm and .task are '
+          'supported$hint',
         );
         return null;
       }
@@ -867,7 +874,9 @@ class ModelManager {
       // GGUF cannot be used for inference with flutter_gemma
       if (ext == '.gguf' || isGguf) {
         _statusController.add(
-          'GGUF is not supported for inference — use .litertlm or .task',
+          'GGUF models cannot run on-device here — flutter_gemma needs a '
+          'LiteRT conversion (.litertlm or .task). Look for a LiteRT '
+          'version of this model.',
         );
         return null;
       }

@@ -1418,6 +1418,18 @@ class _AssistantScreenState extends State<AssistantScreen>
       tools.add(NovaTools.searchWeb);
     }
 
+    // Web fetch only when the query contains a URL or asks to read one —
+    // reading page content into context is expensive on small models.
+    final hasUrl = RegExp(r'https?://\S+|www\.\S+').hasMatch(query);
+    if (hasUrl ||
+        q.contains('this link') ||
+        q.contains('this url') ||
+        q.contains('this page') ||
+        q.contains('this article') ||
+        q.contains('fetch')) {
+      tools.add(NovaTools.webFetch);
+    }
+
     // Connected MCP tools (when a server is connected and tools discovered)
     tools.addAll(McpService.instance.enabledTools);
 

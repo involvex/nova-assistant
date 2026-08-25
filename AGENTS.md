@@ -666,6 +666,10 @@ The web platform has several limitations:
 - Chat history is stored locally via SharedPreferences
 - Model files are stored in the app's documents directory
 - No analytics or telemetry by default
+- Exception: the `webfetch` tool makes an outbound HTTP(S) request **only when
+  the user asks to read a specific link** (the query must contain a URL or
+  fetch/read phrasing). Only the requested page content enters model context;
+  nothing else is transmitted.
 
 ### Permissions
 
@@ -719,6 +723,7 @@ The app requests the following permissions:
 | `cancel_alarm` | Cancel an existing alarm | hour, minute |
 | `open_app` | Open an app by package name | package |
 | `search_web` | Open browser with search query | query |
+| `webfetch` | Fetch a URL and read its page content (HTML converted to plain text) | url, max_length |
 | `get_weather` | Get weather for a location | location |
 | `send_sms` | Send an SMS message | phone, message |
 | `open_settings` | Open device Settings | None |

@@ -8,9 +8,10 @@ void main() {
     });
 
     test('all tools list has expected built-in count', () {
-      // Built-ins include open_app_info + open_battery_settings + audio recording tools;
-      // force_stop_app is only added when Advanced Shizuku force-stop is enabled.
-      expect(NovaTools.all.length, 20);
+      // Built-ins include open_app_info + open_battery_settings + audio
+      // recording tools + webfetch; force_stop_app is only added when
+      // Advanced Shizuku force-stop is enabled.
+      expect(NovaTools.all.length, 21);
       expect(NovaTools.all.any((t) => t.name == 'open_app_info'), isTrue);
       expect(
         NovaTools.all.any((t) => t.name == 'open_battery_settings'),
@@ -122,6 +123,30 @@ void main() {
 
       test('description mentions capturing screen', () {
         expect(NovaTools.takeScreenshot.description, contains('screen'));
+      });
+    });
+
+    group('webFetch tool', () {
+      test('is included in all tools', () {
+        expect(NovaTools.all.any((t) => t.name == 'webfetch'), isTrue);
+      });
+
+      test('has correct name and description', () {
+        expect(NovaTools.webFetch.name, 'webfetch');
+        expect(NovaTools.webFetch.description, contains('URL'));
+        // Distinct from search_web: reads a page instead of opening a browser.
+        expect(NovaTools.webFetch.description, contains('search_web'));
+      });
+
+      test('requires url parameter', () {
+        final required = NovaTools.webFetch.parameters['required'] as List;
+        expect(required, contains('url'));
+      });
+
+      test('url parameter is string type', () {
+        final props = NovaTools.webFetch.parameters['properties'] as Map;
+        expect(props['url']['type'], 'string');
+        expect(props.containsKey('max_length'), isTrue);
       });
     });
   });

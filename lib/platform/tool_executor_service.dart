@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:nova_assistant/models/tool_progress.dart';
 import 'package:nova_assistant/services/audio_recorder_service.dart';
 import 'package:nova_assistant/services/shizuku_service.dart';
+import 'package:nova_assistant/services/web_fetch_service.dart';
 
 class ToolExecutorService {
   static const _channel = MethodChannel('dev.nova.assistant/tools');
@@ -44,6 +45,7 @@ class ToolExecutorService {
     return switch (toolName) {
       'start_audio_recording' => _executeStartRecording(),
       'stop_audio_recording' => _executeStopRecording(),
+      'webfetch' => WebFetchService.instance.fetch(args),
       _ => _invokePlatformChannel(toolName, args),
     };
   }

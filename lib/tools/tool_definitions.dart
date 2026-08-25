@@ -30,6 +30,7 @@ class NovaTools {
     listNotes,
     startAudioRecording,
     stopAudioRecording,
+    webFetch,
   ];
 
   static final Tool getTime = Tool(
@@ -392,6 +393,32 @@ class NovaTools {
     parameters: <String, Object>{
       'type': 'object',
       'properties': <String, Object>{},
+    },
+  );
+
+  static final Tool webFetch = Tool(
+    name: 'webfetch',
+    description:
+        'Fetch and read the content of a specific web page URL into this '
+        'conversation. Use when the user shares a link and asks about its '
+        'contents — summarize, explain, or extract information from it. '
+        'Do NOT use for general searches: search_web opens the browser '
+        'instead of reading a specific page. Only http(s) URLs are supported.',
+    parameters: {
+      'type': 'object',
+      'properties': {
+        'url': {
+          'type': 'string',
+          'description': 'Full absolute URL starting with http:// or https://',
+        },
+        'max_length': {
+          'type': 'integer',
+          'description':
+              'Maximum number of characters to return (500-12000). '
+              'Default 6000.',
+        },
+      },
+      'required': ['url'],
     },
   );
 }

@@ -144,9 +144,9 @@ class ModelOrchestrator {
   static const _prefsKey = 'preferred_model_override';
   static const _customPrefsKey = 'preferred_custom_model_id';
   SharedPreferences? _cachedPrefs;
-
   Future<SharedPreferences> _getPrefs() async {
-    _cachedPrefs ??= await _getPrefs();
+    _cachedPrefs ??= await SharedPreferences.getInstance();
+
     return _cachedPrefs!;
   }
 
@@ -3768,9 +3768,9 @@ class ModelOrchestrator {
   }
 
   Future<String> _languageInstruction() async {
-    _cachedPrefs ??= await _getPrefs();
+    final prefs = await _getPrefs();
     final language = AssistantLanguage.fromString(
-      _cachedPrefs!.getString(AssistantLanguage.prefsKey),
+      prefs.getString(AssistantLanguage.prefsKey),
     );
 
     return language.systemPromptLine;

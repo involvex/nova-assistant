@@ -39,16 +39,11 @@ class _CustomModelImportSheetState extends State<CustomModelImportSheet> {
 
   Future<void> _pickFile() async {
     try {
-      final result = await FilePicker.pickFiles(
+      final files = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['litertlm', 'task'],
       );
-
-      if (result == null) return;
-      if (result.files.isEmpty) {
-        return;
-      }
-      final file = result.files.first;
+      final file = files.first;
       final path = file.path;
 
       if (path == null) {

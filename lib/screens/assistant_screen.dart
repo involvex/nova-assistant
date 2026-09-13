@@ -1935,11 +1935,9 @@ class _AssistantScreenState extends State<AssistantScreen>
 
   Future<void> _pickFile() async {
     try {
-      final result = await FilePicker.pickFiles(type: FileType.any);
+      final files = await FilePicker.pickFiles(type: FileType.any);
 
-      if (result == null || result.files.isEmpty) return;
-
-      for (final file in result.files) {
+      for (final file in files) {
         if (file.path == null) continue;
 
         final attachment = AttachedData(
@@ -1958,7 +1956,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${result.files.length} file(s) attached'),
+            content: Text('${files.length} file(s) attached'),
             duration: const Duration(seconds: 1),
             backgroundColor: const Color(0xFF6C63FF),
           ),
@@ -1978,14 +1976,11 @@ class _AssistantScreenState extends State<AssistantScreen>
 
   Future<void> _handleModelFilePick(NovaModel model) async {
     try {
-      final result = await FilePicker.pickFiles(
+      final files = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['litertlm', 'task'],
       );
-
-      if (result == null) return;
-      if (result.files.isEmpty) return;
-      final file = result.files.first;
+      final file = files.first;
       if (file.path == null) return;
 
       if (!mounted) return;

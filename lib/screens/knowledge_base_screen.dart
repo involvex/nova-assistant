@@ -37,7 +37,7 @@ class _KnowledgeBaseScreenState extends State<KnowledgeBaseScreen> {
   }
 
   Future<void> _pickAndIngest() async {
-    final result = await FilePicker.pickFiles(
+    final files = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const [
         'txt',
@@ -58,10 +58,7 @@ class _KnowledgeBaseScreenState extends State<KnowledgeBaseScreen> {
         'sql',
       ],
     );
-    if (result == null) return;
-    if (result.files.isEmpty) return;
-
-    final file = result.files.first;
+    final file = files.first;
     final path = file.path;
     if (path == null) {
       _snack('Could not read file path');

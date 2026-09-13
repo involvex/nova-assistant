@@ -191,12 +191,11 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
     });
 
     try {
-      final pick = await FilePicker.pickFiles(
+      final files = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['litertlm', 'task'],
       );
-      if (pick == null) return;
-      if (pick.files.isEmpty || pick.files.first.path == null) {
+      if (files.first.path == null) {
         if (mounted) {
           setState(() {
             _isBusy = false;
@@ -206,7 +205,7 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
         return;
       }
 
-      final path = pick.files.first.path!;
+      final path = files.first.path!;
       final installed = await ModelManager.instance.installFromFile(
         filePath: path,
         modelType: _targetModel.modelType,

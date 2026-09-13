@@ -106,16 +106,11 @@ class SettingsBackupService {
   }
 
   Future<SettingsImportResult> importFromPicker() async {
-    final result = await FilePicker.pickFiles(
+    final files = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['json'],
     );
-    if (result == null) return SettingsImportResult.cancelled();
-    if (result.files.isEmpty) {
-      return SettingsImportResult.cancelled();
-    }
-
-    final file = result.files.first;
+    final file = files.first;
     final bytes = await file.readAsBytes();
     if (bytes.isEmpty) {
       return SettingsImportResult.failure('Could not read the selected file.');

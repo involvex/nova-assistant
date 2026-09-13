@@ -1333,16 +1333,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _pickAndInstallModel(BuildContext context) async {
     try {
-      final result = await FilePicker.pickFiles(
+      final files = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['litertlm', 'task'],
         dialogTitle: 'Select a model file',
       );
-
-      if (result == null) return;
-      if (result.files.isEmpty) return;
-
-      final file = result.files.first;
+      final file = files.first;
       if (file.path == null) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

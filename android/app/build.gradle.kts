@@ -89,6 +89,8 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation("androidx.window:window:1.1.0")
+    implementation("androidx.window:window-java:1.1.0")
 
     // TFLite LiteRT for diffusion inference on device
     implementation("org.tensorflow:tensorflow-lite:2.16.1")

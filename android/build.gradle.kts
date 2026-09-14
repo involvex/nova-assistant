@@ -29,6 +29,12 @@ subprojects {
     tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
         options.compilerArgs.add("-Xlint:-options")
     }
+
+    // Apply flutter-gradle-plugin to android_file_picker (from pub cache)
+    // so its build.gradle.kts can access the flutter extension
+    if (project.name == "android_file_picker") {
+        project.plugins.apply("dev.flutter.flutter-gradle-plugin")
+    }
 }
 
 tasks.register<Delete>("clean") {

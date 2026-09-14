@@ -11,8 +11,19 @@ val newBuildDir: Directory =
         .get()
 rootProject.layout.buildDirectory.value(newBuildDir)
 
-subprojects {
-    if (project == rootProject) return@subprojects
+configure<org.gradle.api.initialization.dsl.ScriptHandler> {
+    // Apply flutter-gradle-plugin to android_file_picker (from pub cache)
+    // after android plugin is applied, so it can access AndroidComponentsExtension
+    if (rootProject.name == "android_file_picker") {
+        rootProject.plugins.withId("com.android.library") {
+            rootProject.plugins.apply("dev.flutter.flutter-gradle-plugin")
+        }
+    }
+}
+
+// Configure subprojects using modern API
+projects.forEach { project ->
+    if (project == rootProject) return@forEach
 
     val projectPath = project.projectDir.absolutePath
     val skipRedirect = projectPath.contains(".pub-cache") ||
@@ -26,16 +37,8 @@ subprojects {
         project.layout.buildDirectory.value(newSubprojectBuildDir)
     }
 
-    tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
+    project.tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
         options.compilerArgs.add("-Xlint:-options")
-    }
-
-    // Apply flutter-gradle-plugin to android_file_picker (from pub cache)
-    // after android plugin is applied, so it can access AndroidComponentsExtension
-    if (project.name == "android_file_picker") {
-        project.plugins.withId("com.android.library") {
-            project.plugins.apply("dev.flutter.flutter-gradle-plugin")
-        }
     }
 }
 

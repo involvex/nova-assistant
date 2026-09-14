@@ -35,10 +35,9 @@ class HfModelHit {
 
   factory HfModelHit.fromJson(Map<String, dynamic> json) {
     final tagsRaw = json['tags'];
-    final tags =
-        tagsRaw is List
-            ? tagsRaw.map((e) => e.toString()).toList()
-            : <String>[];
+    final tags = tagsRaw is List
+        ? tagsRaw.map((e) => e.toString()).toList()
+        : <String>[];
     final gatedRaw = json['gated'];
     final gated =
         gatedRaw == true || gatedRaw == 'auto' || gatedRaw == 'manual';
@@ -106,7 +105,7 @@ class HubInstallHints {
 
 /// Thin Hugging Face Hub REST client for LiteRT model discovery.
 class HuggingfaceHubService {
-  HuggingfaceHubService({HttpClient? client}) : _client = client;
+  HuggingfaceHubService({this._client});
 
   static HuggingfaceHubService? _instance;
   static HuggingfaceHubService get instance =>
@@ -173,8 +172,9 @@ class HuggingfaceHubService {
 
   /// Prefer `.litertlm` over `.task` when both exist; otherwise keep order.
   static List<HfRepoFile> preferLitertlm(List<HfRepoFile> files) {
-    final litertlm =
-        files.where((f) => f.path.toLowerCase().endsWith('.litertlm')).toList();
+    final litertlm = files
+        .where((f) => f.path.toLowerCase().endsWith('.litertlm'))
+        .toList();
     if (litertlm.isNotEmpty) return litertlm;
 
     return List<HfRepoFile>.from(files);
@@ -187,10 +187,9 @@ class HuggingfaceHubService {
     List<String> tags = const [],
   }) {
     final blob = '$repoId $filePath ${tags.join(' ')}'.toLowerCase();
-    final fileName =
-        filePath.contains('/')
-            ? filePath.substring(filePath.lastIndexOf('/') + 1)
-            : filePath;
+    final fileName = filePath.contains('/')
+        ? filePath.substring(filePath.lastIndexOf('/') + 1)
+        : filePath;
 
     final isGemma4 =
         blob.contains('gemma-4') ||
@@ -211,22 +210,19 @@ class HuggingfaceHubService {
         blob.contains('e4b');
     final hasThinking = blob.contains('thinking') || isGemma4;
 
-    final modelType =
-        isGemma4
-            ? ModelType.gemma4
-            : (isGemma3 ? ModelType.gemmaIt : ModelType.general);
+    final modelType = isGemma4
+        ? ModelType.gemma4
+        : (isGemma3 ? ModelType.gemmaIt : ModelType.general);
 
-    final ext =
-        fileName.toLowerCase().endsWith('.litertlm')
-            ? ModelFileType.litertlm
-            : ModelFileType.task;
+    final ext = fileName.toLowerCase().endsWith('.litertlm')
+        ? ModelFileType.litertlm
+        : ModelFileType.task;
 
-    final displayBase =
-        fileName
-            .replaceAll(RegExp(r'\.(litertlm|task)$', caseSensitive: false), '')
-            .replaceAll('-', ' ')
-            .replaceAll('_', ' ')
-            .trim();
+    final displayBase = fileName
+        .replaceAll(RegExp(r'\.(litertlm|task)$', caseSensitive: false), '')
+        .replaceAll('-', ' ')
+        .replaceAll('_', ' ')
+        .trim();
 
     return HubInstallHints(
       displayName: displayBase.isEmpty ? repoId : displayBase,

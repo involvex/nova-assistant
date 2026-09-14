@@ -29,6 +29,21 @@ subprojects {
     tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
         options.compilerArgs.add("-Xlint:-options")
     }
+
+    // Provide minimal flutter extension to android_file_picker
+    // so its build.gradle.kts can access flutter.targetSdkVersion, etc.
+    if (project.name == "android_file_picker") {
+        open class FlutterExtension {
+            var compileSdkVersion: Int = 37
+            var targetSdkVersion: Int = 37
+            var versionCode: Int = 1
+            var versionName: String = "1.0.0"
+        }
+        // Only create if flutter extension doesn't already exist
+        if (project.extensions.findByName("flutter") == null) {
+            project.extensions.create("flutter", FlutterExtension::class.java)
+        }
+    }
 }
 
 tasks.register<Delete>("clean") {

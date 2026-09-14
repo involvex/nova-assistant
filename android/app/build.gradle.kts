@@ -1,6 +1,6 @@
 plugins {
     id("com.android.application")
-    // flutter-gradle-plugin is applied automatically via includeBuild in settings.gradle.kts
+    id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {

@@ -31,9 +31,11 @@ subprojects {
     }
 
     // Apply flutter-gradle-plugin to android_file_picker (from pub cache)
-    // so its build.gradle.kts can access the flutter extension
+    // after android plugin is applied, so it can access AndroidComponentsExtension
     if (project.name == "android_file_picker") {
-        project.plugins.apply("dev.flutter.flutter-gradle-plugin")
+        project.plugins.withId("com.android.library") {
+            project.plugins.apply("dev.flutter.flutter-gradle-plugin")
+        }
     }
 }
 

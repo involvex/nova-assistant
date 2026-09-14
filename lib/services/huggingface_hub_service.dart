@@ -269,9 +269,8 @@ class HuggingfaceHubService {
     String revision = 'main',
   }) async {
     final encoded = repoId.split('/').map(Uri.encodeComponent).join('/');
-    final uri = Uri.parse(
-      '$_apiBase/$encoded/tree/$revision',
-    ).replace(queryParameters: const {'recursive': '1'});
+    final uri = Uri.parse('$_apiBase/$encoded/tree/$revision')
+        .replace(queryParameters: const {'recursive': '1'});
 
     final json = await _getJson(uri);
     if (json is! List) return const [];

@@ -67,7 +67,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   mockito: ^5.4.4
-  build_runner: ^2.16.1
+  build_runner: ^2.15.1
   dart_code_linter: ^4.3.0
   coverage: ^1.7.0
   path_provider_platform_interface: ^2.1.2

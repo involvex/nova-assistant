@@ -38,7 +38,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: beta
-          flutter-version-file: pubspec.yaml # path to pubspec.yaml or .fvmrc or .fvm/fvm_config.json
+          # flutter-version-file: pubspec.yaml # path to pubspec.yaml or .fvmrc or .fvm/fvm_config.json
           cache: true
       - run: flutter --version
 
@@ -88,7 +88,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: beta
-          flutter-version-file: pubspec.yaml # path to pubspec.yaml or .fvmrc or .fvm/fvm_config.json
+          # flutter-version-file: pubspec.yaml # path to pubspec.yaml or .fvmrc or .fvm/fvm_config.json
           cache: true
       - run: flutter --version
 

@@ -37,10 +37,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          # Prefer a stable version unless the pre-release is required.
-          flutter-version: "3.48.0-0.5.pre"
           channel: beta
+          flutter-version-file: pubspec.yaml # path to pubspec.yaml or .fvmrc or .fvm/fvm_config.json
           cache: true
+      - run: flutter --version
 
       - name: Install dependencies
         run: flutter pub get
@@ -87,9 +87,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.48.0-0.5.pre"
           channel: beta
+          flutter-version-file: pubspec.yaml # path to pubspec.yaml or .fvmrc or .fvm/fvm_config.json
           cache: true
+      - run: flutter --version
 
       - name: Install dependencies
         run: flutter pub get

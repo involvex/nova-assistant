@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/diffusion_model_info.dart';
+import 'package:nova_assistant/services/model_manager.dart';
 
 class ImageGenerationService {
   static const _channel = MethodChannel('dev.nova.assistant/image_gen');
@@ -19,6 +20,48 @@ class ImageGenerationService {
 
   bool _isGenerating = false;
   bool get isGenerating => _isGenerating;
+
+  /// Channel ID must be the Hub folder name (e.g. `Z-Image-Turbo-LiteRT`),
+  /// not the Dart enum name (`zImageTurbo`).
+  String _channelModelId(DiffusionModel model) => model.fileName;
+
+  DiffusionModel? _matchDiffusionModel(String id) {
+    for (final model in DiffusionModel.values) {
+      if (model.fileName == id ||
+          model.name == id ||
+          id.contains(model.fileName) ||
+          model.fileName.contains(id)) {
+        return model;
+      }
+    }
+
+    return null;
+  }
+
+  Future<DiffusionModel?> resolveInstalledModel([
+    DiffusionModel? preferred,
+  ]) async {
+    if (preferred != null) {
+      final ok = await isModelInstalled(preferred);
+      if (ok) return preferred;
+    }
+
+    for (final model in DiffusionModel.values) {
+      if (ModelManager.instance.isDiffusionModelInstalled(model)) {
+        final path = await ModelManager.instance.findDiffusionModelPath(model);
+        if (path != null) return model;
+      }
+    }
+
+    final fromNative = await getInstalledModels();
+    if (fromNative.isNotEmpty) return fromNative.first;
+
+    for (final model in DiffusionModel.values) {
+      if (await isModelInstalled(model)) return model;
+    }
+
+    return null;
+  }
 
   Future<Uint8List?> generateImage(
     String prompt, {
@@ -46,6 +89,12 @@ class ImageGenerationService {
       }
     }
 
+    final resolved = await resolveInstalledModel(model);
+    if (resolved == null) {
+      debugPrint('ImageGenerationService: no diffusion model installed');
+      return null;
+    }
+
     _isGenerating = true;
 
     try {
@@ -59,7 +108,7 @@ class ImageGenerationService {
           'prompt': prompt,
           'size': size.pixels,
           'seed': seed,
-          'model': model?.name,
+          'model': _channelModelId(resolved),
         },
       );
 
@@ -82,10 +131,26 @@ class ImageGenerationService {
   }
 
   Future<bool> isModelInstalled([DiffusionModel? model]) async {
+    if (model != null) {
+      if (ModelManager.instance.isDiffusionModelInstalled(model)) {
+        final path = await ModelManager.instance.findDiffusionModelPath(model);
+        if (path != null) return true;
+      }
+    } else {
+      for (final m in DiffusionModel.values) {
+        if (ModelManager.instance.isDiffusionModelInstalled(m)) {
+          final path = await ModelManager.instance.findDiffusionModelPath(m);
+          if (path != null) return true;
+        }
+      }
+    }
+
     try {
       final result = await _channel.invokeMethod<bool>(
         'isModelInstalled',
-        <String, dynamic>{'model': model?.name},
+        <String, dynamic>{
+          'model': model == null ? null : _channelModelId(model),
+        },
       );
       return result ?? false;
     } catch (_) {
@@ -100,15 +165,15 @@ class ImageGenerationService {
       );
       if (result == null) return <DiffusionModel>[];
 
-      return result
-          .whereType<String>()
-          .map(
-            (name) => DiffusionModel.values.firstWhere(
-              (m) => m.name == name,
-              orElse: () => DiffusionModel.zImageTurbo,
-            ),
-          )
-          .toList();
+      final models = <DiffusionModel>[];
+      for (final raw in result.whereType<String>()) {
+        final match = _matchDiffusionModel(raw);
+        if (match != null && !models.contains(match)) {
+          models.add(match);
+        }
+      }
+
+      return models;
     } catch (_) {
       return <DiffusionModel>[];
     }

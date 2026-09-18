@@ -34,6 +34,7 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
 
   bool _checkingModel = true;
   bool _modelInstalled = false;
+  DiffusionModel? _activeModel;
   bool _generating = false;
   double _progress = 0;
   int _selectedSize = 512;
@@ -53,10 +54,11 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
   }
 
   Future<void> _checkModelInstalled() async {
-    final installed = await ImageGenerationService.instance.isModelInstalled();
+    final model = await ImageGenerationService.instance.resolveInstalledModel();
     if (!mounted) return;
     setState(() {
-      _modelInstalled = installed;
+      _activeModel = model;
+      _modelInstalled = model != null;
       _checkingModel = false;
     });
   }
@@ -122,6 +124,7 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
     final bytes = await ImageGenerationService.instance.generateImage(
       prompt,
       size: size,
+      model: _activeModel,
     );
 
     if (!mounted) return;

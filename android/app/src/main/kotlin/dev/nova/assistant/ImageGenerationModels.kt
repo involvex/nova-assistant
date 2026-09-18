@@ -42,6 +42,7 @@ object ImageGenerationModels {
       latentHeightFactor = 8,
       latentWidthFactor = 8,
     ),
+    // Hub filenames (text-to-image graphs). Editing kce_* / kv_vae_enc not required.
     MODEL_FLUX_2_KLEIN to ModelGraphSpec(
       textEncoder = listOf(
         "ke_enc0.tflite",
@@ -49,15 +50,16 @@ object ImageGenerationModels {
         "ke_enc2.tflite",
       ),
       unetMain = listOf(
-        "kc_main0.tflite",
-        "kc_main1.tflite",
-        "kc_main2.tflite",
-        "kc_main3.tflite",
-        "kc_main4.tflite",
-        "kc_main5.tflite",
+        "kc_prep.tflite",
+        "kc_double0.tflite",
+        "kc_double1.tflite",
+        "kc_single0.tflite",
+        "kc_single1.tflite",
+        "kc_single2.tflite",
+        "kc_single3.tflite",
       ),
       unetFinal = listOf("kc_final.tflite"),
-      vae = listOf("kvae.tflite"),
+      vae = listOf("kv_vae.tflite"),
       defaultSteps = 4,
       defaultGuidanceScale = 1.0f,
       latentChannels = 4,

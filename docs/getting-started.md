@@ -3,13 +3,15 @@ layout: default
 title: Getting started
 ---
 
+<link rel="stylesheet" href="{{ '/assets/css/nova-docs.css' | relative_url }}">
+
 # Getting started
 
 ## Prerequisites
 
 | Tool | Version |
 |------|---------|
-| Flutter | `3.47.0-0.1.pre` (beta channel) |
+| Flutter | `>=3.17.0-0.1.pre` (see `pubspec.yaml`) |
 | Dart | matches Flutter SDK (`pubspec.yaml`) |
 | Android SDK | API 26+, NDK as in `android/app/build.gradle.kts` |
 | Device | Prefer **arm64-v8a** physical device (≥6 GB RAM for Gemma 4 E2B) |
@@ -64,6 +66,15 @@ On first launch, use onboarding or **Settings → AI Models** to download or imp
 
 Optional: set a HuggingFace token in Settings for authenticated downloads.
 Optional: enable **Adult mode** in Settings if you want less prudish answers on legal adult topics (on-device only; still refuses illegal content).
+
+## Assistant mode & screen capture
+
+To use Nova as the system assistant with screen context, see
+[Assistant mode](assistant-mode.md) — including the AppOps grant:
+
+```bash
+adb shell appops set dev.nova.assistant PROJECT_MEDIA allow
+```
 
 ## Agent-assisted setup
 

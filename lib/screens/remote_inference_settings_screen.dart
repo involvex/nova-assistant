@@ -23,6 +23,7 @@ class _RemoteInferenceSettingsScreenState
   final _tokenController = TextEditingController();
   bool _loading = true;
   bool _testing = false;
+  bool _dirty = false;
   String? _testResult;
 
   @override
@@ -49,10 +50,17 @@ class _RemoteInferenceSettingsScreenState
       _modelIdController.text = config.modelId;
       _tokenController.text = config.apiToken ?? '';
       _loading = false;
+      _dirty = false;
     });
   }
 
-  Future<void> _save() async {
+  Future<void> _persistBackend(InferenceBackend backend) async {
+    final prefs = await SharedPreferences.getInstance();
+    await RemoteInferenceConfig.saveBackend(prefs, backend);
+    await ModelOrchestrator.refreshSettings();
+  }
+
+  Future<void> _save({bool showSnack = true}) async {
     final prefs = await SharedPreferences.getInstance();
     final config = RemoteInferenceConfig(
       baseUrl: _baseUrlController.text.trim(),
@@ -64,7 +72,8 @@ class _RemoteInferenceSettingsScreenState
     await config.save(prefs);
     await RemoteInferenceConfig.saveBackend(prefs, _backend);
     await ModelOrchestrator.refreshSettings();
-    if (mounted) {
+    _dirty = false;
+    if (showSnack && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Remote inference settings saved')),
       );
@@ -95,149 +104,180 @@ class _RemoteInferenceSettingsScreenState
     });
   }
 
+  Future<bool> _onWillPop() async {
+    if (_dirty) {
+      await _save(showSnack: false);
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D0D1A),
-      appBar: AppBar(
-        title: const Text('Remote LAN inference'),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop && _dirty) {
+          await _save(showSnack: false);
+        }
+      },
+      child: Scaffold(
         backgroundColor: const Color(0xFF0D0D1A),
-        elevation: 0,
-        actions: [
-          TextButton(
-            onPressed: _loading ? null : _save,
-            child: const Text('Save'),
+        appBar: AppBar(
+          title: const Text('Remote LAN inference'),
+          backgroundColor: const Color(0xFF0D0D1A),
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () async {
+              await _onWillPop();
+              if (context.mounted) Navigator.of(context).pop();
+            },
           ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2A1A1A),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.orange.withValues(alpha: 0.4),
+          actions: [
+            TextButton(
+              onPressed: _loading ? null : () => _save(),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2A1A1A),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.orange.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: const Text(
+                      'Only use on trusted private Wi‑Fi. Do not expose your '
+                      'model host to the public internet without a firewall '
+                      'and token.',
+                      style: TextStyle(
+                        color: Colors.orangeAccent,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
-                  child: const Text(
-                    'Only use on trusted private Wi‑Fi. Do not expose your '
-                    'model host to the public internet without a firewall and token.',
-                    style: TextStyle(color: Colors.orangeAccent, fontSize: 13),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Backend',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<InferenceBackend>(
-                  segments: const [
-                    ButtonSegment(
-                      value: InferenceBackend.onDevice,
-                      label: Text('On-device'),
-                      icon: Icon(Icons.phone_android),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Backend',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w600,
                     ),
-                    ButtonSegment(
-                      value: InferenceBackend.remote,
-                      label: Text('Remote LAN'),
-                      icon: Icon(Icons.lan_outlined),
+                  ),
+                  const SizedBox(height: 8),
+                  SegmentedButton<InferenceBackend>(
+                    segments: const [
+                      ButtonSegment(
+                        value: InferenceBackend.onDevice,
+                        label: Text('On-device'),
+                        icon: Icon(Icons.phone_android),
+                      ),
+                      ButtonSegment(
+                        value: InferenceBackend.remote,
+                        label: Text('Remote LAN'),
+                        icon: Icon(Icons.lan_outlined),
+                      ),
+                    ],
+                    selected: {_backend},
+                    onSelectionChanged: (s) async {
+                      final next = s.first;
+                      setState(() => _backend = next);
+                      await _persistBackend(next);
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  TextField(
+                    controller: _baseUrlController,
+                    style: const TextStyle(color: Colors.white),
+                    onChanged: (_) => _dirty = true,
+                    decoration: const InputDecoration(
+                      labelText: 'Base URL',
+                      hintText: 'http://192.168.x.x:8080',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white24),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFF6C63FF)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _modelIdController,
+                    style: const TextStyle(color: Colors.white),
+                    onChanged: (_) => _dirty = true,
+                    decoration: const InputDecoration(
+                      labelText: 'Model id',
+                      hintText: 'local-model',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white24),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFF6C63FF)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _tokenController,
+                    obscureText: true,
+                    style: const TextStyle(color: Colors.white),
+                    onChanged: (_) => _dirty = true,
+                    decoration: const InputDecoration(
+                      labelText: 'API token (optional)',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white24),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFF6C63FF)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    onPressed: _testing ? null : _testConnection,
+                    icon: _testing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.wifi_tethering),
+                    label: Text(_testing ? 'Testing…' : 'Test connection'),
+                  ),
+                  if (_testResult != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _testResult!,
+                      style: TextStyle(
+                        color: _testResult!.startsWith('Connected')
+                            ? Colors.greenAccent
+                            : Colors.redAccent,
+                      ),
                     ),
                   ],
-                  selected: {_backend},
-                  onSelectionChanged: (s) {
-                    setState(() => _backend = s.first);
-                  },
-                ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _baseUrlController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: 'Base URL',
-                    hintText: 'http://192.168.x.x:8080',
-                    labelStyle: TextStyle(color: Colors.white54),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFF6C63FF)),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _modelIdController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: 'Model id',
-                    hintText: 'local-model',
-                    labelStyle: TextStyle(color: Colors.white54),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFF6C63FF)),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _tokenController,
-                  obscureText: true,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: 'API token (optional)',
-                    labelStyle: TextStyle(color: Colors.white54),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFF6C63FF)),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                FilledButton.icon(
-                  onPressed: _testing ? null : _testConnection,
-                  icon: _testing
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.wifi_tethering),
-                  label: Text(_testing ? 'Testing…' : 'Test connection'),
-                ),
-                if (_testResult != null) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 24),
                   Text(
-                    _testResult!,
-                    style: TextStyle(
-                      color: _testResult!.startsWith('Connected')
-                          ? Colors.greenAccent
-                          : Colors.redAccent,
-                    ),
+                    'Host with llama-server:\n'
+                    'llama-server -m model.gguf --host 0.0.0.0 --port 8080\n\n'
+                    'Point Nova at http://<pc-lan-ip>:8080 — this is how large '
+                    'GGUF models work today without on-device GGUF.',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
                   ),
                 ],
-                const SizedBox(height: 24),
-                Text(
-                  'Host with llama-server:\n'
-                  'llama-server -m model.gguf --host 0.0.0.0 --port 8080\n\n'
-                  'Point Nova at http://<pc-lan-ip>:8080 — this is how large '
-                  'GGUF models work today without on-device GGUF.',
-                  style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                ),
-              ],
-            ),
+              ),
+      ),
     );
   }
 }

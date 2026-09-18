@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nova_assistant/models/user_preferences.dart';
+import 'package:nova_assistant/theme/nova_palettes.dart';
 
 class UserPreferencesService {
   static const String _key = 'user_preferences';
+  static const String _bubbleThemeKey = 'settings_bubble_theme';
 
   static UserPreferencesService? _instance;
   static UserPreferencesService get instance =>
@@ -14,6 +17,10 @@ class UserPreferencesService {
   UserPreferencesService._();
 
   SharedPreferences? _prefs;
+  final _changes = StreamController<UserPreferences>.broadcast();
+
+  /// Emits whenever theme mode, palette, or font scale changes.
+  Stream<UserPreferences> get changes => _changes.stream;
 
   Future<SharedPreferences> get _p async =>
       _prefs ??= await SharedPreferences.getInstance();
@@ -21,17 +28,37 @@ class UserPreferencesService {
   Future<UserPreferences> getPreferences() async {
     final prefs = await _p;
     final json = prefs.getString(_key);
-    if (json == null) return const UserPreferences();
-    try {
-      return UserPreferences.fromJson(jsonDecode(json) as Map<String, dynamic>);
-    } catch (_) {
-      return const UserPreferences();
+    UserPreferences loaded;
+    if (json == null) {
+      loaded = const UserPreferences();
+    } else {
+      try {
+        loaded = UserPreferences.fromJson(
+          jsonDecode(json) as Map<String, dynamic>,
+        );
+      } catch (_) {
+        loaded = const UserPreferences();
+      }
     }
+
+    // Migrate legacy bubble-only theme into appPaletteId when unset/default.
+    final legacyBubble = prefs.getString(_bubbleThemeKey);
+    if (legacyBubble != null &&
+        (loaded.appPaletteId == 'defaultTheme' ||
+            loaded.appPaletteId.isEmpty)) {
+      final migrated = NovaPalette.parseId(legacyBubble);
+      if (migrated != null && migrated != NovaPaletteId.defaultTheme) {
+        loaded = loaded.copyWith(appPaletteId: migrated.name);
+      }
+    }
+
+    return loaded;
   }
 
   Future<void> savePreferences(UserPreferences prefs) async {
     final p = await _p;
     await p.setString(_key, jsonEncode(prefs.toJson()));
+    _changes.add(prefs);
   }
 
   Future<UserMode> getMode() async {
@@ -84,6 +111,13 @@ class UserPreferencesService {
   Future<void> setThemeMode(ThemeModeSetting themeMode) async {
     final current = await getPreferences();
     await savePreferences(current.copyWith(themeMode: themeMode));
+  }
+
+  Future<void> setAppPaletteId(String paletteId) async {
+    final current = await getPreferences();
+    await savePreferences(current.copyWith(appPaletteId: paletteId));
+    final p = await _p;
+    await p.setString(_bubbleThemeKey, paletteId);
   }
 
   Future<double> getFontScale() async {

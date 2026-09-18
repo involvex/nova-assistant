@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/chat_bubble_theme.dart';
 import 'package:nova_assistant/models/chat_message.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 class ChatBubble extends StatelessWidget {
   final ChatMessage message;

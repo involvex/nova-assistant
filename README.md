@@ -8,6 +8,13 @@ Nova runs AI models entirely on your device — no chat data is sent to external
 
 **Agent skill:** [`.cursor/skills/nova-dev`](.cursor/skills/nova-dev/SKILL.md) — tell any coding agent: *use the nova_dev skill to setup and build the app*
 
+Also available to other agents via [`.agents/skills/nova-dev`](.agents/skills/nova-dev/SKILL.md) and [`.claude/skills/nova-dev`](.claude/skills/nova-dev/SKILL.md). After editing the Cursor skill, sync with:
+
+```powershell
+./scripts/link-nova-dev-skill.ps1
+# live single-edit junction: ./scripts/link-nova-dev-skill.ps1 -LiveLink
+```
+
 ## Features
 
 - **On-device AI** — Gemma / LiteRT via `flutter_gemma`
@@ -72,7 +79,9 @@ nova-assistant/
   android/             # Kotlin native (tools, capture, assistant)
   docs/                # Documentation site (GitHub Pages)
   test/                # Unit / widget tests
-  .cursor/skills/      # Agent skills (nova-dev)
+  .cursor/skills/      # Agent skills (nova-dev canonical)
+  .agents/skills/      # Synced skills for Codex / Agents SDK
+  .claude/skills/      # Claude Code (junctions → .agents)
   AGENTS.md            # Full coding agent guide
   ROADMAP.md           # Product roadmap
 ```

@@ -2481,6 +2481,9 @@ class ModelOrchestrator {
     await _acquireInferenceLock();
     _generationCancelledByUser = false;
 
+    // Fresh prefs each turn so Remote LAN toggles apply without restart.
+    await _loadRuntimeSettings();
+
     try {
       // Deterministic timer shortcut (relative duration → wall-clock alarm).
       final parsedTimer = AlarmTimeParser.tryParseTimer(query);
@@ -3563,22 +3566,27 @@ class ModelOrchestrator {
         };
         final seed = resolvedArgs['seed'] as int?;
         final modelName = resolvedArgs['model'] as String?;
-        final model = modelName != null
-            ? DiffusionModel.values.firstWhere(
-                (m) => m.name == modelName,
-                orElse: () => DiffusionModel.zImageTurbo,
-              )
-            : null;
+        DiffusionModel? preferred;
+        if (modelName != null) {
+          for (final m in DiffusionModel.values) {
+            if (m.name == modelName ||
+                m.fileName == modelName ||
+                modelName.contains(m.fileName)) {
+              preferred = m;
+              break;
+            }
+          }
+        }
+        final model = await ImageGenerationService.instance
+            .resolveInstalledModel(preferred);
 
-        final installed = await ImageGenerationService.instance
-            .isModelInstalled(model);
-        if (!installed) {
+        if (model == null) {
           toolResult = <String, dynamic>{
             'success': false,
             'error': 'no_model',
             'message':
                 'No diffusion model installed. '
-                'Download Z-Image-Turbo (~800MB) or FLUX.2-klein (~2.4GB) '
+                'Download Z-Image-Turbo (~9.4GB) or FLUX.2-klein (~9.6GB) '
                 'in Settings to generate images.',
           };
         } else {
@@ -4092,6 +4100,12 @@ class ModelOrchestrator {
     final prefs = await instance._getPrefs();
     final enabled = prefs.getBool('settings_prewarm_model') ?? false;
     if (!enabled) return;
+
+    final backend = RemoteInferenceConfig.backendFromPrefs(prefs);
+    if (backend == InferenceBackend.remote) {
+      debugPrint('Pre-warm skipped: Remote LAN backend active');
+      return;
+    }
 
     final orch = instance;
     if (orch._activeModel != null) return;

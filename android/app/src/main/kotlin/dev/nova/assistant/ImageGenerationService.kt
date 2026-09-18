@@ -3,6 +3,7 @@ package dev.nova.assistant
 import android.content.Context
 import android.util.Log
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 object ImageGenerationService {
   private const val TAG = "ImageGenerationService"
@@ -37,6 +38,25 @@ object ImageGenerationService {
     }
   }
 
+  private fun resolveModelType(modelName: String): DiffusionPipeline.ModelType? {
+    return when {
+      modelName.contains(ImageGenerationModels.MODEL_Z_IMAGE_TURBO, ignoreCase = true) ||
+        modelName.equals("zImageTurbo", ignoreCase = true) ->
+        DiffusionPipeline.ModelType.Z_IMAGE_TURBO
+      modelName.contains(ImageGenerationModels.MODEL_FLUX_2_KLEIN, ignoreCase = true) ||
+        modelName.equals("flux2Klein", ignoreCase = true) ->
+        DiffusionPipeline.ModelType.FLUX_2_KLEIN
+      else -> null
+    }
+  }
+
+  private fun hasTflite(dir: File): Boolean {
+    return dir.exists() && dir.isDirectory &&
+      dir.listFiles()?.any { file ->
+        file.isFile && file.extension.equals("tflite", ignoreCase = true)
+      } == true
+  }
+
   private fun generateImage(
     context: Context,
     prompt: String,
@@ -44,17 +64,12 @@ object ImageGenerationService {
     seed: Int?,
     modelName: String?,
   ): ByteArray? {
-    if (modelName == null) {
-      throw IllegalArgumentException("model name required")
-    }
+    val resolvedName = modelName
+      ?: getInstalledModels(context).firstOrNull()
+      ?: throw IllegalArgumentException("model name required")
 
-    val modelType = when {
-      modelName.contains(ImageGenerationModels.MODEL_Z_IMAGE_TURBO, ignoreCase = true) ->
-        DiffusionPipeline.ModelType.Z_IMAGE_TURBO
-      modelName.contains(ImageGenerationModels.MODEL_FLUX_2_KLEIN, ignoreCase = true) ->
-        DiffusionPipeline.ModelType.FLUX_2_KLEIN
-      else -> throw IllegalArgumentException("Unsupported model: $modelName")
-    }
+    val modelType = resolveModelType(resolvedName)
+      ?: throw IllegalArgumentException("Unsupported model: $resolvedName")
 
     val supportedSizes = listOf(256, 512, 1024)
     if (size !in supportedSizes) {
@@ -62,8 +77,8 @@ object ImageGenerationService {
     }
 
     val modelDir = DiffusionPipeline.getModelDir(context, modelType)
-    if (!modelDir.exists() || !modelDir.listFiles()?.any { it.extension.equals("tflite", ignoreCase = true) }!!) {
-      throw IllegalStateException("Model not installed: $modelName. Install it from Settings.")
+    if (!hasTflite(modelDir)) {
+      throw IllegalStateException("Model not installed: $resolvedName. Install it from Settings.")
     }
 
     val spec = when (modelType) {
@@ -71,7 +86,7 @@ object ImageGenerationService {
         ImageGenerationModels.MODEL_SPECS[ImageGenerationModels.MODEL_Z_IMAGE_TURBO]
       DiffusionPipeline.ModelType.FLUX_2_KLEIN ->
         ImageGenerationModels.MODEL_SPECS[ImageGenerationModels.MODEL_FLUX_2_KLEIN]
-    } ?: throw IllegalStateException("No model spec for $modelName")
+    } ?: throw IllegalStateException("No model spec for $resolvedName")
 
     val config = DiffusionPipeline.GenerationConfig(
       modelType = modelType,
@@ -97,37 +112,23 @@ object ImageGenerationService {
   }
 
   private fun isModelInstalled(context: Context, model: String?): Boolean {
-    if (model == null) return false
-    val modelType = when {
-      model.contains(ImageGenerationModels.MODEL_Z_IMAGE_TURBO, ignoreCase = true) ->
-        DiffusionPipeline.ModelType.Z_IMAGE_TURBO
-      model.contains(ImageGenerationModels.MODEL_FLUX_2_KLEIN, ignoreCase = true) ->
-        DiffusionPipeline.ModelType.FLUX_2_KLEIN
-      else -> return false
+    if (model == null || model.isBlank()) {
+      return getInstalledModels(context).isNotEmpty()
     }
-    val modelDir = DiffusionPipeline.getModelDir(context, modelType)
-    if (!modelDir.exists() || !modelDir.isDirectory) return false
-    return modelDir.listFiles()?.any { file ->
-      file.isFile && file.extension.equals("tflite", ignoreCase = true)
-    } == true
+    val modelType = resolveModelType(model) ?: return false
+    return hasTflite(DiffusionPipeline.getModelDir(context, modelType))
   }
 
   private fun getInstalledModels(context: Context): List<String> {
-    val docsDir = context.getExternalFilesDir(null) ?: context.filesDir
-    val diffusionDir = java.io.File(docsDir, "diffusion_models")
-    if (!diffusionDir.exists() || !diffusionDir.isDirectory) return emptyList()
-
-    val installed = mutableListOf<String>()
-    diffusionDir.listFiles()?.forEach { dir ->
-      if (dir.isDirectory) {
-        val hasTflite = dir.listFiles()?.any { file ->
-          file.isFile && file.extension.equals("tflite", ignoreCase = true)
-        } == true
-        if (hasTflite && ImageGenerationModels.isSupportedModel(dir.name)) {
+    val installed = linkedSetOf<String>()
+    for (root in DiffusionPipeline.diffusionRootCandidates(context)) {
+      if (!root.exists() || !root.isDirectory) continue
+      root.listFiles()?.forEach { dir ->
+        if (dir.isDirectory && hasTflite(dir) && ImageGenerationModels.isSupportedModel(dir.name)) {
           installed.add(dir.name)
         }
       }
     }
-    return installed
+    return installed.toList()
   }
 }

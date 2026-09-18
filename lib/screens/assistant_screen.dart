@@ -9,8 +9,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/chat_bubble_theme.dart';
+import 'package:nova_assistant/theme/nova_palettes.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/model_info.dart';
+import 'package:nova_assistant/models/inference_backend.dart';
+import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:nova_assistant/services/document_extractor.dart';
 import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/conversation_summary_service.dart';
@@ -20,6 +23,7 @@ import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_release_policy.dart';
 import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:nova_assistant/platform/overlay_service.dart';
@@ -101,6 +105,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   int _currentSearchMatch = 0;
   List<int> _searchMatchIndices = [];
   ChatBubbleTheme _chatTheme = ChatBubbleTheme.defaultTheme;
+  StreamSubscription<UserPreferences>? _prefsThemeSub;
   int _messageVersion = 0;
   int? _cachedHistoryTokenEstimate;
   int? _cachedHistoryTokenEstimateVersion;
@@ -127,6 +132,14 @@ class _AssistantScreenState extends State<AssistantScreen>
     _loadThinkingMode();
     _loadDebugMode();
     _loadBubbleTheme();
+    _prefsThemeSub = UserPreferencesService.instance.changes.listen((prefs) {
+      final paletteId =
+          NovaPalette.parseId(prefs.appPaletteId) ?? NovaPaletteId.defaultTheme;
+      if (!mounted) return;
+      setState(() {
+        _chatTheme = ChatBubbleTheme.fromPalette(NovaPalette.fromId(paletteId));
+      });
+    });
     _loadInitialScreenshot();
     _loadHistory();
     _requestPermissions();
@@ -328,15 +341,13 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _loadBubbleTheme() async {
-    final prefs = await SharedPreferences.getInstance();
-    final themeName =
-        prefs.getString('settings_bubble_theme') ?? 'defaultTheme';
-    final type = ChatBubbleThemeType.values.firstWhere(
-      (t) => t.name == themeName,
-      orElse: () => ChatBubbleThemeType.defaultTheme,
-    );
+    final prefs = await UserPreferencesService.instance.getPreferences();
+    final paletteId =
+        NovaPalette.parseId(prefs.appPaletteId) ?? NovaPaletteId.defaultTheme;
     if (mounted) {
-      setState(() => _chatTheme = ChatBubbleTheme.fromType(type));
+      setState(() {
+        _chatTheme = ChatBubbleTheme.fromPalette(NovaPalette.fromId(paletteId));
+      });
     }
   }
 
@@ -365,6 +376,10 @@ class _AssistantScreenState extends State<AssistantScreen>
       );
 
   String get _effectiveModelLabel {
+    if (ModelOrchestrator.instance.inferenceBackend ==
+        InferenceBackend.remote) {
+      return 'Remote LAN';
+    }
     if (_selectedCustomModel != null) return _selectedCustomModel!.displayName;
     if (_isAutoMode) return 'Auto → ${_effectiveModel.displayName}';
 
@@ -945,6 +960,12 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _checkModelAvailability() async {
+    if (ModelOrchestrator.instance.inferenceBackend ==
+        InferenceBackend.remote) {
+      if (mounted) setState(() => _offlineMode = false);
+      return;
+    }
+
     final manager = ModelManager.instance;
     bool anyInstalled = false;
     for (final model in NovaModel.values) {
@@ -1058,6 +1079,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   void dispose() {
     ShizukuService.instance.confirmationHandler = null;
     WidgetsBinding.instance.removeObserver(this);
+    _prefsThemeSub?.cancel();
     _historyClearedSub?.cancel();
     _statusSub?.cancel();
     _contextBudgetSub?.cancel();
@@ -2250,7 +2272,10 @@ class _AssistantScreenState extends State<AssistantScreen>
                     : 'ctx: ${(_contextBudget!.usageRatio * 100).round()}% '
                           '(${_contextBudget!.estimatedTokens}/${_contextBudget!.kvLimit})',
               ),
-            if (isLoadingModel) ModelLoadingOverlay(status: _status),
+            if (isLoadingModel &&
+                ModelOrchestrator.instance.inferenceBackend !=
+                    InferenceBackend.remote)
+              ModelLoadingOverlay(status: _status),
             if (_showSearch)
               Positioned(
                 top: 0,

@@ -5,16 +5,16 @@ version: 0.4.7+6
 
 environment:
   sdk: '>=3.13.0-282.1.beta <4.0.0'
-  flutter: '>=3.47.0-0.1.pre'
+  flutter: '>=3.17.0-0.1.pre'
 
 dependencies:
   flutter:
     sdk: flutter
 
   # AI Inference — core + engines
-  flutter_gemma: ^1.8.2
-  flutter_gemma_litertlm: ^1.6.3
-  flutter_gemma_mediapipe: ^1.0.5
+  flutter_gemma: ^1.8.3
+  flutter_gemma_litertlm: ^1.6.4
+  flutter_gemma_mediapipe: ^1.0.6
 
   # Permissions
   permission_handler: ^13.0.2
@@ -22,12 +22,12 @@ dependencies:
   # Audio (voice input)
   record: ^7.1.1
   just_audio: ^0.10.6
-  speech_to_text: ^7.0.0
+  speech_to_text: ^7.5.0
 
   # Storage
   path_provider: ^2.1.5
   shared_preferences: ^2.3.4
-  flutter_secure_storage: ^11.1.1
+  flutter_secure_storage: ^11.2.0
   sqflite: ^2.4.4
 
   # Network
@@ -45,7 +45,7 @@ dependencies:
   wakelock_plus: ^1.8.0
 
   # UI
-  flutter_markdown: ^0.7.6
+  flutter_markdown_plus: ^1.0.7
   cupertino_icons: ^1.0.8
   file_picker: ^12.3.0
   image_picker: ^1.1.2
@@ -57,7 +57,7 @@ dependencies:
 
   # Home Screen Widgets
   home_widget: ^0.9.4
-  syncfusion_flutter_pdf: ^34.2.7
+  syncfusion_flutter_pdf: ^34.2.8
   flutter_gemma_speech: ^0.5.0
   url_launcher: ^6.3.2
   connectivity_plus: ^7.3.1

@@ -44,4 +44,21 @@ Enable Pages in the repo: **Settings → Pages → Source: GitHub Actions**.
 
 ## Agent skill
 
-Shareable Cursor skill: `.cursor/skills/nova-dev/SKILL.md`.
+Shareable skill: [`.cursor/skills/nova-dev/SKILL.md`](../.cursor/skills/nova-dev/SKILL.md)
+(canonical). Synced copies for other agents:
+
+| Path | Consumer |
+|------|----------|
+| `.cursor/skills/nova-dev/` | Cursor |
+| `.agents/skills/nova-dev/` | Codex / Agents SDK |
+| `.claude/skills/nova-dev/` | Claude Code (junction → `.agents`) |
+
+```powershell
+./scripts/link-nova-dev-skill.ps1          # copy Cursor → agents, junction claude
+./scripts/link-nova-dev-skill.ps1 -LiveLink # junction agents → Cursor (single edit)
+```
+
+```bash
+./scripts/link-nova-dev-skill.sh
+./scripts/link-nova-dev-skill.sh --live
+```

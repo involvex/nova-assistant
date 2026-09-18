@@ -4,6 +4,9 @@
 > All AI inference runs locally on the device - no data is sent to external servers.
 
 **Human docs:** [`docs/`](docs/) (GitHub Pages) · **Agent skill:** [`.cursor/skills/nova-dev`](.cursor/skills/nova-dev/SKILL.md)
+(also synced to [`.agents/skills/nova-dev`](.agents/skills/nova-dev/SKILL.md) and
+[`.claude/skills/nova-dev`](.claude/skills/nova-dev/SKILL.md) — run
+[`scripts/link-nova-dev-skill.ps1`](scripts/link-nova-dev-skill.ps1) after edits)
 
 When a developer says *use the nova_dev skill to setup and build the app* or
 *configure my own model*, follow that skill first, then this file for coding standards.
@@ -677,7 +680,9 @@ The app requests the following permissions:
 
 - **Microphone**: For voice input (speech-to-text)
 - **Photos**: For image picking from gallery
-- **Screen Capture**: For screenshot-based context (requires user consent)
+- **Screen Capture**: For screenshot-based context (requires MediaProjection consent).
+  Debug/power-user: `adb shell appops set dev.nova.assistant PROJECT_MEDIA allow`
+  (see `docs/assistant-mode.md`)
 
 ### Model Security
 

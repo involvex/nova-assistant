@@ -1514,14 +1514,9 @@ class ModelManager {
 
   Future<bool> uninstallDiffusionModel(DiffusionModel model) async {
     try {
-      final entry = _diffusionModels.firstWhere(
-        (m) => m.model == model,
-        orElse: () => throw Exception('Diffusion model not found'),
-      );
-
       final docsDir = await getApplicationDocumentsDirectory();
       final modelDir = Directory(
-        '${docsDir.path}/diffusion_models/${entry.fileName}',
+        '${docsDir.path}/diffusion_models/${model.fileName}',
       );
       if (await modelDir.exists()) {
         await modelDir.delete(recursive: true);

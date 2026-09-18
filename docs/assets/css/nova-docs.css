@@ -1,0 +1,67 @@
+/* Nova docs — Cayman theme enhancements */
+body {
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.nova-topnav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  padding: 0.65rem 1rem;
+  background: rgba(21, 24, 31, 0.96);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+}
+
+.nova-topnav a {
+  color: #c9d1d9;
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.nova-topnav a:hover {
+  color: #58a6ff;
+}
+
+.nova-topnav .nova-brand {
+  color: #a78bfa;
+  font-weight: 700;
+  margin-right: 0.5rem;
+}
+
+.nova-topnav .nova-spacer {
+  flex: 1;
+}
+
+pre,
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.highlight pre,
+pre.highlight {
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.main-content table {
+  display: block;
+  overflow-x: auto;
+}
+
+@media (max-width: 640px) {
+  .nova-topnav {
+    gap: 0.4rem 0.75rem;
+  }
+
+  .nova-topnav a {
+    font-size: 0.8rem;
+  }
+}

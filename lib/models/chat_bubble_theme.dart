@@ -1,6 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:nova_assistant/theme/nova_palettes.dart';
 
-enum ChatBubbleThemeType { defaultTheme, ocean, forest, neon }
+/// Legacy chat-bubble theme wrapper — maps onto [NovaPalette].
+enum ChatBubbleThemeType {
+  defaultTheme,
+  hacker,
+  monokai,
+  dracula,
+  ocean,
+  forest,
+  neon,
+}
 
 class ChatBubbleTheme {
   const ChatBubbleTheme({
@@ -23,53 +33,44 @@ class ChatBubbleTheme {
   final Color assistantTextColor;
   final Color accentColor;
 
-  static const defaultTheme = ChatBubbleTheme(
-    name: 'Default',
-    type: ChatBubbleThemeType.defaultTheme,
-    userBubbleColor: Color(0xFF6C63FF),
-    assistantBubbleColor: Color(0xFF1A1A2E),
-    backgroundColor: Color(0xFF0D0D1A),
-    userTextColor: Colors.white,
-    assistantTextColor: Color(0xEBFFFFFF),
-    accentColor: Color(0xFF6C63FF),
-  );
+  factory ChatBubbleTheme.fromPalette(NovaPalette palette) {
+    return ChatBubbleTheme(
+      name: palette.name,
+      type: ChatBubbleThemeType.values.firstWhere(
+        (t) => t.name == palette.id.name,
+        orElse: () => ChatBubbleThemeType.defaultTheme,
+      ),
+      userBubbleColor: palette.userBubble,
+      assistantBubbleColor: palette.assistantBubble,
+      backgroundColor: palette.chatBackground,
+      userTextColor: Colors.white,
+      assistantTextColor: const Color(0xEBFFFFFF),
+      accentColor: palette.accent,
+    );
+  }
 
-  static const ocean = ChatBubbleTheme(
-    name: 'Ocean',
-    type: ChatBubbleThemeType.ocean,
-    userBubbleColor: Color(0xFF0077B6),
-    assistantBubbleColor: Color(0xFF023E8A),
-    backgroundColor: Color(0xFF03045E),
-    userTextColor: Colors.white,
-    assistantTextColor: Color(0xEBFFFFFF),
-    accentColor: Color(0xFF00B4D8),
-  );
+  static ChatBubbleTheme get defaultTheme =>
+      ChatBubbleTheme.fromPalette(NovaPalette.defaultTheme);
+  static ChatBubbleTheme get hacker =>
+      ChatBubbleTheme.fromPalette(NovaPalette.hacker);
+  static ChatBubbleTheme get monokai =>
+      ChatBubbleTheme.fromPalette(NovaPalette.monokai);
+  static ChatBubbleTheme get dracula =>
+      ChatBubbleTheme.fromPalette(NovaPalette.dracula);
+  static ChatBubbleTheme get ocean =>
+      ChatBubbleTheme.fromPalette(NovaPalette.ocean);
+  static ChatBubbleTheme get forest =>
+      ChatBubbleTheme.fromPalette(NovaPalette.forest);
+  static ChatBubbleTheme get neon =>
+      ChatBubbleTheme.fromPalette(NovaPalette.neon);
 
-  static const forest = ChatBubbleTheme(
-    name: 'Forest',
-    type: ChatBubbleThemeType.forest,
-    userBubbleColor: Color(0xFF2D6A4F),
-    assistantBubbleColor: Color(0xFF1B4332),
-    backgroundColor: Color(0xFF081C15),
-    userTextColor: Colors.white,
-    assistantTextColor: Color(0xEBFFFFFF),
-    accentColor: Color(0xFF52B788),
-  );
-
-  static const neon = ChatBubbleTheme(
-    name: 'Neon',
-    type: ChatBubbleThemeType.neon,
-    userBubbleColor: Color(0xFFFF006E),
-    assistantBubbleColor: Color(0xFF1A1A2E),
-    backgroundColor: Color(0xFF0D0D1A),
-    userTextColor: Colors.white,
-    assistantTextColor: Color(0xEBFFFFFF),
-    accentColor: Color(0xFF8338EC),
-  );
-
-  static const values = [defaultTheme, ocean, forest, neon];
+  static List<ChatBubbleTheme> get values => NovaPalette.values
+      .map(ChatBubbleTheme.fromPalette)
+      .toList(growable: false);
 
   static ChatBubbleTheme fromType(ChatBubbleThemeType type) {
-    return values.firstWhere((t) => t.type == type, orElse: () => defaultTheme);
+    final paletteId =
+        NovaPalette.parseId(type.name) ?? NovaPaletteId.defaultTheme;
+    return ChatBubbleTheme.fromPalette(NovaPalette.fromId(paletteId));
   }
 }

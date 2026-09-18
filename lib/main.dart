@@ -28,6 +28,7 @@ import 'package:nova_assistant/services/widget_service.dart';
 import 'package:nova_assistant/services/share_intent_service.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
+import 'package:nova_assistant/theme/nova_palettes.dart';
 import 'package:nova_assistant/platform/overlay_service.dart';
 import 'package:nova_assistant/screens/overlay_chat_screen.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
@@ -76,7 +77,15 @@ void main() async {
     await NotificationService.instance.requestPermission();
     await WidgetService.instance.initialize();
 
-    _prefetchModels();
+    // Load inference backend / prefs before UI so Remote LAN is honored
+    // on the first chat turn (prefetch of disk models stays background).
+    try {
+      await ModelOrchestrator.instance.initializeDefaultModel();
+    } catch (e) {
+      debugPrint('Default model init failed: $e');
+    }
+
+    unawaited(_prefetchModels());
   } catch (e) {
     debugPrint('Initialization error: $e');
   }
@@ -118,11 +127,6 @@ Future<void> _prefetchModels() async {
     await ModelOrchestrator.instance.prefetchModels();
   } catch (e) {
     debugPrint('Model prefetch failed: $e');
-  }
-  try {
-    await ModelOrchestrator.instance.initializeDefaultModel();
-  } catch (e) {
-    debugPrint('Default model init failed: $e');
   }
 }
 
@@ -215,6 +219,7 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
   StreamSubscription<String>? _widgetActionSub;
   StreamSubscription<String>? _notificationActionSub;
   StreamSubscription<String>? _shareIntentSub;
+  StreamSubscription<UserPreferences>? _prefsSub;
 
   String? _lastWidgetAction;
   DateTime? _lastWidgetActionTime;
@@ -223,9 +228,7 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
   String? _pendingShareText;
   ThemeModeSetting _themeMode = ThemeModeSetting.system;
   double _fontScale = 1.0;
-
-  late final ThemeData _lightTheme = _buildLightTheme();
-  late final ThemeData _darkTheme = _buildDarkTheme();
+  NovaPalette _palette = NovaPalette.defaultTheme;
 
   @override
   void initState() {
@@ -235,6 +238,27 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     _setupNotificationNavigation();
     _setupShareIntentNavigation();
     _loadThemeMode();
+    _prefsSub = UserPreferencesService.instance.changes.listen((prefs) {
+      if (!mounted) return;
+      setState(() {
+        _themeMode = prefs.themeMode;
+        _fontScale = prefs.fontScale;
+        _palette = NovaPalette.fromId(
+          NovaPalette.parseId(prefs.appPaletteId) ?? NovaPaletteId.defaultTheme,
+        );
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _prefsSub?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _widgetActionSub?.cancel();
+    _notificationActionSub?.cancel();
+    _shareIntentSub?.cancel();
+    _disposeServices();
+    super.dispose();
   }
 
   Future<void> _loadThemeMode() async {
@@ -243,6 +267,9 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
       setState(() {
         _themeMode = prefs.themeMode;
         _fontScale = prefs.fontScale;
+        _palette = NovaPalette.fromId(
+          NovaPalette.parseId(prefs.appPaletteId) ?? NovaPaletteId.defaultTheme,
+        );
       });
     }
   }
@@ -252,79 +279,6 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     ThemeModeSetting.dark => ThemeMode.dark,
     ThemeModeSetting.light => ThemeMode.light,
   };
-
-  ThemeData _buildLightTheme() {
-    final seed = const Color(0xFF6C63FF);
-    return ThemeData(
-      brightness: Brightness.light,
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: seed,
-        brightness: Brightness.light,
-      ),
-      fontFamily: 'Roboto',
-      scaffoldBackgroundColor: const Color(0xFFF7F7FF),
-      appBarTheme: AppBarTheme(
-        backgroundColor: const Color(0xFFF7F7FF),
-        elevation: 0,
-        centerTitle: true,
-        foregroundColor: const Color(0xFF1A1A2E),
-      ),
-      cardTheme: CardThemeData(
-        color: Colors.white,
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
-          borderSide: BorderSide.none,
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 20,
-          vertical: 16,
-        ),
-      ),
-    );
-  }
-
-  ThemeData _buildDarkTheme() {
-    final seed = const Color(0xFF6C63FF);
-    return ThemeData(
-      brightness: Brightness.dark,
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: seed,
-        brightness: Brightness.dark,
-      ),
-      fontFamily: 'Roboto',
-      scaffoldBackgroundColor: const Color(0xFF0D0D1A),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFF0D0D1A),
-        elevation: 0,
-        centerTitle: true,
-      ),
-      cardTheme: CardThemeData(
-        color: const Color(0xFF1A1A2E),
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: const Color(0xFF1A1A2E),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
-          borderSide: BorderSide.none,
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 20,
-          vertical: 16,
-        ),
-      ),
-    );
-  }
 
   void _setupWidgetNavigation() {
     _widgetActionSub = WidgetService.instance.widgetActionStream.listen(
@@ -444,13 +398,6 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
     }
   }
 
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _disposeServices();
-    super.dispose();
-  }
-
   Future<void> _disposeServices() async {
     try {
       await ModelOrchestrator.instance.close();
@@ -515,8 +462,8 @@ class _NovaAppState extends State<NovaApp> with WidgetsBindingObserver {
       child: MaterialApp(
         title: 'Nova',
         debugShowCheckedModeBanner: false,
-        theme: _lightTheme,
-        darkTheme: _darkTheme,
+        theme: _palette.buildLightTheme(),
+        darkTheme: _palette.buildDarkTheme(),
         themeMode: _materialThemeMode(),
         navigatorKey: _navigatorKey,
         home: const AppLoader(),

@@ -18,6 +18,7 @@ class UserPreferences {
   final ThemeModeSetting themeMode;
   final double fontScale;
   final String assistantLaunchMode;
+  final String appPaletteId;
 
   const UserPreferences({
     this.mode = UserMode.expert,
@@ -27,6 +28,7 @@ class UserPreferences {
     this.themeMode = ThemeModeSetting.system,
     this.fontScale = 1.0,
     this.assistantLaunchMode = 'overlay',
+    this.appPaletteId = 'defaultTheme',
   });
 
   UserPreferences copyWith({
@@ -37,6 +39,7 @@ class UserPreferences {
     ThemeModeSetting? themeMode,
     double? fontScale,
     String? assistantLaunchMode,
+    String? appPaletteId,
   }) {
     return UserPreferences(
       mode: mode ?? this.mode,
@@ -48,6 +51,7 @@ class UserPreferences {
       themeMode: themeMode ?? this.themeMode,
       fontScale: fontScale ?? this.fontScale,
       assistantLaunchMode: assistantLaunchMode ?? this.assistantLaunchMode,
+      appPaletteId: appPaletteId ?? this.appPaletteId,
     );
   }
 
@@ -59,6 +63,7 @@ class UserPreferences {
     'themeMode': themeMode.name,
     'fontScale': fontScale,
     'assistantLaunchMode': assistantLaunchMode,
+    'appPaletteId': appPaletteId,
   };
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) =>
@@ -80,5 +85,6 @@ class UserPreferences {
         fontScale: (json['fontScale'] as num?)?.toDouble() ?? 1.0,
         assistantLaunchMode:
             json['assistantLaunchMode'] as String? ?? 'overlay',
+        appPaletteId: json['appPaletteId'] as String? ?? 'defaultTheme',
       );
 }

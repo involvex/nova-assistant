@@ -3,6 +3,8 @@ layout: default
 title: Models
 ---
 
+<link rel="stylesheet" href="{{ '/assets/css/nova-docs.css' | relative_url }}">
+
 # Models
 
 ## Built-in catalog
@@ -76,8 +78,18 @@ chunks + host tokenizer/scheduler), not `flutter_gemma` / LiteRT-LM chat
 Nova ships a separate native LiteRT GPU diffusion pipeline for on-device image
 generation. Ask "generate an image of a sunset over mountains" and Nova will
 run the selected diffusion model (Z-Image-Turbo or FLUX.2-klein) entirely on
-device, then display the result inline in the chat. Diffusion models are
-large (~800 MB – 2.4 GB); download them via Settings → Models.
+device, then display the result inline in the chat.
 
-This feature is **Android-only** in the current build (web and other platforms
-fall back to remote LAN).
+| Model | Approx size | Notes |
+|-------|-------------|-------|
+| Z-Image-Turbo | ~9400 MB | Preferred text-to-image path |
+| FLUX.2-klein-4B | ~9600 MB | Hub graphs use `kc_prep` / `kc_double*` / `kc_single*` / `kv_vae` |
+
+Download or remove them in **Settings → Models → Image generation** (trash icon
+uninstalls and frees disk). Storage breakdown includes diffusion folders.
+
+Weights live under the Flutter documents directory:
+
+`…/app_flutter/diffusion_models/<model-folder>/*.tflite`
+
+This feature is **Android-only** in the current build.

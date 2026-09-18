@@ -351,11 +351,38 @@ object DiffusionPipeline {
   }
 
   fun getModelDir(context: Context, modelType: ModelType): File {
-    val docsDir = context.getExternalFilesDir(null) ?: context.filesDir
     val modelDirName = when (modelType) {
       ModelType.Z_IMAGE_TURBO -> ImageGenerationModels.MODEL_Z_IMAGE_TURBO
       ModelType.FLUX_2_KLEIN -> ImageGenerationModels.MODEL_FLUX_2_KLEIN
     }
-    return File(File(docsDir, "diffusion_models"), modelDirName)
+    return resolveDiffusionModelDir(context, modelDirName)
+  }
+
+  /**
+   * Flutter path_provider documents dir is `app_flutter/` under filesDir.
+   * Prefer that (where Dart downloads), then fall back to external files.
+   */
+  fun resolveDiffusionModelDir(context: Context, modelDirName: String): File {
+    val candidates = listOfNotNull(
+      File(File(context.getDir("app_flutter", Context.MODE_PRIVATE), "diffusion_models"), modelDirName),
+      File(File(context.filesDir, "app_flutter/diffusion_models"), modelDirName),
+      context.getExternalFilesDir(null)?.let {
+        File(File(it, "diffusion_models"), modelDirName)
+      },
+      File(File(context.filesDir, "diffusion_models"), modelDirName),
+    )
+    return candidates.firstOrNull { dir ->
+      dir.exists() && dir.isDirectory &&
+        dir.listFiles()?.any { it.isFile && it.extension.equals("tflite", ignoreCase = true) } == true
+    } ?: candidates.first()
+  }
+
+  fun diffusionRootCandidates(context: Context): List<File> {
+    return listOfNotNull(
+      File(context.getDir("app_flutter", Context.MODE_PRIVATE), "diffusion_models"),
+      File(context.filesDir, "app_flutter/diffusion_models"),
+      context.getExternalFilesDir(null)?.let { File(it, "diffusion_models") },
+      File(context.filesDir, "diffusion_models"),
+    )
   }
 }

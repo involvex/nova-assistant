@@ -6,15 +6,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:nova_assistant/models/chat_message.dart';
-import 'package:nova_assistant/models/chat_bubble_theme.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/diffusion_model_info.dart';
 import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/assistant_language.dart';
 import 'package:nova_assistant/models/assistant_role.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
+import 'package:nova_assistant/models/inference_backend.dart';
 import 'package:nova_assistant/platform/assistant_role_service.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/identity_config_screen.dart';
@@ -40,6 +41,8 @@ import 'package:nova_assistant/services/shizuku_service.dart';
 import 'package:nova_assistant/services/diffusion_download_service.dart';
 import 'package:nova_assistant/screens/prompt_presets_screen.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:nova_assistant/theme/nova_palettes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ignore_for_file: use_build_context_synchronously
@@ -84,7 +87,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _fontScale = 1.0;
   StreamSubscription<Map<String, dynamic>>? _assistantRoleSub;
   StreamSubscription<String>? _modelStatusSub;
-  ChatBubbleThemeType _selectedBubbleTheme = ChatBubbleThemeType.defaultTheme;
+  NovaPaletteId _selectedPalette = NovaPaletteId.defaultTheme;
 
   @override
   void initState() {
@@ -117,10 +120,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final loadedThemeMode = await UserPreferencesService.instance
-        .getThemeMode();
-    final loadedFontScale = await UserPreferencesService.instance
-        .getFontScale();
+    final userPrefs = await UserPreferencesService.instance.getPreferences();
+    final loadedThemeMode = userPrefs.themeMode;
+    final loadedFontScale = userPrefs.fontScale;
     if (mounted) {
       setState(() {
         _autoCapture = prefs.getBool('settings_auto_capture') ?? true;
@@ -158,12 +160,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _hfTokenStatus = _resolveHfTokenStatus(prefs.getString('hf_token'));
         _themeMode = loadedThemeMode;
         _fontScale = loadedFontScale;
-        final themeName =
-            prefs.getString('settings_bubble_theme') ?? 'defaultTheme';
-        _selectedBubbleTheme = ChatBubbleThemeType.values.firstWhere(
-          (t) => t.name == themeName,
-          orElse: () => ChatBubbleThemeType.defaultTheme,
-        );
+        final paletteId =
+            NovaPalette.parseId(userPrefs.appPaletteId) ??
+            NovaPalette.parseId(
+              prefs.getString('settings_bubble_theme') ?? 'defaultTheme',
+            ) ??
+            NovaPaletteId.defaultTheme;
+        _selectedPalette = paletteId;
       });
       if (_debugMode) {
         unawaited(_refreshDebugMemory());
@@ -189,6 +192,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
       for (final model in models) {
         modelList.add({'name': model.fileName, 'sizeMB': model.fileSizeMB});
       }
+
+      for (final entry in ModelManager.instance.diffusionModels) {
+        final sizeMB = entry.fileSizeBytes > 0
+            ? entry.fileSizeBytes / (1024 * 1024)
+            : entry.model.approxSizeMB.toDouble();
+        modelList.add({'name': entry.fileName, 'sizeMB': sizeMB});
+      }
+
+      // Disk scan for diffusion dirs not yet in prefs (or size 0).
+      try {
+        final docsDir = await getApplicationDocumentsDirectory();
+        final diffusionRoot = Directory('${docsDir.path}/diffusion_models');
+        if (await diffusionRoot.exists()) {
+          await for (final entity in diffusionRoot.list()) {
+            if (entity is! Directory) continue;
+            final name = p.basename(entity.path);
+            final already = modelList.any((m) => m['name'] == name);
+            if (already) continue;
+            var bytes = 0;
+            await for (final file in entity.list(recursive: true)) {
+              if (file is File) {
+                bytes += await file.length();
+              }
+            }
+            if (bytes > 0) {
+              modelList.add({'name': name, 'sizeMB': bytes / (1024 * 1024)});
+            }
+          }
+        }
+      } catch (_) {
+        // Storage breakdown is best-effort.
+      }
+
       final totalMB = modelList.fold<double>(
         0,
         (sum, m) => sum + (m['sizeMB'] as double),
@@ -526,7 +562,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _actionTile(
         icon: Icons.lan_outlined,
         title: 'Remote LAN inference',
-        subtitle: 'Stream from llama-server / Ollama on your Wi‑Fi',
+        subtitle:
+            ModelOrchestrator.instance.inferenceBackend ==
+                InferenceBackend.remote
+            ? 'Active — streaming from LAN host'
+            : 'Stream from llama-server / Ollama on your Wi‑Fi',
         onTap: () async {
           await Navigator.push(
             context,
@@ -844,20 +884,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _saveFontScale();
         },
       ),
-      _sectionHeader('CHAT BUBBLE THEME'),
-      RadioGroup<ChatBubbleThemeType>(
-        groupValue: _selectedBubbleTheme,
-        onChanged: (type) {
-          if (type == null) return;
-          setState(() => _selectedBubbleTheme = type);
-          _saveBubbleTheme(type);
+      _sectionHeader('Color palette'),
+      RadioGroup<NovaPaletteId>(
+        groupValue: _selectedPalette,
+        onChanged: (id) {
+          if (id == null) return;
+          setState(() => _selectedPalette = id);
+          _savePalette(id);
         },
         child: Column(
-          children: ChatBubbleTheme.values
+          children: NovaPalette.values
               .map(
-                (theme) => RadioListTile<ChatBubbleThemeType>(
+                (palette) => RadioListTile<NovaPaletteId>(
                   title: Text(
-                    theme.name,
+                    palette.name,
                     style: const TextStyle(color: Colors.white),
                   ),
                   subtitle: Container(
@@ -867,14 +907,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       borderRadius: BorderRadius.circular(4),
                       gradient: LinearGradient(
                         colors: [
-                          theme.userBubbleColor,
-                          theme.assistantBubbleColor,
+                          palette.userBubble,
+                          palette.assistantBubble,
+                          palette.accent,
                         ],
                       ),
                     ),
                   ),
-                  value: theme.type,
-                  activeColor: theme.accentColor,
+                  value: palette.id,
+                  activeColor: palette.accent,
                 ),
               )
               .toList(),
@@ -891,9 +932,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await UserPreferencesService.instance.setFontScale(_fontScale);
   }
 
-  Future<void> _saveBubbleTheme(ChatBubbleThemeType type) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('settings_bubble_theme', type.name);
+  Future<void> _savePalette(NovaPaletteId id) async {
+    await UserPreferencesService.instance.setAppPaletteId(id.name);
+  }
+
+  Future<void> _openExternalUrl(String url) async {
+    final uri = Uri.parse(url);
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not open $url')));
+    }
   }
 
   List<Widget> _appDataHubChildren(BuildContext context) {
@@ -1197,10 +1246,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
         subtitle:
             'All processing happens on-device. No data leaves your phone.',
       ),
-      _infoTile(
+      _actionTile(
         icon: Icons.code,
-        title: 'Open Source',
-        subtitle: 'Built with Flutter + flutter_gemma',
+        title: 'Source code',
+        subtitle: 'github.com/involvex/nova-assistant',
+        onTap: () =>
+            _openExternalUrl('https://github.com/involvex/nova-assistant'),
+      ),
+      _actionTile(
+        icon: Icons.menu_book_outlined,
+        title: 'Documentation',
+        subtitle: 'involvex.github.io/nova-assistant',
+        onTap: () =>
+            _openExternalUrl('https://involvex.github.io/nova-assistant/'),
+      ),
+      _actionTile(
+        icon: Icons.favorite_outline,
+        title: 'GitHub Sponsors',
+        subtitle: 'Support development on GitHub',
+        onTap: () => _openExternalUrl('https://github.com/sponsors/involvex'),
+      ),
+      _actionTile(
+        icon: Icons.coffee_outlined,
+        title: 'Buy Me a Coffee',
+        subtitle: 'buymeacoffee.com/involvex',
+        onTap: () => _openExternalUrl('https://buymeacoffee.com/involvex'),
+      ),
+      _actionTile(
+        icon: Icons.payments_outlined,
+        title: 'PayPal',
+        subtitle: 'paypal.me/involvex',
+        onTap: () => _openExternalUrl('https://paypal.me/involvex'),
+      ),
+      _actionTile(
+        icon: Icons.card_giftcard_outlined,
+        title: 'Bing Rewards',
+        subtitle: 'Support via Microsoft Rewards referral',
+        onTap: () => _openExternalUrl(
+          'https://rewards.bing.com/welcome?rh=14525F68&ref=rafsrchae&form=ML2XE3&OCID=ML2XE3&PUBL=RewardsDO&CREA=ML2XE3',
+        ),
       ),
     ];
   }
@@ -1834,7 +1918,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             if (installed)
-              Icon(Icons.check_circle, color: Colors.green[400], size: 20)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle, color: Colors.green[400], size: 20),
+                  IconButton(
+                    tooltip: 'Uninstall',
+                    icon: Icon(
+                      Icons.delete_outline,
+                      color: Colors.red[300],
+                      size: 20,
+                    ),
+                    onPressed: () => _confirmUninstallLlm(context, model),
+                  ),
+                ],
+              )
             else
               Icon(
                 Icons.cloud_download_outlined,
@@ -1918,7 +2016,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             if (installed)
-              Icon(Icons.check_circle, color: Colors.green[400], size: 20)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle, color: Colors.green[400], size: 20),
+                  IconButton(
+                    tooltip: 'Uninstall',
+                    icon: Icon(
+                      Icons.delete_outline,
+                      color: Colors.red[300],
+                      size: 20,
+                    ),
+                    onPressed: () => _confirmUninstallDiffusion(context, model),
+                  ),
+                ],
+              )
             else
               Icon(
                 Icons.cloud_download_outlined,
@@ -1926,6 +2038,97 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 size: 20,
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmUninstallLlm(
+    BuildContext context,
+    NovaModel model,
+  ) async {
+    final fileName = ModelHuggingFaceURLs.fileNameFor(model);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Text(
+          'Remove ${model.displayName}?',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'This deletes ~${model.sizeMB} MB from device storage.',
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red[700]),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final ok = await ModelManager.instance.uninstallModel(fileName);
+    if (!context.mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? '${model.displayName} removed'
+              : 'Failed to remove ${model.displayName}',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmUninstallDiffusion(
+    BuildContext context,
+    DiffusionModel model,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Text(
+          'Remove ${model.displayName}?',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'This deletes ~${model.approxSizeMB} MB of diffusion weights.',
+          style: TextStyle(color: Colors.grey[400]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red[700]),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final ok = await ModelManager.instance.uninstallDiffusionModel(model);
+    if (!context.mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? '${model.displayName} removed'
+              : 'Failed to remove ${model.displayName}',
         ),
       ),
     );

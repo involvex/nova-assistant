@@ -3,6 +3,8 @@ layout: default
 title: Tools and MCP
 ---
 
+<link rel="stylesheet" href="{{ '/assets/css/nova-docs.css' | relative_url }}">
+
 # Tools and MCP
 
 ## Built-in device tools
@@ -42,6 +44,8 @@ Configure servers in **Settings → MCP**. On connect failure, the UI shows a cl
 ## Screenshot / vision
 
 1. Grant MediaProjection when prompted
-2. Tool or UI requests capture → `ScreenshotService.requestCapture()`
-3. Bytes fetched via screenshot MethodChannel
-4. Orchestrator attaches `Message.withImage` when the active engine supports vision
+2. For assistant-mode capture on Android 14+ / some OEMs, see
+   [Assistant mode](assistant-mode.md) (`PROJECT_MEDIA` AppOps)
+3. Tool or UI requests capture → `ScreenshotService.requestCapture()`
+4. Bytes fetched via screenshot MethodChannel
+5. Orchestrator attaches `Message.withImage` when the active engine supports vision

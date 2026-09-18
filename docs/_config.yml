@@ -10,5 +10,7 @@ relative_links:
 markdown: kramdown
 permalink: pretty
 show_downloads: false
+exclude:
+  - superpowers/
 github:
   repository_url: https://github.com/involvex/nova-assistant

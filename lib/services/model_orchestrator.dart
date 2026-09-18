@@ -258,6 +258,92 @@ class ModelOrchestrator {
 
   RemoteInferenceConfig get remoteInferenceConfig => _remoteConfig;
 
+  /// Cached assistant role (loaded at init / settings change).
+  AssistantRole get assistantRole => _cachedRole;
+
+  /// One-shot completion that does not touch the live chat history.
+  ///
+  /// Used for prompt starters / follow-up chips. Returns null when busy,
+  /// when no backend is ready, or on timeout/error.
+  Future<String?> completeOnce({
+    required String prompt,
+    Duration timeout = const Duration(seconds: 18),
+  }) async {
+    if (!_isInitialized || isBusy || prompt.trim().isEmpty) return null;
+
+    if (_inferenceBackend == InferenceBackend.remote) {
+      return _completeOnceRemote(prompt, timeout);
+    }
+
+    return _completeOnceLocal(prompt, timeout);
+  }
+
+  Future<String?> _completeOnceRemote(String prompt, Duration timeout) async {
+    try {
+      final client = RemoteInferenceClient();
+      final buffer = StringBuffer();
+      await for (final chunk
+          in client
+              .streamChat(
+                config: _remoteConfig,
+                messages: [
+                  {
+                    'role': 'system',
+                    'content': 'You reply with JSON only. No markdown fences.',
+                  },
+                  {'role': 'user', 'content': prompt},
+                ],
+                temperature: 0.7,
+              )
+              .timeout(timeout)) {
+        buffer.write(chunk);
+      }
+      final text = buffer.toString().trim();
+
+      return text.isEmpty ? null : text;
+    } catch (e) {
+      debugPrint('[Nova] completeOnce remote failed: $e');
+
+      return null;
+    }
+  }
+
+  Future<String?> _completeOnceLocal(String prompt, Duration timeout) async {
+    final model = _activeModel;
+    if (model == null) return null;
+
+    try {
+      final sideChat = await model.createChat(
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.9,
+        tokenBuffer: 256,
+        supportImage: false,
+        supportsFunctionCalls: false,
+        isThinking: false,
+        tools: const [],
+        systemInstruction:
+            'You reply with JSON only. No markdown fences. Be brief.',
+      );
+      await sideChat.addQuery(Message.text(text: prompt, isUser: true));
+      final buffer = StringBuffer();
+      await for (final event in sideChat.generateChatResponseAsync().timeout(
+        timeout,
+      )) {
+        if (event is TextResponse) {
+          buffer.write(event.token);
+        }
+      }
+      final text = buffer.toString().trim();
+
+      return text.isEmpty ? null : text;
+    } catch (e) {
+      debugPrint('[Nova] completeOnce local failed: $e');
+
+      return null;
+    }
+  }
+
   void setKeepModelWarm(bool enabled) {
     _keepModelWarm = enabled;
     _resetIdleTimer();

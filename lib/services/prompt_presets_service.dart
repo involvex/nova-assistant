@@ -1,10 +1,28 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:nova_assistant/models/prompt_preset.dart';
+import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/utils/suggestion_json_parser.dart';
+
+/// Context used to rank / generate empty-chat starter chips.
+class PromptStarterContext {
+  final String? roleName;
+  final int hourOfDay;
+  final bool hasImageGen;
+  final String? recentTopic;
+
+  const PromptStarterContext({
+    this.roleName,
+    this.hourOfDay = 12,
+    this.hasImageGen = false,
+    this.recentTopic,
+  });
+}
 
 class PromptPresetsService {
   static PromptPresetsService? _instance;
@@ -120,11 +138,17 @@ class PromptPresetsService {
   }
 
   /// Short starter chips for an empty chat (Summarize / Plan / Debug / Learn).
-  List<({String label, String prompt})> get emptyStateStarters {
-    const order = ['Summarize', 'Plan', 'Debug', 'Learn'];
+  List<({String label, String prompt})> get emptyStateStarters =>
+      contextualEmptyStateStarters(const PromptStarterContext());
+
+  /// Heuristic starters ranked by role, time of day, and capabilities.
+  List<({String label, String prompt})> contextualEmptyStateStarters(
+    PromptStarterContext context,
+  ) {
+    final ranked = _rankedStarterNames(context);
     final byName = <String, PromptPreset>{for (final p in _presets) p.name: p};
     final starters = <({String label, String prompt})>[];
-    for (final name in order) {
+    for (final name in ranked) {
       final preset = byName[name];
       if (preset != null) {
         starters.add((label: name, prompt: preset.prompt));
@@ -132,9 +156,153 @@ class PromptPresetsService {
         final fallback = _starterFallback(name);
         if (fallback != null) starters.add(fallback);
       }
+      if (starters.length >= 4) break;
     }
 
     return starters;
+  }
+
+  /// Instant heuristics, then optionally refresh via LLM when a backend is ready.
+  Future<List<({String label, String prompt})>> resolveEmptyStateStarters(
+    PromptStarterContext context, {
+    bool preferLlm = true,
+  }) async {
+    final fallback = contextualEmptyStateStarters(context);
+    if (!preferLlm) return fallback;
+
+    final generated = await _generateStartersWithLlm(context);
+    if (generated.isEmpty) return fallback;
+
+    return generated;
+  }
+
+  /// Ask the model for reusable prompt presets about [topic], then save them.
+  Future<List<PromptPreset>> generateAndSavePresets({
+    required String topic,
+    String? roleName,
+  }) async {
+    final drafts = await generatePresetDrafts(topic: topic, roleName: roleName);
+    final created = <PromptPreset>[];
+    for (final draft in drafts) {
+      created.add(
+        await createPreset(
+          name: draft.name,
+          prompt: draft.prompt,
+          description: draft.description,
+          category: draft.category ?? 'Generated',
+        ),
+      );
+    }
+
+    return created;
+  }
+
+  /// LLM drafts only (does not persist). Empty list on failure.
+  Future<
+    List<({String name, String prompt, String? description, String? category})>
+  >
+  generatePresetDrafts({required String topic, String? roleName}) async {
+    final trimmed = topic.trim();
+    if (trimmed.isEmpty) return const [];
+
+    final role = roleName ?? ModelOrchestrator.instance.assistantRole.name;
+    final prompt =
+        'Generate 4 reusable prompt presets for an on-device AI assistant.\n'
+        'Assistant role: $role\n'
+        'Topic or goal: $trimmed\n'
+        'Return ONLY a JSON array of objects with keys: '
+        'name (short), prompt (ready-to-use template, may end with colon or '
+        'newline for user input), description (one sentence), category '
+        '(Coding|Writing|Productivity|Learning|Creative|Generated).\n'
+        'Make prompts actionable and specific to the topic.';
+
+    final raw = await ModelOrchestrator.instance.completeOnce(prompt: prompt);
+    if (raw == null || raw.isEmpty) return const [];
+
+    return SuggestionJsonParser.parsePresetDrafts(raw, max: 5);
+  }
+
+  Future<List<({String label, String prompt})>> _generateStartersWithLlm(
+    PromptStarterContext context,
+  ) async {
+    final role =
+        context.roleName ?? ModelOrchestrator.instance.assistantRole.name;
+    final hour = context.hourOfDay;
+    final timeHint = hour < 12
+        ? 'morning'
+        : hour < 17
+        ? 'afternoon'
+        : 'evening';
+    final extras = <String>[
+      if (context.hasImageGen) 'image generation is available',
+      if (context.recentTopic != null && context.recentTopic!.isNotEmpty)
+        'recent interest: ${context.recentTopic}',
+    ].join('; ');
+
+    final prompt =
+        'Suggest 4 short chat starter chips for an empty conversation.\n'
+        'Assistant role: $role\n'
+        'Time of day: $timeHint\n'
+        '${extras.isEmpty ? '' : 'Context: $extras\n'}'
+        'Return ONLY a JSON array of objects: '
+        '{"label":"max 18 chars","prompt":"full prompt to put in the composer"}.\n'
+        'Labels must be distinct. Prompts should invite the user to continue '
+        '(often end with a colon or blank for them to fill in).';
+
+    try {
+      final raw = await ModelOrchestrator.instance.completeOnce(prompt: prompt);
+      if (raw == null || raw.isEmpty) return const [];
+      final parsed = SuggestionJsonParser.parseLabeledPrompts(raw, max: 4);
+      if (parsed.length < 2) return const [];
+
+      return parsed;
+    } catch (e) {
+      debugPrint('PromptPresetsService LLM starters failed: $e');
+
+      return const [];
+    }
+  }
+
+  List<String> _rankedStarterNames(PromptStarterContext context) {
+    final role = (context.roleName ?? '').toLowerCase();
+    final hour = context.hourOfDay;
+    final names = <String>[];
+
+    if (role.contains('coder') || role.contains('code')) {
+      names.addAll(['Debug', 'Explain Code', 'Write Unit Test', 'Plan']);
+    } else if (role.contains('creative')) {
+      names.addAll([
+        'Brainstorm Ideas',
+        'Improve Writing',
+        'Learn',
+        'Summarize',
+      ]);
+    } else if (role.contains('student')) {
+      names.addAll(['Learn', 'Summarize', 'Plan', 'Explain Code']);
+    } else if (role.contains('analyst')) {
+      names.addAll(['Summarize', 'Plan', 'Debug', 'Learn']);
+    } else {
+      names.addAll(['Summarize', 'Plan', 'Debug', 'Learn']);
+    }
+
+    if (hour >= 5 && hour < 10) {
+      names.insert(0, 'Plan');
+    } else if (hour >= 21 || hour < 5) {
+      names.insert(0, 'Summarize');
+    }
+
+    if (context.hasImageGen) {
+      names.insert(0, 'Generate Image');
+    }
+
+    // Deduplicate preserving order
+    final seen = <String>{};
+    final ordered = <String>[];
+    for (final name in names) {
+      if (seen.add(name)) ordered.add(name);
+    }
+
+    return ordered;
   }
 
   static ({String label, String prompt})? _starterFallback(String name) {
@@ -162,6 +330,34 @@ class PromptPresetsService {
         prompt:
             'Teach me about the following topic like a patient tutor. '
             'Use simple explanations and a short quiz at the end:\n\n',
+      ),
+      'Explain Code' => (
+        label: 'Explain Code',
+        prompt:
+            'Explain the following code in detail, including what each '
+            'part does and why it works:\n\n',
+      ),
+      'Write Unit Test' => (
+        label: 'Unit Test',
+        prompt:
+            'Write comprehensive unit tests for the following code, '
+            'covering edge cases and error scenarios:\n\n',
+      ),
+      'Improve Writing' => (
+        label: 'Improve Writing',
+        prompt:
+            'Improve the following text for clarity, grammar, and style '
+            'while maintaining the original meaning:\n\n',
+      ),
+      'Brainstorm Ideas' => (
+        label: 'Brainstorm',
+        prompt:
+            'Help me brainstorm creative ideas for the following topic '
+            'or problem:\n\n',
+      ),
+      'Generate Image' => (
+        label: 'Generate Image',
+        prompt: 'Generate an image of: ',
       ),
       _ => null,
     };

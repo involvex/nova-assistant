@@ -1,6 +1,7 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
+
+import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/utils/suggestion_json_parser.dart';
 
 /// Generates contextual follow-up question chips for the chat input bar.
 class FollowUpSuggestionService {
@@ -16,29 +17,8 @@ class FollowUpSuggestionService {
   ];
 
   /// Parse model JSON output into up to 3 suggestion strings.
-  static List<String> parseSuggestions(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) return [];
-
-    try {
-      final start = trimmed.indexOf('[');
-      final end = trimmed.lastIndexOf(']');
-      if (start != -1 && end > start) {
-        final decoded = jsonDecode(trimmed.substring(start, end + 1));
-        if (decoded is List) {
-          return decoded
-              .map((e) => e.toString().trim())
-              .where((s) => s.isNotEmpty)
-              .take(3)
-              .toList();
-        }
-      }
-    } catch (e) {
-      debugPrint('FollowUpSuggestionService.parseSuggestions: $e');
-    }
-
-    return [];
-  }
+  static List<String> parseSuggestions(String raw) =>
+      SuggestionJsonParser.parseStringList(raw, max: 3);
 
   Future<List<String>> suggest({
     String? lastUserMessage,
@@ -53,6 +33,14 @@ class FollowUpSuggestionService {
 
       final user = lastUserMessage ?? '';
       final assistant = lastAssistantMessage ?? '';
+
+      final llm = await _suggestWithLlm(
+        user: user,
+        assistant: assistant,
+        different: different,
+      );
+      if (llm.isNotEmpty) return llm;
+
       final heuristic = _heuristicSuggestions(
         user: user,
         assistant: assistant,
@@ -65,6 +53,46 @@ class FollowUpSuggestionService {
       debugPrint('FollowUpSuggestionService.suggest error: $e');
       return List<String>.from(starterSuggestions);
     }
+  }
+
+  Future<List<String>> _suggestWithLlm({
+    required String user,
+    required String assistant,
+    required bool different,
+  }) async {
+    final clippedUser = _clip(user, 400);
+    final clippedAssistant = _clip(assistant, 600);
+    final diversity = different
+        ? 'Suggest different angles than obvious follow-ups.'
+        : 'Keep suggestions natural next steps.';
+    final prompt =
+        'Given this chat turn, suggest 3 short follow-up messages the user '
+        'might tap to send next.\n'
+        'User: $clippedUser\n'
+        'Assistant: $clippedAssistant\n'
+        '$diversity\n'
+        'Return ONLY a JSON array of 3 short strings (max ~60 chars each). '
+        'No numbering.';
+
+    try {
+      final raw = await ModelOrchestrator.instance.completeOnce(prompt: prompt);
+      if (raw == null || raw.isEmpty) return const [];
+      final parsed = parseSuggestions(raw);
+      if (parsed.length < 2) return const [];
+
+      return parsed;
+    } catch (e) {
+      debugPrint('FollowUpSuggestionService LLM failed: $e');
+
+      return const [];
+    }
+  }
+
+  static String _clip(String text, int max) {
+    final trimmed = text.trim();
+    if (trimmed.length <= max) return trimmed;
+
+    return trimmed.substring(0, max);
   }
 
   List<String> _heuristicSuggestions({

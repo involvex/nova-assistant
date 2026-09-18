@@ -9,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:nova_assistant/models/attached_data.dart';
 import 'package:nova_assistant/models/chat_message.dart';
 import 'package:nova_assistant/models/chat_bubble_theme.dart';
+import 'package:nova_assistant/models/diffusion_model_info.dart';
 import 'package:nova_assistant/theme/nova_palettes.dart';
 import 'package:nova_assistant/models/conversation.dart';
 import 'package:nova_assistant/models/model_info.dart';
@@ -94,6 +95,9 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _isLoadingSuggestions = false;
   bool _suggestionReroll = false;
   int _suggestionRequestId = 0;
+  List<({String label, String prompt})> _promptStarters =
+      PromptPresetsService.instance.emptyStateStarters;
+  int _starterRequestId = 0;
   bool _memoryWarningShown = false;
   bool _debugMode = false;
   int? _debugMemoryMb;
@@ -145,6 +149,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     _requestPermissions();
     _listenToModelStatus();
     _checkModelAvailability();
+    unawaited(_refreshPromptStarters());
     _historyClearedSub = ModelOrchestrator.instance.historyClearedStream.listen(
       (_) {
         if (mounted) {
@@ -154,6 +159,7 @@ class _AssistantScreenState extends State<AssistantScreen>
             _lastContextBudgetWarnPercent = 0;
             _invalidateHistoryTokenEstimate();
           });
+          unawaited(_refreshPromptStarters());
         }
       },
     );
@@ -759,6 +765,29 @@ class _AssistantScreenState extends State<AssistantScreen>
       _followUpSuggestions = [];
       _isLoadingSuggestions = false;
     });
+  }
+
+  Future<void> _refreshPromptStarters() async {
+    final requestId = ++_starterRequestId;
+    final hasImageGen = DiffusionModel.values.any(
+      ModelManager.instance.isDiffusionModelInstalled,
+    );
+    final context = PromptStarterContext(
+      roleName: ModelOrchestrator.instance.assistantRole.name,
+      hourOfDay: DateTime.now().hour,
+      hasImageGen: hasImageGen,
+    );
+    final heuristics = PromptPresetsService.instance
+        .contextualEmptyStateStarters(context);
+    if (mounted && requestId == _starterRequestId) {
+      setState(() => _promptStarters = heuristics);
+    }
+
+    final resolved = await PromptPresetsService.instance
+        .resolveEmptyStateStarters(context);
+    if (!mounted || requestId != _starterRequestId) return;
+    if (resolved.isEmpty) return;
+    setState(() => _promptStarters = resolved);
   }
 
   void _filterMessages(String query) {
@@ -2216,7 +2245,7 @@ class _AssistantScreenState extends State<AssistantScreen>
                     onBranchFromHere: (index) =>
                         unawaited(_branchFromMessage(index)),
                     ttsEnabled: TtsService.instance.isEnabled,
-                    starters: PromptPresetsService.instance.emptyStateStarters,
+                    starters: _promptStarters,
                     onFillComposer: _fillComposer,
                     onApplySuggestion: _applySuggestion,
                     formatTimestamp: _formatTimestamp,

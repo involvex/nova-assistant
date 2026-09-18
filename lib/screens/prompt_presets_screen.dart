@@ -25,6 +25,7 @@ class _PromptPresetsScreenState extends State<PromptPresetsScreen> {
   String? _selectedCategory;
   final _searchController = TextEditingController();
   StreamSubscription<List<PromptPreset>>? _presetsSub;
+  bool _isGenerating = false;
 
   @override
   void initState() {
@@ -64,6 +65,21 @@ class _PromptPresetsScreenState extends State<PromptPresetsScreen> {
       appBar: AppBar(
         title: Text(widget.selectMode ? 'Select Prompt' : 'Prompt Presets'),
         backgroundColor: const Color(0xFF1A1A2E),
+        actions: widget.selectMode
+            ? null
+            : [
+                IconButton(
+                  tooltip: 'Generate with AI',
+                  onPressed: _isGenerating ? null : _showGenerateDialog,
+                  icon: _isGenerating
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.auto_awesome),
+                ),
+              ],
       ),
       body: Column(
         children: [
@@ -324,6 +340,118 @@ class _PromptPresetsScreenState extends State<PromptPresetsScreen> {
         ),
       ),
     );
+  }
+
+  void _showGenerateDialog() {
+    final topicController = TextEditingController();
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E2E),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: 24,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Generate presets with AI',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Describe a topic. Nova drafts reusable presets '
+              '(needs a loaded model or remote LAN backend).',
+              style: TextStyle(color: Colors.grey[500], fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: topicController,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'e.g. Flutter debugging, meal planning…',
+                hintStyle: TextStyle(color: Colors.grey[600], fontSize: 13),
+                filled: true,
+                fillColor: const Color(0xFF0D0D1A),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.grey[500]),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final topic = topicController.text.trim();
+                    if (topic.isEmpty) return;
+                    Navigator.pop(ctx);
+                    await _runGenerate(topic);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF6C63FF),
+                  ),
+                  icon: const Icon(Icons.auto_awesome, size: 18),
+                  label: const Text('Generate'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _runGenerate(String topic) async {
+    setState(() => _isGenerating = true);
+    try {
+      final created = await _presetsService.generateAndSavePresets(
+        topic: topic,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            created.isEmpty
+                ? 'Could not generate presets. Load a model or enable Remote LAN.'
+                : 'Added ${created.length} AI-generated preset'
+                      '${created.length == 1 ? '' : 's'}.',
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
+    }
   }
 
   void _showEditDialog(PromptPreset preset) {

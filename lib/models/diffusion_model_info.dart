@@ -37,12 +37,12 @@ enum DiffusionModel {
   String get runnerNotReadyMessage => switch (this) {
     DiffusionModel.zImageTurbo =>
       'Z-Image Turbo weights are installed, but Nova cannot run them yet. '
-      'The LiteRT graphs need a host loop (Qwen2 BPE + embed_tokens → '
-      'qwen_enc → embx/refx + embc/refc → DiT chunks → VAE). '
-      'Chat still works; image gen for this model is not available.',
+          'The LiteRT graphs need a host loop (Qwen2 BPE + embed_tokens → '
+          'qwen_enc → embx/refx + embc/refc → DiT chunks → VAE). '
+          'Chat still works; image gen for this model is not available.',
     DiffusionModel.flux2Klein =>
       'FLUX.2-klein weights are installed, but Nova cannot run them yet. '
-      'The on-device diffusion runner is not wired for this LiteRT graph set.',
+          'The on-device diffusion runner is not wired for this LiteRT graph set.',
   };
 }
 

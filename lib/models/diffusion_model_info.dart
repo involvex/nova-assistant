@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 enum DiffusionModel {
   zImageTurbo(
     'Z-Image-Turbo-LiteRT',
@@ -23,6 +25,25 @@ enum DiffusionModel {
     this.repoId,
     this.approxSizeMB,
   );
+
+  /// Weights can install while the native host loop is still unfinished.
+  /// Flip via [debugForceInferenceReady] in widget tests only.
+  @visibleForTesting
+  static bool debugForceInferenceReady = false;
+
+  bool get inferenceReady => debugForceInferenceReady;
+
+  /// User-facing reason when [inferenceReady] is false.
+  String get runnerNotReadyMessage => switch (this) {
+    DiffusionModel.zImageTurbo =>
+      'Z-Image Turbo weights are installed, but Nova cannot run them yet. '
+      'The LiteRT graphs need a host loop (Qwen2 BPE + embed_tokens → '
+      'qwen_enc → embx/refx + embc/refc → DiT chunks → VAE). '
+      'Chat still works; image gen for this model is not available.',
+    DiffusionModel.flux2Klein =>
+      'FLUX.2-klein weights are installed, but Nova cannot run them yet. '
+      'The on-device diffusion runner is not wired for this LiteRT graph set.',
+  };
 }
 
 enum DiffusionModelFileType {

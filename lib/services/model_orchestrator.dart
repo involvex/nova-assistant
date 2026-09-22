@@ -278,6 +278,50 @@ class ModelOrchestrator {
     return _completeOnceLocal(prompt, timeout);
   }
 
+  /// Creates a chat, retrying without tools if LiteRT returns null
+  /// ("Failed to create conversation") — common after a conflicting side
+  /// chat or with heavy tool schemas on custom Gemma 4 builds.
+  Future<InferenceChat?> _createChatSafe(
+    InferenceModel inferenceModel, {
+    required String systemInstruction,
+    List<Tool> tools = const [],
+    bool supportImage = false,
+    bool isThinking = false,
+  }) async {
+    Future<InferenceChat?> attempt(List<Tool> chatTools) async {
+      try {
+        return await inferenceModel.createChat(
+          systemInstruction: systemInstruction,
+          tools: chatTools,
+          supportImage: supportImage,
+          supportsFunctionCalls: chatTools.isNotEmpty,
+          isThinking: isThinking,
+        );
+      } catch (e) {
+        debugPrint('[Nova] createChat failed (tools=${chatTools.length}): $e');
+
+        return null;
+      }
+    }
+
+    var chat = await attempt(tools);
+    if (chat != null) return chat;
+
+    if (tools.isNotEmpty) {
+      debugPrint('[Nova] createChat retry without tools');
+      chat = await attempt(const []);
+      if (chat != null) return chat;
+    }
+
+    try {
+      await resetInferenceSession();
+    } catch (e) {
+      debugPrint('[Nova] reset before createChat retry failed: $e');
+    }
+
+    return attempt(tools.isEmpty ? const [] : tools);
+  }
+
   Future<String?> _completeOnceRemote(String prompt, Duration timeout) async {
     try {
       final client = RemoteInferenceClient();
@@ -309,11 +353,16 @@ class ModelOrchestrator {
   }
 
   Future<String?> _completeOnceLocal(String prompt, Duration timeout) async {
-    final model = _activeModel;
-    if (model == null) return null;
+    // A second createChat() on the active LiteRT engine orphans / conflicts
+    // with the live chat and surfaces as "Failed to create conversation"
+    // on the next user turn (especially after switching custom models).
+    // Local one-shots are therefore disabled; remote completeOnce still works.
+    if (_activeChat != null || _activeModel == null) {
+      return null;
+    }
 
     try {
-      final sideChat = await model.createChat(
+      final sideChat = await _activeModel!.createChat(
         temperature: 0.7,
         topK: 40,
         topP: 0.9,
@@ -325,18 +374,27 @@ class ModelOrchestrator {
         systemInstruction:
             'You reply with JSON only. No markdown fences. Be brief.',
       );
-      await sideChat.addQuery(Message.text(text: prompt, isUser: true));
-      final buffer = StringBuffer();
-      await for (final event in sideChat.generateChatResponseAsync().timeout(
-        timeout,
-      )) {
-        if (event is TextResponse) {
-          buffer.write(event.token);
+      try {
+        await sideChat.addQuery(Message.text(text: prompt, isUser: true));
+        final buffer = StringBuffer();
+        await for (final event in sideChat.generateChatResponseAsync().timeout(
+          timeout,
+        )) {
+          if (event is TextResponse) {
+            buffer.write(event.token);
+          }
         }
-      }
-      final text = buffer.toString().trim();
+        final text = buffer.toString().trim();
 
-      return text.isEmpty ? null : text;
+        return text.isEmpty ? null : text;
+      } finally {
+        try {
+          await sideChat.close();
+        } catch (_) {}
+        // createChat assigned InferenceModel.chat — clear so the next
+        // processMessage createChat isn't fighting a closed handle.
+        _activeChat = null;
+      }
     } catch (e) {
       debugPrint('[Nova] completeOnce local failed: $e');
 
@@ -1472,7 +1530,10 @@ class ModelOrchestrator {
                     'Nova will not silently switch to SmolLM.',
         );
       }
-      final fallback = await _pickRamFallback(modelToLoad);
+      final fallback = await _pickRamFallback(
+        modelToLoad,
+        needsVision: screenshot != null && screenshot.isNotEmpty,
+      );
       if (fallback != null) {
         // #region agent log
         _debugLog(
@@ -1767,9 +1828,16 @@ class ModelOrchestrator {
   /// Pick a smaller model that fits free RAM.
   ///
   /// Prefers Gemma 3 1B when it fits (better quality / tools), then SmolLM.
+  /// For vision turns, FastVLM is the only useful fallback (text models cannot
+  /// see the screenshot).
   /// Prefers models already on disk (no download) within that order.
-  Future<NovaModel?> _pickRamFallback(NovaModel blocked) async {
-    const candidates = <NovaModel>[NovaModel.gemma3_1b, NovaModel.smollm];
+  Future<NovaModel?> _pickRamFallback(
+    NovaModel blocked, {
+    bool needsVision = false,
+  }) async {
+    final candidates = needsVision
+        ? const <NovaModel>[NovaModel.fastvlm]
+        : const <NovaModel>[NovaModel.gemma3_1b, NovaModel.smollm];
     NovaModel? firstDownloadable;
 
     for (final candidate in candidates) {
@@ -1806,15 +1874,13 @@ class ModelOrchestrator {
 
     if (_preferredCustomModelOverride != null) {
       final custom = _preferredCustomModelOverride!;
-      final availMemMb = await MemoryDiagnosticsService.instance
-          .readAvailableMemMb();
+      final mem = MemoryDiagnosticsService.instance;
+      final availMemMb = await mem.readAvailableMemMb();
+      final totalMemMb = await mem.readTotalMemMb();
       final modelSizeMb = custom.fileSizeMB;
       if (availMemMb != null && modelSizeMb > 0) {
-        final minFree = modelSizeMb >= 2000
-            ? 1800
-            : modelSizeMb >= 400
-            ? 700
-            : null;
+        final minFree = PlatformAdaptationService.instance
+            .minFreeRamMbForFileSizeMb(modelSizeMb, totalMemMb: totalMemMb);
         if (minFree != null && availMemMb < minFree) {
           _preferredCustomModelOverride = null;
           _modelOverrideDirty = false;
@@ -1856,20 +1922,26 @@ class ModelOrchestrator {
     final customModel = _preferredCustomModelOverride!;
     _statusController.add('Using custom model: ${customModel.displayName}');
 
-    final availMemMb = await MemoryDiagnosticsService.instance
-        .readAvailableMemMb();
+    // Warm primary (e.g. Gemma 4 E2B) often leaves only ~1 GB MemAvailable on
+    // a 12 GB phone even though the process itself accounts for most of the
+    // "used" RAM. Unload first, then re-measure before hard-blocking.
+    _statusController.add('Freeing memory for custom model...');
+    await releaseIdleResources(force: true);
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+
+    final mem = MemoryDiagnosticsService.instance;
+    final availMemMb = await mem.readAvailableMemMb();
+    final totalMemMb = await mem.readTotalMemMb();
     final modelSizeMb = customModel.fileSizeMB;
     if (availMemMb != null && modelSizeMb > 0) {
-      final minFree = modelSizeMb >= 2000
-          ? 1800
-          : modelSizeMb >= 400
-          ? 700
-          : null;
+      final minFree = PlatformAdaptationService.instance
+          .minFreeRamMbForFileSizeMb(modelSizeMb, totalMemMb: totalMemMb);
       if (minFree != null && availMemMb < minFree) {
+        final totalPart = totalMemMb != null ? ' of ~$totalMemMb MB total' : '';
         yield InferenceResult(
           text:
               'Not enough free RAM to load ${customModel.displayName} '
-              '($availMemMb MB free, need ~$minFree MB free). '
+              '($availMemMb MB free$totalPart, need ~$minFree MB free). '
               'Close background apps or switch to a smaller model.',
           model: selector.primaryHeavy,
           isStreaming: false,
@@ -2064,11 +2136,26 @@ class ModelOrchestrator {
       );
     }
 
-    final chat = await inferenceModel.createChat(
+    final chat = await _createChatSafe(
+      inferenceModel,
       systemInstruction: buffer.toString(),
       tools: tools,
       supportImage: customModel.hasVision && _activeModelSupportsImage,
+      isThinking: customModel.hasThinking && thinkingMode,
     );
+    if (chat == null) {
+      yield InferenceResult(
+        text:
+            'Failed to start a chat with ${customModel.displayName}. '
+            'Try Settings → Reset inference, then send again. '
+            'If it keeps failing, the model file may be incompatible.',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+      );
+
+      return;
+    }
+    _activeChat = chat;
 
     final queryError = _validateQueryLength(
       query: query,
@@ -2528,6 +2615,39 @@ class ModelOrchestrator {
     return selected;
   }
 
+  /// Prefer FastVLM for screen/vision turns when free RAM is tight so warm
+  /// Gemma 4 + MediaProjection do not LMK the process.
+  Future<NovaModel> _resolveVisionModelForRam(NovaModel preferred) async {
+    if (!preferred.hasVision && preferred != NovaModel.fastvlm) {
+      return preferred;
+    }
+
+    final mem = MemoryDiagnosticsService.instance;
+    final avail = await mem.readAvailableMemMb();
+    final total = await mem.readTotalMemMb();
+    final pss = mem.lastPssMb;
+
+    final tight =
+        (avail != null && avail < 2200) ||
+        (pss != null && pss >= 2800) ||
+        (total != null && total < 6656);
+
+    if (!tight) return preferred;
+
+    final fastFile = ModelHuggingFaceURLs.fileNameFor(NovaModel.fastvlm);
+    final fastOnDisk = await ModelManager.instance.isInstalledOnDisk(fastFile);
+    if (!fastOnDisk) return preferred;
+
+    if (preferred != NovaModel.fastvlm) {
+      _statusController.add(
+        'Low free RAM — using FastVLM for this screen capture '
+        '(${avail ?? '?'} MB free)',
+      );
+    }
+
+    return NovaModel.fastvlm;
+  }
+
   /// First installed vision-capable catalog model, or null.
   Future<NovaModel?> _installedVisionModel() async {
     for (final candidate in const [NovaModel.fastvlm, NovaModel.gemma4E2b]) {
@@ -2781,6 +2901,11 @@ class ModelOrchestrator {
             '[DEBUG] Force Primary Model: ${model.displayName}',
           );
         }
+        // Screen/vision turns: do not keep forcing Gemma 4 when FastVLM fits.
+        if ((screenshot != null || hasImageAttachments) && !model.hasVision) {
+          final vision = await _installedVisionModel();
+          if (vision != null) model = vision;
+        }
       } else {
         model = _selectModel(
           query: query,
@@ -2811,6 +2936,23 @@ class ModelOrchestrator {
           );
 
           return;
+        }
+      }
+
+      if (needsVision) {
+        final before = model;
+        model = await _resolveVisionModelForRam(model);
+        if (model != before) visionForced = true;
+
+        // Free warm Gemma / projection leftovers before vision decode+infer.
+        if (_activeModelType != null && _activeModelType != model) {
+          _statusController.add('Freeing memory for vision...');
+          await releaseIdleResources(force: true);
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          try {
+            const channel = MethodChannel('dev.nova.assistant/diagnostics');
+            await channel.invokeMethod<bool>('requestGc');
+          } catch (_) {}
         }
       }
       // #region agent log
@@ -3180,8 +3322,11 @@ class ModelOrchestrator {
       Object? streamError;
       var safetyStopped = false;
       final maxOutputChars = GenerationSafety.maxOutputCharsFor(model);
+      // Cap tool rounds tighter when an image is already in play — models
+      // otherwise burn the full 5 rounds on take_screenshot / get_time loops.
+      final maxToolRounds = imageAlreadyAvailable ? 3 : _maxToolRounds;
       try {
-        while (hasPendingToolCalls && toolRounds < _maxToolRounds) {
+        while (hasPendingToolCalls && toolRounds < maxToolRounds) {
           hasPendingToolCalls = false;
           toolRounds++;
 
@@ -3272,12 +3417,16 @@ class ModelOrchestrator {
                           'success': true,
                           'message':
                               'An image is already available in this turn. '
-                              'Describe that image. Do not call take_screenshot again.',
+                              'Describe that image now in plain text. '
+                              'Do not call any tools.',
                         },
                       ),
                     );
                     executedToolSignatures.add(signature);
-                    hasPendingToolCalls = true;
+                    // One recovery round only — further tool calls would loop.
+                    hasPendingToolCalls = screenshotToolCallsThisTurn == 0;
+                    screenshotToolCallsThisTurn++;
+                    imageAlreadyAvailable = true;
                     continue;
                   }
 
@@ -3384,12 +3533,15 @@ class ModelOrchestrator {
                       'success': true,
                       'message':
                           'An image is already available in this turn. '
-                          'Describe that image. Do not call take_screenshot again.',
+                          'Describe that image now in plain text. '
+                          'Do not call any tools.',
                     },
                   ),
                 );
                 executedToolSignatures.add(signature);
-                hasPendingToolCalls = true;
+                hasPendingToolCalls = screenshotToolCallsThisTurn == 0;
+                screenshotToolCallsThisTurn++;
+                imageAlreadyAvailable = true;
                 continue;
               }
 
@@ -3506,7 +3658,7 @@ class ModelOrchestrator {
         return;
       }
 
-      if (toolRounds >= _maxToolRounds && hasPendingToolCalls) {
+      if (toolRounds >= maxToolRounds && hasPendingToolCalls) {
         inferenceStopwatch.stop();
         final capped = _sanitizeAssistantText(fullResponse);
         yield InferenceResult(
@@ -3644,11 +3796,11 @@ class ModelOrchestrator {
 
       if (resolvedName == 'generate_image') {
         final prompt = resolvedArgs['prompt'] as String? ?? '';
-        final sizeInt = (resolvedArgs['size'] as int?) ?? 512;
+        final sizeInt = (resolvedArgs['size'] as int?) ?? 256;
         final size = switch (sizeInt) {
-          256 => ImageSize.size256,
-          1024 => ImageSize.size1024,
-          _ => ImageSize.size512,
+          512 => ImageSize.size512,
+          1024 => ImageSize.size512, // clamp — 1024 OOMs with chat model
+          _ => ImageSize.size256,
         };
         final seed = resolvedArgs['seed'] as int?;
         final modelName = resolvedArgs['model'] as String?;
@@ -4195,6 +4347,15 @@ class ModelOrchestrator {
 
     final orch = instance;
     if (orch._activeModel != null) return;
+
+    final mem = MemoryDiagnosticsService.instance;
+    final avail = await mem.readAvailableMemMb();
+    if (avail != null && avail < 2500) {
+      debugPrint(
+        'Pre-warm skipped: only $avail MB free (need ~2500 to avoid LMK)',
+      );
+      return;
+    }
 
     final defaultModel = orch.preferredModelType ?? orch.selector.primaryHeavy;
 

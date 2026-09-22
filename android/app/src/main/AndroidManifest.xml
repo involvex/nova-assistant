@@ -78,11 +78,11 @@
         <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
         <uses-native-library android:name="libcdsprpc.so" android:required="false" />
 
-        <!-- Main Flutter Activity -->
+        <!-- Main Flutter Activity — singleTask so assistant reuses one engine -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard"
             android:windowSoftInputMode="adjustResize">

@@ -37,5 +37,26 @@ void main() {
       expect(frame.image.height, greaterThan(frame.image.width));
       frame.image.dispose();
     });
+
+    test('keeps already-small frames without PNG inflation', () async {
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      canvas.drawColor(const ui.Color(0xFF445566), ui.BlendMode.src);
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(400, 700);
+      final png = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      final input = png!.buffer.asUint8List();
+
+      final out = await VisionImagePrep.prepareForInference(
+        input,
+        maxSide: 768,
+      );
+
+      expect(
+        identical(out, input) || out.lengthInBytes <= input.lengthInBytes,
+        isTrue,
+      );
+    });
   });
 }

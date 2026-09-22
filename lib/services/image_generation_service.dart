@@ -6,6 +6,9 @@ import 'package:nova_assistant/models/adult_mode_policy.dart';
 import 'package:nova_assistant/models/diffusion_model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 
+/// Optional hook to free LLM RAM before diffusion (set from app init).
+typedef ImageGenMemoryHook = Future<void> Function();
+
 class ImageGenerationService {
   static const _channel = MethodChannel('dev.nova.assistant/image_gen');
 
@@ -15,11 +18,17 @@ class ImageGenerationService {
 
   ImageGenerationService._();
 
+  /// Avoids a circular import with [ModelOrchestrator].
+  static ImageGenMemoryHook? beforeGenerateHook;
+
   final _progressController = StreamController<GenProgress>.broadcast();
   Stream<GenProgress> get progressStream => _progressController.stream;
 
   bool _isGenerating = false;
   bool get isGenerating => _isGenerating;
+
+  /// Last native / policy error from [generateImage] (for UI).
+  String? lastError;
 
   /// Channel ID must be the Hub folder name (e.g. `Z-Image-Turbo-LiteRT`),
   /// not the Dart enum name (`zImageTurbo`).
@@ -63,18 +72,39 @@ class ImageGenerationService {
     return null;
   }
 
+  Future<void> _freeLlmMemory() async {
+    final hook = beforeGenerateHook;
+    if (hook == null) return;
+    try {
+      _progressController.add(
+        const GenProgress(
+          stage: 'free_llm',
+          percent: 2,
+          message: 'Freeing chat model memory...',
+        ),
+      );
+      await hook();
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    } catch (e) {
+      debugPrint('ImageGenerationService: LLM release failed: $e');
+    }
+  }
+
   Future<Uint8List?> generateImage(
     String prompt, {
-    ImageSize size = ImageSize.size512,
+    ImageSize size = ImageSize.size256,
     int? seed,
     DiffusionModel? model,
   }) async {
+    lastError = null;
     if (_isGenerating) {
+      lastError = 'An image is already being generated';
       debugPrint('ImageGenerationService: already generating');
       return null;
     }
 
     if (prompt.trim().isEmpty) {
+      lastError = 'Prompt is empty';
       debugPrint('ImageGenerationService: empty prompt');
       return null;
     }
@@ -82,6 +112,7 @@ class ImageGenerationService {
     if (!await AdultModePolicy.isEnabled()) {
       final safe = AdultModePolicy.isPromptSafe(prompt);
       if (!safe) {
+        lastError = 'Prompt blocked by adult mode policy';
         debugPrint(
           'ImageGenerationService: prompt blocked by adult mode policy',
         );
@@ -91,7 +122,16 @@ class ImageGenerationService {
 
     final resolved = await resolveInstalledModel(model);
     if (resolved == null) {
+      lastError = 'No diffusion model installed';
       debugPrint('ImageGenerationService: no diffusion model installed');
+      return null;
+    }
+
+    // Fail before unloading Gemma — Z-Image/FLUX installs are download-only
+    // until the LiteRT host loop ships (avoids "Skipped N frames" jank).
+    if (!resolved.inferenceReady) {
+      lastError = resolved.runnerNotReadyMessage;
+      debugPrint('ImageGenerationService: ${resolved.runnerNotReadyMessage}');
       return null;
     }
 
@@ -99,9 +139,17 @@ class ImageGenerationService {
 
     try {
       _progressController.add(
-        GenProgress(stage: 'start', percent: 0, message: 'Starting...'),
+        const GenProgress(stage: 'start', percent: 0, message: 'Starting...'),
       );
 
+      await _freeLlmMemory();
+
+      // Only resolve the documents path when prefs know the install — avoids
+      // hanging on path_provider in tests / before the plugin is ready.
+      final modelPath =
+          ModelManager.instance.isDiffusionModelInstalled(resolved)
+          ? await ModelManager.instance.findDiffusionModelPath(resolved)
+          : null;
       final result = await _channel.invokeMethod<Uint8List>(
         'generateImage',
         <String, dynamic>{
@@ -109,23 +157,27 @@ class ImageGenerationService {
           'size': size.pixels,
           'seed': seed,
           'model': _channelModelId(resolved),
+          'modelDir': ?modelPath,
         },
       );
 
       return result;
     } on PlatformException catch (e) {
+      lastError = e.message ?? 'Image generation failed';
       debugPrint('ImageGenerationService: PlatformException — ${e.message}');
       return null;
     } on MissingPluginException {
+      lastError = 'Image generation is not available on this platform';
       debugPrint('ImageGenerationService: channel not available');
       return null;
     } catch (e) {
+      lastError = e.toString();
       debugPrint('ImageGenerationService: failed — $e');
       return null;
     } finally {
       _isGenerating = false;
       _progressController.add(
-        GenProgress(stage: 'done', percent: 100, message: 'Done'),
+        const GenProgress(stage: 'done', percent: 100, message: 'Done'),
       );
     }
   }
@@ -146,10 +198,16 @@ class ImageGenerationService {
     }
 
     try {
+      final modelPath =
+          model != null &&
+              ModelManager.instance.isDiffusionModelInstalled(model)
+          ? await ModelManager.instance.findDiffusionModelPath(model)
+          : null;
       final result = await _channel.invokeMethod<bool>(
         'isModelInstalled',
         <String, dynamic>{
           'model': model == null ? null : _channelModelId(model),
+          'modelDir': ?modelPath,
         },
       );
       return result ?? false;
@@ -181,6 +239,13 @@ class ImageGenerationService {
 
   void dispose() {
     _progressController.close();
+  }
+
+  /// Test-only: clear in-flight generation flag on the singleton.
+  @visibleForTesting
+  void resetForTest() {
+    _isGenerating = false;
+    lastError = null;
   }
 }
 

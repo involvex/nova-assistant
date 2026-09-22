@@ -6,6 +6,7 @@ import 'package:flutter_gemma_litertlm/flutter_gemma_litertlm.dart';
 import 'package:flutter_gemma_mediapipe/flutter_gemma_mediapipe.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/image_generation_service.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/onboarding/onboarding_screen.dart';
 import 'package:nova_assistant/screens/chat_history_screen.dart';
@@ -84,6 +85,10 @@ void main() async {
     } catch (e) {
       debugPrint('Default model init failed: $e');
     }
+
+    // Diffusion + Gemma together OOMs; free the chat engine first.
+    ImageGenerationService.beforeGenerateHook = () =>
+        ModelOrchestrator.instance.releaseIdleResources(force: true);
 
     unawaited(_prefetchModels());
   } catch (e) {

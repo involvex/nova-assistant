@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -8,12 +9,14 @@ class VisionImagePrep {
   const VisionImagePrep._();
 
   /// Max longest edge in pixels for model input.
+  /// Matches [ScreenCaptureHelper] capture cap so JPEG frames pass through
+  /// without a PNG re-encode that balloons RAM (67 KB → 367 KB).
   static const defaultMaxSide = 768;
 
   /// Skip re-encode when already small enough (bytes + dimensions).
-  static const _skipIfUnderBytes = 180 * 1024;
+  static const _skipIfUnderBytes = 220 * 1024;
 
-  /// Returns a PNG (or the original bytes if already small).
+  /// Returns image bytes for the model (prefer original JPEG when possible).
   static Future<Uint8List> prepareForInference(
     Uint8List bytes, {
     int maxSide = defaultMaxSide,
@@ -26,10 +29,9 @@ class VisionImagePrep {
       final image = frame.image;
       final w = image.width;
       final h = image.height;
+      final longest = math.max(w, h);
 
-      if (w <= maxSide &&
-          h <= maxSide &&
-          bytes.lengthInBytes <= _skipIfUnderBytes) {
+      if (longest <= maxSide && bytes.lengthInBytes <= _skipIfUnderBytes) {
         image.dispose();
 
         return bytes;
@@ -52,6 +54,19 @@ class VisionImagePrep {
       if (png == null) return bytes;
 
       final out = png.buffer.asUint8List();
+
+      // dart:ui can only re-encode PNG. If that inflates a compact JPEG from
+      // MediaProjection, keep the original when dimensions are close enough.
+      if (out.lengthInBytes > bytes.lengthInBytes &&
+          longest <= (maxSide * 1.2).round()) {
+        debugPrint(
+          'VisionImagePrep: keeping original ${bytes.lengthInBytes}B '
+          '(${w}x$h) — PNG would be ${out.lengthInBytes}B',
+        );
+
+        return bytes;
+      }
+
       debugPrint(
         'VisionImagePrep: ${w}x$h (${bytes.lengthInBytes}B) → '
         '${outW}x$outH (${out.lengthInBytes}B)',

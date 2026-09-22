@@ -313,14 +313,26 @@ class PlatformAdaptationService {
 
   /// Minimum free system RAM (MB) required before a cold load of [model].
   /// Returns null when no hard gate applies (small models / non-Android).
-  int? minFreeRamMbFor(NovaModel model) {
+  ///
+  /// Pass [totalMemMb] when known: on ≥10 GB devices the warm primary model
+  /// often leaves ActivityManager.availMem looking starved (~1 GB) even though
+  /// unloading it reclaimes enough headroom for a large custom load.
+  int? minFreeRamMbFor(NovaModel model, {int? totalMemMb}) {
+    return minFreeRamMbForFileSizeMb(model.sizeMB, totalMemMb: totalMemMb);
+  }
+
+  /// Same tiers as [minFreeRamMbFor], for custom / imported weights by size.
+  int? minFreeRamMbForFileSizeMb(num sizeMb, {int? totalMemMb}) {
     if (kIsWeb) return null;
     if (defaultTargetPlatform != TargetPlatform.android) return null;
 
     // Softened for 6GB devices (POCO F1 etc.): hard-block only when truly
     // starved. Prefer auto-fallback in the orchestrator over refusing chat.
-    if (model.sizeMB >= 2000) return 1800;
-    if (model.sizeMB >= 400) return 700;
+    // On ≥10 GB phones, require less free *before* unload — callers should
+    // release the warm model first, then re-check.
+    final highRam = totalMemMb != null && totalMemMb >= 10240;
+    if (sizeMb >= 2000) return highRam ? 900 : 1800;
+    if (sizeMb >= 400) return highRam ? 450 : 700;
 
     return null;
   }
@@ -360,7 +372,7 @@ class PlatformAdaptationService {
     required int? availMemMb,
     int? totalMemMb,
   }) {
-    final minFree = minFreeRamMbFor(model);
+    final minFree = minFreeRamMbFor(model, totalMemMb: totalMemMb);
     if (minFree == null || availMemMb == null) return null;
     if (availMemMb >= minFree) return null;
 
@@ -375,12 +387,11 @@ class PlatformAdaptationService {
 
   /// Async hard gate using [MemoryDiagnosticsService] free-RAM reading.
   Future<String?> checkCanLoadModel(NovaModel model) async {
-    final minFree = minFreeRamMbFor(model);
-    if (minFree == null) return null;
-
     final mem = MemoryDiagnosticsService.instance;
     final avail = await mem.readAvailableMemMb();
     final total = await mem.readTotalMemMb();
+    final minFree = minFreeRamMbFor(model, totalMemMb: total);
+    if (minFree == null) return null;
 
     return freeRamGateMessage(
       model: model,

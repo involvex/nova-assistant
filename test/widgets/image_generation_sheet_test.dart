@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nova_assistant/models/diffusion_model_info.dart';
+import 'package:nova_assistant/services/image_generation_service.dart';
 import 'package:nova_assistant/widgets/image_generation_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -20,11 +22,17 @@ void main() {
     modelInstalled = true;
     generateCalls = 0;
     lastGenerateArgs = null;
+    DiffusionModel.debugForceInferenceReady = true;
+    ImageGenerationService.instance.resetForTest();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           switch (call.method) {
             case 'isModelInstalled':
               return modelInstalled;
+            case 'getInstalledModels':
+              return modelInstalled
+                  ? <String>['Z-Image-Turbo-LiteRT']
+                  : <String>[];
             case 'generateImage':
               generateCalls++;
               lastGenerateArgs = call.arguments;
@@ -35,6 +43,7 @@ void main() {
   });
 
   tearDown(() {
+    DiffusionModel.debugForceInferenceReady = false;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
   });
@@ -71,6 +80,17 @@ void main() {
     expect(find.text('512x512'), findsOneWidget);
     expect(find.text('1024x1024'), findsOneWidget);
     expect(find.text('Generate'), findsOneWidget);
+  });
+
+  testWidgets('shows runner-not-ready banner when host loop is unfinished', (
+    tester,
+  ) async {
+    DiffusionModel.debugForceInferenceReady = false;
+    await pumpAndOpenSheet(tester);
+
+    expect(find.text('Runner not ready'), findsOneWidget);
+    expect(find.textContaining('cannot run them yet'), findsOneWidget);
+    expect(generateCalls, 0);
   });
 
   testWidgets('shows guidance when no diffusion model is installed', (
@@ -156,6 +176,8 @@ void main() {
           switch (call.method) {
             case 'isModelInstalled':
               return true;
+            case 'getInstalledModels':
+              return <String>['Z-Image-Turbo-LiteRT'];
             case 'generateImage':
               generateCalls++;
               return null;

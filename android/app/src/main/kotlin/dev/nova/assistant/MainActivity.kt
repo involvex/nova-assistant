@@ -51,19 +51,28 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIntent(intent)
+        loadScreenshotFromIntent(intent)
     }
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
 
         handleIntent(intent)
+        loadScreenshotFromIntent(intent)
+    }
 
+    /**
+     * Reads screenshot extras from [AssistantActivity] when the existing
+     * MainActivity instance is brought to the front (singleTask).
+     */
+    private fun loadScreenshotFromIntent(intent: Intent?) {
+        if (intent == null) return
         try {
             val screenshotPath = intent.getStringExtra(AssistantActivity.EXTRA_SCREENSHOT_PATH)
             val screenText = intent.getStringExtra(AssistantActivity.EXTRA_SCREEN_TEXT)
             val timestamp = intent.getLongExtra(AssistantActivity.EXTRA_TIMESTAMP, 0L)
 
-            Log.d(TAG, "onCreate: screenshotPath=$screenshotPath, screenText=$screenText, timestamp=$timestamp")
+            Log.d(TAG, "loadScreenshotFromIntent: path=$screenshotPath, ts=$timestamp")
 
             if (screenshotPath != null) {
                 AssistantActivity.isSystemAssistantLaunch = true
@@ -82,11 +91,9 @@ class MainActivity : FlutterActivity() {
                 } else {
                     Log.w(TAG, "Screenshot file does not exist: $screenshotPath")
                 }
-            } else {
-                Log.d(TAG, "No screenshot path in intent")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error in onCreate: ${e.message}")
+            Log.e(TAG, "Error loading screenshot: ${e.message}")
         }
     }
 

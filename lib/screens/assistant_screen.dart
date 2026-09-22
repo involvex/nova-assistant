@@ -1171,7 +1171,21 @@ class _AssistantScreenState extends State<AssistantScreen>
     } else if (state == AppLifecycleState.resumed) {
       _checkModelAvailability();
       _detectModelEviction();
+      // singleTask assistant reuses MainActivity — initState won't re-run.
+      unawaited(_reloadAssistantScreenshotIfNeeded());
     }
+  }
+
+  /// Picks up a fresh system-assistant screenshot when MainActivity is reused.
+  Future<void> _reloadAssistantScreenshotIfNeeded() async {
+    final fromAssistant = await ScreenshotService.instance
+        .wasLaunchedFromSystemAssistant();
+    if (!fromAssistant) return;
+
+    final screenshot = await ScreenshotService.instance.getLatestScreenshot();
+    if (!mounted || screenshot == null || screenshot.isEmpty) return;
+
+    setState(() => _currentScreenshot = screenshot);
   }
 
   Future<void> _detectModelEviction() async {
@@ -1419,6 +1433,21 @@ class _AssistantScreenState extends State<AssistantScreen>
   List<Tool> _toolsForQuery(String query, {bool hasImage = false}) {
     final tools = <Tool>[];
     final q = query.toLowerCase();
+    final wantsDeviceScreen = _wantsDeviceScreen(query, hasImage: hasImage);
+
+    // Vision / screen turns: do not expose get_time and other toys — Gemma
+    // otherwise loops get_time instead of describing the attached image.
+    if (hasImage || wantsDeviceScreen) {
+      if (wantsDeviceScreen && !hasImage) {
+        tools.add(NovaTools.takeScreenshot);
+      }
+      if (_wantsGenerateImage(query, hasImage: hasImage)) {
+        tools.add(NovaTools.generateImage);
+      }
+      tools.addAll(McpService.instance.enabledTools);
+
+      return tools;
+    }
 
     // Core tools (no screenshot — gated below)
     tools.addAll([
@@ -1433,13 +1462,6 @@ class _AssistantScreenState extends State<AssistantScreen>
 
     if (ShizukuService.instance.shouldExposeForceStopTool) {
       tools.add(NovaTools.forceStopApp);
-    }
-
-    // Only offer screen capture when the user asks for the *device screen*
-    // and no image is already attached (gallery / prior capture).
-    final wantsDeviceScreen = _wantsDeviceScreen(query, hasImage: hasImage);
-    if (wantsDeviceScreen) {
-      tools.add(NovaTools.takeScreenshot);
     }
 
     // Only offer image generation when the user explicitly asks to create,
@@ -1646,9 +1668,12 @@ class _AssistantScreenState extends State<AssistantScreen>
         thinkingMode: _thinkingMode,
         tools: _toolsForQuery(text, hasImage: hasImageAttachment),
         attachments: _attachmentManager.attachments,
-        // Force heavy model only in auto mode; respect model overrides
+        // Force heavy model only in auto mode without an image; vision turns
+        // prefer FastVLM under RAM pressure (see orchestrator).
         forcePrimaryModel:
-            _selectedModel == null && _selectedCustomModel == null,
+            _selectedModel == null &&
+            _selectedCustomModel == null &&
+            !hasImageAttachment,
       )) {
         if (!mounted) break;
 

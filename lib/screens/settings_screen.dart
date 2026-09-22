@@ -79,7 +79,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _shizukuStatusLabel = 'Checking…';
   AssistantRole _assistantRole = AssistantRole.helpful;
   AssistantLanguage _assistantLanguage = AssistantLanguage.match;
-  String _assistantLaunchMode = 'overlay';
+  String _assistantLaunchMode = 'full';
   String _installStatus = '';
   String _appVersion = '0.1.0';
   String _hfTokenStatus = 'Not configured';
@@ -156,7 +156,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getString(AssistantLanguage.prefsKey),
         );
         _assistantLaunchMode =
-            prefs.getString('assistant_launch_mode') ?? 'overlay';
+            prefs.getString('assistant_launch_mode') ?? 'full';
         _hfTokenStatus = _resolveHfTokenStatus(prefs.getString('hf_token'));
         _themeMode = loadedThemeMode;
         _fontScale = loadedFontScale;
@@ -618,6 +618,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             );
           }
+        },
+      ),
+      _actionTile(
+        icon: Icons.delete_sweep_outlined,
+        title: 'Free orphan model files',
+        subtitle:
+            'Delete weight files left after older uninstalls that only '
+            'cleared the app list',
+        onTap: () async {
+          setState(() => _installStatus = 'Scanning for orphan models...');
+          await ModelOrchestrator.instance.releaseIdleResources(force: true);
+          final freed = await ModelManager.instance.reclaimOrphanModelFiles();
+          if (!mounted) return;
+          setState(() => _installStatus = '');
+          final mb = (freed / (1024 * 1024)).round();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                mb > 0
+                    ? 'Freed $mb MB of orphan model files'
+                    : 'No orphan model files found',
+              ),
+              backgroundColor: const Color(0xFF6C63FF),
+            ),
+          );
         },
       ),
       _sectionHeader('IMAGE GENERATION'),
@@ -1714,6 +1739,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       : FontWeight.normal,
                 ),
               ),
+              subtitle: Text(
+                'Separate Flutter window — uses more RAM; prefer Full app '
+                'if the phone slows down',
+                style: TextStyle(color: Colors.grey[500], fontSize: 12),
+              ),
               trailing: _assistantLaunchMode == 'overlay'
                   ? const Icon(Icons.check, color: Color(0xFF6C63FF))
                   : null,
@@ -2075,14 +2105,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirmed != true || !context.mounted) return;
 
+    await ModelOrchestrator.instance.releaseIdleResources(force: true);
     final ok = await ModelManager.instance.uninstallModel(fileName);
+    final reclaimed = await ModelManager.instance.reclaimOrphanModelFiles();
     if (!context.mounted) return;
     setState(() {});
+    final reclaimMb = (reclaimed / (1024 * 1024)).round();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           ok
               ? '${model.displayName} removed'
+                    '${reclaimMb > 0 ? ' (+$reclaimMb MB orphans cleared)' : ''}'
               : 'Failed to remove ${model.displayName}',
         ),
       ),

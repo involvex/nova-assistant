@@ -42,6 +42,7 @@ object DiffusionPipeline {
     val seed: Int?,
     val steps: Int,
     val guidanceScale: Float,
+    val prompt: String = "",
   )
 
   private var loadedModelType: ModelType? = null
@@ -49,20 +50,27 @@ object DiffusionPipeline {
   private var unetMainInterpreters: List<Interpreter> = emptyList()
   private var unetFinalInterpreter: Interpreter? = null
   private var vaeInterpreter: Interpreter? = null
-  private var gpuDelegate: GpuDelegate? = null
+  private val gpuDelegates = mutableListOf<GpuDelegate>()
+  /** GPU delegate disabled: JNI/R8 + peak VRAM with Gemma caused process kills. */
+  @Volatile private var tryGpuDelegate = false
 
   fun isModelLoaded(modelType: ModelType): Boolean {
     return loadedModelType == modelType
   }
 
-  fun loadModel(context: Context, modelType: ModelType, onProgress: (String, Int) -> Unit = { _, _ -> }) {
+  fun loadModel(
+    context: Context,
+    modelType: ModelType,
+    onProgress: (String, Int) -> Unit = { _, _ -> },
+    modelDirOverride: File? = null,
+  ) {
     if (isModelLoaded(modelType)) {
       Log.d(TAG, "Model already loaded: $modelType")
       return
     }
     unloadModel()
 
-    val modelDir = getModelDir(context, modelType)
+    val modelDir = modelDirOverride ?: getModelDir(context, modelType)
     if (!modelDir.exists()) {
       throw IllegalStateException("Model directory not found: ${modelDir.absolutePath}")
     }
@@ -88,7 +96,7 @@ object DiffusionPipeline {
 
     loadedModelType = modelType
     onProgress("Model loaded", 100)
-    Log.i(TAG, "Model loaded: $modelType")
+    Log.i(TAG, "Model loaded: $modelType (gpu=${gpuDelegates.isNotEmpty()})")
   }
 
   fun unloadModel() {
@@ -96,16 +104,39 @@ object DiffusionPipeline {
     unetMainInterpreters.forEach { it.close() }
     unetFinalInterpreter?.close()
     vaeInterpreter?.close()
-    gpuDelegate?.close()
+    for (delegate in gpuDelegates) {
+      try {
+        delegate.close()
+      } catch (_: Throwable) {
+        // ignore
+      }
+    }
+    gpuDelegates.clear()
 
     textEncoderInterpreter = null
     unetMainInterpreters = emptyList()
     unetFinalInterpreter = null
     vaeInterpreter = null
-    gpuDelegate = null
     loadedModelType = null
 
     Log.d(TAG, "Model unloaded")
+  }
+
+  private fun closeTextEncoder() {
+    textEncoderInterpreter?.close()
+    textEncoderInterpreter = null
+  }
+
+  private fun closeUnets() {
+    unetMainInterpreters.forEach { it.close() }
+    unetMainInterpreters = emptyList()
+    unetFinalInterpreter?.close()
+    unetFinalInterpreter = null
+  }
+
+  private fun closeVae() {
+    vaeInterpreter?.close()
+    vaeInterpreter = null
   }
 
   private fun createInterpreter(
@@ -120,12 +151,24 @@ object DiffusionPipeline {
     }
 
     val options = Interpreter.Options().apply {
-      setNumThreads(4)
+      // Keep thread count modest — each thread holds activation buffers.
+      setNumThreads(2)
+      // Diffusion graphs fail XNNPack reshape (node prepare errors). Force
+      // the reference kernels; GPU is already off for OOM/JNI reasons.
       try {
-        gpuDelegate = GpuDelegate()
-        addDelegate(gpuDelegate)
-      } catch (e: Exception) {
-        Log.w(TAG, "NNAPI GPU delegate unavailable, falling back to CPU: ${e.message}")
+        setUseXNNPACK(false)
+      } catch (t: Throwable) {
+        Log.w(TAG, "setUseXNNPACK(false) unavailable: ${t.message}")
+      }
+      if (tryGpuDelegate) {
+        try {
+          val delegate = GpuDelegate()
+          addDelegate(delegate)
+          gpuDelegates.add(delegate)
+        } catch (t: Throwable) {
+          tryGpuDelegate = false
+          Log.w(TAG, "GPU delegate unavailable, using CPU: ${t.message}")
+        }
       }
     }
 
@@ -133,16 +176,19 @@ object DiffusionPipeline {
     return Interpreter(modelFile, options)
   }
 
+  /**
+   * Phased load to cut peak RSS: encode → drop encoder → denoise → drop UNets →
+   * VAE decode → unload. Still heavy, but avoids holding every graph at once
+   * with a warm Gemma session.
+   */
   fun generateImage(
     context: Context,
     config: GenerationConfig,
     onProgress: (String, Int) -> Unit = { _, _ -> },
+    modelDirOverride: File? = null,
   ): PipelineResult {
-    val modelDir = getModelDir(context, config.modelType)
-
-    if (!isModelLoaded(config.modelType)) {
-      loadModel(context, config.modelType, onProgress)
-    }
+    val modelDir = modelDirOverride ?: getModelDir(context, config.modelType)
+    unloadModel()
 
     val spec = when (config.modelType) {
       ModelType.Z_IMAGE_TURBO -> ImageGenerationModels.MODEL_SPECS[ImageGenerationModels.MODEL_Z_IMAGE_TURBO]
@@ -160,15 +206,42 @@ object DiffusionPipeline {
       floatArrayOf((rng.nextFloat() - 0.5f) * 2f)
     }
 
-    onProgress("Encoding prompt", 10)
-    val textEmbeddings = encodePrompt(config.modelType, "A beautiful image")
+    val promptText = config.prompt.ifBlank { "A beautiful image" }
 
-    onProgress("Preparing scheduler", 15)
+    // Z-Image Turbo LiteRT graphs expect host-side Qwen2 BPE + embed_tokens
+    // forming inputs_embeds[1,64,2560], then embx/refx + embc/refc before the
+    // DiT chunks — not raw UTF-8 into qwen_enc. Fail before mmap'ing the
+    // 3.5 GB encoder (that path also triggers TFLite "SUM failed to prepare").
+    if (config.modelType == ModelType.Z_IMAGE_TURBO) {
+      throw IllegalStateException(
+        "Z-Image Turbo is installed, but Nova's on-device runner is not " +
+          "wired for its LiteRT host loop yet. qwen_enc.tflite expects " +
+          "float inputs_embeds[1,64,2560] from Qwen2 BPE + embed_tokens " +
+          "(not raw text), plus embx/refx/embc/refc and CFG on the host. " +
+          "See DIFFUSION_MODEL_SPEC.md / Hub card litert-community/" +
+          "Z-Image-Turbo-LiteRT.",
+      )
+    }
+
+    onProgress("Loading text encoder", 8)
+    textEncoderInterpreter = createInterpreter(modelDir, spec.textEncoder)
+    onProgress("Encoding prompt", 12)
+    val textEmbeddings = encodePrompt(config.modelType, promptText)
+    closeTextEncoder()
+    System.gc()
+
+    onProgress("Loading UNet", 15)
+    unetMainInterpreters = spec.unetMain.map { fileName ->
+      createInterpreter(modelDir, listOf(fileName))
+    }
+    unetFinalInterpreter = createInterpreter(modelDir, spec.unetFinal)
+    loadedModelType = config.modelType
+
     val scheduler = DiffusionScheduler.createState()
     val timesteps = DiffusionScheduler.getTimestepsForInference(scheduler, config.steps)
 
     for ((stepIdx, timestep) in timesteps.withIndex()) {
-      val progress = 15 + ((stepIdx + 1) * 70 / timesteps.size)
+      val progress = 18 + ((stepIdx + 1) * 65 / timesteps.size)
       onProgress("Denoising step ${stepIdx + 1}/${timesteps.size}", progress)
 
       val scaledLatents = scaleLatentsForTimestep(latents, timestep, scheduler)
@@ -176,10 +249,26 @@ object DiffusionPipeline {
       var noisePred: Array<FloatArray> = emptyArray()
       for ((blockIdx, interpreter) in unetMainInterpreters.withIndex()) {
         val blockInput = if (blockIdx == 0) scaledLatents else noisePred
-        noisePred = runUnetBlock(interpreter, blockInput, textEmbeddings, timestep, latentHeight, latentWidth, latentChannels)
+        noisePred = runUnetBlock(
+          interpreter,
+          blockInput,
+          textEmbeddings,
+          timestep,
+          latentHeight,
+          latentWidth,
+          latentChannels,
+        )
       }
 
-      val finalNoise = runUnetFinal(unetFinalInterpreter!!, noisePred, textEmbeddings, timestep, latentHeight, latentWidth, latentChannels)
+      val finalNoise = runUnetFinal(
+        unetFinalInterpreter!!,
+        noisePred,
+        textEmbeddings,
+        timestep,
+        latentHeight,
+        latentWidth,
+        latentChannels,
+      )
 
       val stepResult = DiffusionScheduler.step(
         state = scheduler,
@@ -193,8 +282,22 @@ object DiffusionPipeline {
       }
     }
 
-    onProgress("Decoding image", 90)
-    val imageBytes = decodeLatentsToPng(vaeInterpreter!!, latents, latentHeight, latentWidth, latentChannels, config.size)
+    closeUnets()
+    System.gc()
+
+    onProgress("Loading VAE", 88)
+    vaeInterpreter = createInterpreter(modelDir, spec.vae)
+    onProgress("Decoding image", 92)
+    val imageBytes = decodeLatentsToPng(
+      vaeInterpreter!!,
+      latents,
+      latentHeight,
+      latentWidth,
+      latentChannels,
+      config.size,
+    )
+    closeVae()
+    loadedModelType = null
 
     onProgress("Complete", 100)
     return PipelineResult(imageBytes = imageBytes, width = config.size, height = config.size)
@@ -205,18 +308,32 @@ object DiffusionPipeline {
     prompt: String,
   ): Array<FloatArray> {
     val encoder = textEncoderInterpreter ?: throw IllegalStateException("Text encoder not loaded")
-    val promptBytes = prompt.toByteArray(Charsets.UTF_8)
-
     val inputShape = encoder.getInputTensor(0).shape()
     val outputShape = encoder.getOutputTensor(0).shape()
+    Log.d(
+      TAG,
+      "encodePrompt($modelType) in=${inputShape.contentToString()} out=${outputShape.contentToString()}",
+    )
+
+    // Rank-3 float embeddings (Z-Image / modern encoders) cannot be filled
+    // from UTF-8 bytes — that path triggers TFLite reduce/SUM prepare errors.
+    if (inputShape.size >= 3) {
+      throw IllegalStateException(
+        "Text encoder expects rank-${inputShape.size} tensor " +
+          "${inputShape.contentToString()} (precomputed embeddings), " +
+          "but Nova only has a stub UTF-8 path. Host tokenization required.",
+      )
+    }
+
+    val promptBytes = prompt.toByteArray(Charsets.UTF_8)
 
     val inputArray = when {
       inputShape.size == 2 && inputShape[1] == 1 -> {
-        val seqLen = inputShape[0]
+        val seqLen = inputShape[0].coerceAtLeast(1)
         Array(seqLen) { floatArrayOf(promptBytes.getOrElse(it % promptBytes.size) { 0 }.toFloat()) }
       }
       inputShape.size == 2 && inputShape[1] > 1 -> {
-        val seqLen = inputShape[0]
+        val seqLen = inputShape[0].coerceAtLeast(1)
         val dim = inputShape[1]
         Array(seqLen) { i ->
           val base = if (i < promptBytes.size) promptBytes[i].toFloat() else 0f
@@ -224,12 +341,21 @@ object DiffusionPipeline {
         }
       }
       else -> {
-        val total = inputShape.reduceOrNull { a, b -> a * b } ?: 1
+        val total = inputShape.fold(1) { a, b ->
+          val dim = if (b <= 0) 1 else b
+          a * dim
+        }.coerceAtLeast(1)
         Array(total) { floatArrayOf(promptBytes.getOrElse(it % promptBytes.size) { 0 }.toFloat()) }
       }
     }
 
-    val outputArray = Array(outputShape[0]) { FloatArray(outputShape[1]) }
+    val outRows = outputShape.getOrElse(0) { 1 }.coerceAtLeast(1)
+    val outCols = if (outputShape.size >= 2) {
+      outputShape[1].coerceAtLeast(1)
+    } else {
+      1
+    }
+    val outputArray = Array(outRows) { FloatArray(outCols) }
     encoder.run(inputArray, outputArray)
     return outputArray
   }
@@ -359,30 +485,47 @@ object DiffusionPipeline {
   }
 
   /**
-   * Flutter path_provider documents dir is `app_flutter/` under filesDir.
-   * Prefer that (where Dart downloads), then fall back to external files.
+   * Flutter [path_provider] documents dir on Android is
+   * `Context.getDir("flutter")` → `/data/.../app_flutter` (NOT `getDir("app_flutter")`,
+   * which resolves to `app_app_flutter`).
+   *
+   * Prefer that path (where Dart downloads), then legacy / external fallbacks.
    */
   fun resolveDiffusionModelDir(context: Context, modelDirName: String): File {
-    val candidates = listOfNotNull(
-      File(File(context.getDir("app_flutter", Context.MODE_PRIVATE), "diffusion_models"), modelDirName),
-      File(File(context.filesDir, "app_flutter/diffusion_models"), modelDirName),
-      context.getExternalFilesDir(null)?.let {
-        File(File(it, "diffusion_models"), modelDirName)
-      },
-      File(File(context.filesDir, "diffusion_models"), modelDirName),
+    val candidates = diffusionModelDirCandidates(context, modelDirName)
+    val matched = candidates.firstOrNull { dir -> hasTfliteWeights(dir) }
+    if (matched != null) {
+      Log.d(TAG, "Resolved diffusion model dir: ${matched.absolutePath}")
+      return matched
+    }
+    Log.w(
+      TAG,
+      "No tflite weights for $modelDirName; searched: " +
+        candidates.joinToString { it.absolutePath },
     )
-    return candidates.firstOrNull { dir ->
-      dir.exists() && dir.isDirectory &&
-        dir.listFiles()?.any { it.isFile && it.extension.equals("tflite", ignoreCase = true) } == true
-    } ?: candidates.first()
+    return candidates.first()
+  }
+
+  fun diffusionModelDirCandidates(context: Context, modelDirName: String): List<File> {
+    return diffusionRootCandidates(context).map { root -> File(root, modelDirName) }
   }
 
   fun diffusionRootCandidates(context: Context): List<File> {
+    // getDir("flutter") → .../app_flutter (Flutter path_provider documents).
+    // getDir("app_flutter") → .../app_app_flutter (wrong; kept last for legacy).
     return listOfNotNull(
-      File(context.getDir("app_flutter", Context.MODE_PRIVATE), "diffusion_models"),
+      File(context.getDir("flutter", Context.MODE_PRIVATE), "diffusion_models"),
       File(context.filesDir, "app_flutter/diffusion_models"),
       context.getExternalFilesDir(null)?.let { File(it, "diffusion_models") },
       File(context.filesDir, "diffusion_models"),
-    )
+      File(context.getDir("app_flutter", Context.MODE_PRIVATE), "diffusion_models"),
+    ).distinctBy { it.absolutePath }
+  }
+
+  fun hasTfliteWeights(dir: File): Boolean {
+    return dir.exists() && dir.isDirectory &&
+      dir.listFiles()?.any { file ->
+        file.isFile && file.extension.equals("tflite", ignoreCase = true)
+      } == true
   }
 }

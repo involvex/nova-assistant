@@ -37,7 +37,7 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
   DiffusionModel? _activeModel;
   bool _generating = false;
   double _progress = 0;
-  int _selectedSize = 512;
+  int _selectedSize = 256;
   String? _error;
 
   @override
@@ -133,8 +133,9 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
       setState(() {
         _generating = false;
         _error =
+            ImageGenerationService.instance.lastError ??
             'Generation failed. Check that a diffusion model is installed '
-            'and try again.';
+                'and try again.';
       });
       return;
     }
@@ -242,15 +243,45 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
   }
 
   Widget _buildFormBody() {
+    final runnerReady = _activeModel?.inferenceReady ?? false;
+    final runnerMessage = _activeModel?.runnerNotReadyMessage;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (!runnerReady && runnerMessage != null) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.construction_outlined,
+                  color: Colors.amber,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    runnerMessage,
+                    style: const TextStyle(color: Colors.amber, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
         TextField(
           controller: _promptController,
-          enabled: !_generating,
+          enabled: !_generating && runnerReady,
           maxLines: 3,
           minLines: 2,
-          autofocus: true,
+          autofocus: runnerReady,
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
             hintText: 'Describe the image to generate...',
@@ -263,7 +294,7 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
             ),
             contentPadding: const EdgeInsets.all(14),
           ),
-          onSubmitted: (_) => unawaited(_generate()),
+          onSubmitted: runnerReady ? (_) => unawaited(_generate()) : null,
         ),
         const SizedBox(height: 14),
         Row(
@@ -275,6 +306,13 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
             const SizedBox(width: 10),
             ...ImageSize.values.map(_buildSizeChip),
           ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          runnerReady
+              ? '256 is safest. Chat model is unloaded first to free RAM.'
+              : 'Download still useful for when the runner ships; chat is unaffected.',
+          style: TextStyle(color: Colors.grey[600], fontSize: 11),
         ),
         if (_error != null) ...[
           const SizedBox(height: 12),
@@ -313,10 +351,18 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
         ],
         const SizedBox(height: 16),
         FilledButton.icon(
-          onPressed: _generating ? null : () => unawaited(_generate()),
+          onPressed: (_generating || !runnerReady)
+              ? null
+              : () => unawaited(_generate()),
           style: FilledButton.styleFrom(backgroundColor: _accentColor),
           icon: const Icon(Icons.auto_awesome, size: 18),
-          label: Text(_generating ? 'Generating...' : 'Generate'),
+          label: Text(
+            !runnerReady
+                ? 'Runner not ready'
+                : _generating
+                ? 'Generating...'
+                : 'Generate',
+          ),
         ),
       ],
     );

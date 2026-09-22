@@ -27,7 +27,7 @@ class UserPreferences {
     this.beginnerHasSeenSimplifiedPrompt = false,
     this.themeMode = ThemeModeSetting.system,
     this.fontScale = 1.0,
-    this.assistantLaunchMode = 'overlay',
+    this.assistantLaunchMode = 'full',
     this.appPaletteId = 'defaultTheme',
   });
 
@@ -83,8 +83,7 @@ class UserPreferences {
               )
             : ThemeModeSetting.system,
         fontScale: (json['fontScale'] as num?)?.toDouble() ?? 1.0,
-        assistantLaunchMode:
-            json['assistantLaunchMode'] as String? ?? 'overlay',
+        assistantLaunchMode: json['assistantLaunchMode'] as String? ?? 'full',
         appPaletteId: json['appPaletteId'] as String? ?? 'defaultTheme',
       );
 }

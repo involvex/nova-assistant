@@ -64,5 +64,24 @@ void main() {
       expect(service.minFreeRamMbFor(NovaModel.gemma3_1b), 700);
       expect(service.minFreeRamMbFor(NovaModel.smollm), isNull);
     });
+
+    test('high-total devices use softer free-RAM floor', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      expect(
+        service.minFreeRamMbFor(NovaModel.gemma4E2b, totalMemMb: 12288),
+        900,
+      );
+      expect(service.minFreeRamMbForFileSizeMb(3600, totalMemMb: 12288), 900);
+      expect(
+        service.freeRamGateMessage(
+          model: NovaModel.gemma4E2b,
+          availMemMb: 1206,
+          totalMemMb: 12288,
+        ),
+        isNull,
+      );
+    });
   });
 }

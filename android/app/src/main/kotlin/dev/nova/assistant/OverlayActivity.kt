@@ -56,8 +56,14 @@ class OverlayActivity : FlutterActivity() {
                     }
                     "expandToFullApp" -> {
                         Log.d(TAG, "Expanding to full app (MainActivity)")
+                        FlutterActivityTracker.finishOverlayIfAlive()
                         val intent = Intent(this, MainActivity::class.java).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(
+                                Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+                            )
                         }
                         startActivity(intent)
                         finish()
@@ -69,7 +75,30 @@ class OverlayActivity : FlutterActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // If Main already owns a Flutter engine, bounce to it — never run two.
+        // Must still call super.onCreate (Activity contract); finish immediately after.
+        val redirectToMain = NovaApplication.isMainFlutterAlive()
+        if (redirectToMain) {
+            Log.w(TAG, "MainActivity already alive — redirecting, finishing Overlay")
+            val forward = Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+                )
+                intent?.extras?.let { putExtras(it) }
+            }
+            startActivity(forward)
+        }
+
         super.onCreate(savedInstanceState)
+
+        if (redirectToMain) {
+            finish()
+            return
+        }
+
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or

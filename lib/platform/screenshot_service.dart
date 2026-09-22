@@ -14,7 +14,11 @@ class ScreenshotService {
 
   Uint8List? get cachedScreenshot => _cachedScreenshot;
 
-  Future<Uint8List?> getLatestScreenshot() async {
+  /// Fetches the latest frame. By default releases MediaProjection + ImageReader
+  /// afterward so warm Gemma + virtual display do not LMK the process.
+  Future<Uint8List?> getLatestScreenshot({
+    bool releaseProjection = true,
+  }) async {
     try {
       final result = await _channel.invokeMethod<Uint8List>(
         'getLatestScreenshot',
@@ -22,6 +26,10 @@ class ScreenshotService {
       if (result != null && result.isNotEmpty) {
         _cachedScreenshot = result;
         _lastCapture = DateTime.now();
+      }
+
+      if (releaseProjection) {
+        await releaseCapture();
       }
 
       return result;
@@ -39,6 +47,21 @@ class ScreenshotService {
       debugPrint('ScreenshotService: failed to get screenshot — $e');
 
       return null;
+    }
+  }
+
+  /// Tears down MediaProjection, ImageReader, and the capture FGS.
+  Future<bool> releaseCapture() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('releaseCapture');
+
+      return ok ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (e) {
+      debugPrint('ScreenshotService: releaseCapture failed — $e');
+
+      return false;
     }
   }
 

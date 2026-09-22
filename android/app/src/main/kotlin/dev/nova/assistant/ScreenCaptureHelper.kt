@@ -92,6 +92,15 @@ object ScreenCaptureHelper {
                         requestScreenCapture(activity)
                     }
                 }
+                "releaseCapture" -> {
+                    try {
+                        releaseProjection(activity.applicationContext)
+                        result.success(true)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "releaseCapture failed: ${t.message}")
+                        result.success(false)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -265,9 +274,9 @@ object ScreenCaptureHelper {
                 captureWidth = metrics.widthPixels.coerceAtLeast(1)
                 captureHeight = metrics.heightPixels.coerceAtLeast(1)
             }
-            // Cap displays for vision KV budget (full 1080×2400 + tools
-            // overflows Gemma 4 @ 4096 tokens on the first message).
-            val maxDim = 896
+            // Cap displays for vision KV + RAM (full 1080×2400 ImageReader
+            // buffers + warm Gemma 4 LMK the process in assistant mode).
+            val maxDim = 768
             if (captureWidth > maxDim || captureHeight > maxDim) {
                 val scale = maxDim.toFloat() / maxOf(captureWidth, captureHeight)
                 captureWidth = (captureWidth * scale).toInt().coerceAtLeast(1)

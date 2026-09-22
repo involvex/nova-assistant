@@ -572,7 +572,13 @@ class ModelManager {
   Future<String?> _findModelFile(String fileName) async {
     if (_pathCache.containsKey(fileName)) {
       final cached = _pathCache[fileName]!;
-      return cached.isEmpty ? null : cached;
+      if (cached.isNotEmpty) {
+        if (await File(cached).exists()) return cached;
+        _pathCache.remove(fileName);
+      } else {
+        // Do not permanently cache misses — installs land after a lookup.
+        _pathCache.remove(fileName);
+      }
     }
 
     String? result;
@@ -622,7 +628,10 @@ class ModelManager {
       debugPrint('ModelManager._findModelFile error: $e');
     }
 
-    _pathCache[fileName] = result ?? '';
+    if (result != null) {
+      _pathCache[fileName] = result;
+    }
+
     return result;
   }
 
@@ -688,21 +697,36 @@ class ModelManager {
   }
 
   /// Delete a model file from disk given its filename.
-  /// Returns true if deleted, false otherwise.
+  /// Returns true if at least one file was deleted.
   Future<bool> _deleteModelFile(String fileName) async {
+    _pathCache.remove(fileName);
+    var deleted = false;
     try {
-      final path = await _findModelFile(fileName);
-      if (path != null) {
+      final candidates = <String>{};
+
+      final found = await _findModelFile(fileName);
+      if (found != null) candidates.add(found);
+
+      final dir = await getApplicationDocumentsDirectory();
+      candidates.add(p.join(dir.path, fileName));
+      candidates.add(p.join(dir.path, 'models', fileName));
+
+      for (final path in candidates) {
         final file = File(path);
-        if (await file.exists()) {
-          await file.delete();
-          return true;
-        }
+        if (!await file.exists()) continue;
+        final sizeMb = (await file.length()) / (1024 * 1024);
+        await file.delete();
+        deleted = true;
+        debugPrint(
+          'ModelManager: deleted $path (${sizeMb.toStringAsFixed(0)} MB)',
+        );
       }
     } catch (e) {
       debugPrint('ModelManager._deleteModelFile error: $e');
     }
-    return false;
+    _pathCache.remove(fileName);
+
+    return deleted;
   }
 
   Future<InstalledModel?> installFromFile({
@@ -1053,11 +1077,25 @@ class ModelManager {
         (m) => m.id == modelId,
         orElse: () => throw Exception('Model not found'),
       );
-      await FlutterGemma.uninstallModel(modelId);
+      // Prefer disk delete even if flutter_gemma unregister fails — otherwise
+      // "Remove" only clears prefs and leaves multi-GB weights on device.
+      final deleted = await _deleteModelFile(model.fileName);
+      try {
+        await FlutterGemma.uninstallModel(modelId);
+      } catch (e) {
+        debugPrint('ModelManager: FlutterGemma.uninstallModel: $e');
+      }
+      try {
+        await FlutterGemma.uninstallModel(model.fileName);
+      } catch (_) {}
       _installedModels.removeWhere((m) => m.id == modelId);
       _pathCache.remove(model.fileName);
       await _saveToPrefs();
-      _statusController.add('Model removed: $modelId');
+      _statusController.add(
+        deleted
+            ? 'Model removed from device: ${model.fileName}'
+            : 'Model unregistered (file may already be gone): ${model.fileName}',
+      );
       return true;
     } catch (e) {
       debugPrint('ModelManager: uninstallModel failed: $e');
@@ -1072,16 +1110,74 @@ class ModelManager {
         orElse: () => throw Exception('Model not found'),
       );
 
-      // Uninstall from flutter_gemma using the fileName
-      await FlutterGemma.uninstallModel(customModel.fileName);
+      final deleted = await _deleteModelFile(customModel.fileName);
+      try {
+        await FlutterGemma.uninstallModel(customModel.fileName);
+      } catch (e) {
+        debugPrint('ModelManager: FlutterGemma.uninstallModel custom: $e');
+      }
       _customModels.removeWhere((m) => m.id == modelId);
+      _pathCache.remove(customModel.fileName);
       await _saveCustomModelsToPrefs();
-      _statusController.add('Custom model removed: $modelId');
+      _statusController.add(
+        deleted
+            ? 'Custom model deleted from device: ${customModel.fileName}'
+            : 'Custom model unregistered: ${customModel.fileName}',
+      );
       return true;
     } catch (e) {
       debugPrint('ModelManager: removeCustomModel failed: $e');
       return false;
     }
+  }
+
+  /// Deletes weight files on disk that are no longer tracked in prefs.
+  ///
+  /// Use after older builds that unregistered models without deleting files.
+  /// Returns approximate bytes freed.
+  Future<int> reclaimOrphanModelFiles() async {
+    final known = <String>{
+      for (final m in _installedModels) m.fileName,
+      for (final m in _customModels) m.fileName,
+    };
+    var freed = 0;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final roots = <Directory>[dir, Directory(p.join(dir.path, 'models'))];
+      for (final root in roots) {
+        if (!await root.exists()) continue;
+        await for (final entity in root.list(followLinks: false)) {
+          if (entity is! File) continue;
+          final name = p.basename(entity.path);
+          final lower = name.toLowerCase();
+          final isWeight =
+              lower.endsWith('.litertlm') ||
+              lower.endsWith('.task') ||
+              lower.endsWith('.gguf');
+          if (!isWeight) continue;
+          if (known.contains(name)) continue;
+          // Ignore in-progress downloads.
+          if (name.startsWith('nova_download_')) continue;
+          final size = await entity.length();
+          await entity.delete();
+          freed += size;
+          debugPrint(
+            'ModelManager: reclaimed orphan $name '
+            '(${(size / (1024 * 1024)).toStringAsFixed(0)} MB)',
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('ModelManager.reclaimOrphanModelFiles: $e');
+    }
+    if (freed > 0) {
+      _statusController.add(
+        'Reclaimed ${(freed / (1024 * 1024)).toStringAsFixed(0)} MB of '
+        'orphan model files',
+      );
+    }
+
+    return freed;
   }
 
   /// Persists metadata edits (e.g. context size) for an installed custom model.
@@ -1537,13 +1633,24 @@ class ModelManager {
   }
 
   Future<String?> findDiffusionModelPath(DiffusionModel model) async {
-    final docsDir = await getApplicationDocumentsDirectory();
-    final modelDir = Directory(
-      '${docsDir.path}/diffusion_models/${model.fileName}',
-    );
-    if (await modelDir.exists()) {
-      return modelDir.path;
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final modelDir = Directory(
+        '${docsDir.path}/diffusion_models/${model.fileName}',
+      );
+      if (!await modelDir.exists()) {
+        return null;
+      }
+      // Prefer dirs that actually contain LiteRT graphs (native needs .tflite).
+      await for (final entity in modelDir.list()) {
+        if (entity is File && entity.path.toLowerCase().endsWith('.tflite')) {
+          return modelDir.path;
+        }
+      }
+    } catch (e) {
+      debugPrint('ModelManager: findDiffusionModelPath failed: $e');
     }
+
     return null;
   }
 

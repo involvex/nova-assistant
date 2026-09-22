@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
+import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/widgets/custom_model_card.dart';
 import 'package:nova_assistant/widgets/model_card.dart';
 
@@ -115,7 +116,10 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
     );
 
     if (confirmed == true) {
-      await ModelManager.instance.removeCustomModel(model.id);
+      // Release mmap'd weights so the file can be deleted on Android.
+      await ModelOrchestrator.instance.releaseIdleResources(force: true);
+      final ok = await ModelManager.instance.removeCustomModel(model.id);
+      final reclaimed = await ModelManager.instance.reclaimOrphanModelFiles();
       if (mounted) {
         setState(() {
           _customModels.removeWhere((m) => m.id == model.id);
@@ -124,6 +128,17 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
             widget.onCustomModelSelected(null);
           }
         });
+        final reclaimMb = (reclaimed / (1024 * 1024)).round();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              ok
+                  ? '${model.displayName} deleted from device storage'
+                        '${reclaimMb > 0 ? ' (+$reclaimMb MB orphans)' : ''}'
+                  : 'Failed to delete ${model.displayName}',
+            ),
+          ),
+        );
       }
     }
   }

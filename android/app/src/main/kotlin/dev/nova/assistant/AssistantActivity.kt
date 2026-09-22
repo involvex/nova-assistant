@@ -30,7 +30,8 @@ class AssistantActivity : Activity() {
         private const val REQUEST_SCREEN_CAPTURE = 1001
         private const val LAUNCH_MODE_PREFS = "FlutterSharedPreferences"
         private const val LAUNCH_MODE_KEY = "flutter.assistant_launch_mode"
-        private const val DEFAULT_LAUNCH_MODE = "overlay"
+        /** Prefer full app — overlay is a second FlutterEngine and LMKs mid-range phones. */
+        private const val DEFAULT_LAUNCH_MODE = "full"
 
         var latestScreenshot: ByteArray? = null
         var latestScreenText: String? = null
@@ -116,20 +117,39 @@ class AssistantActivity : Activity() {
         if (launchScheduled) return
         launchScheduled = true
 
-        val launchMode = getLaunchMode()
-        Log.d(TAG, "Launch mode: $launchMode")
+        val preferredMode = getLaunchMode()
+        // Never run Overlay + Main Flutter engines at once. If Main is already
+        // alive, always reuse it (REORDER_TO_FRONT). Overlay only when cold.
+        val useOverlay =
+            preferredMode == "overlay" &&
+                !NovaApplication.isMainFlutterAlive()
 
-        val targetClass = if (launchMode == "overlay") {
+        if (!useOverlay) {
+            FlutterActivityTracker.finishOverlayIfAlive()
+        }
+
+        val targetClass = if (useOverlay) {
             OverlayActivity::class.java
         } else {
             MainActivity::class.java
         }
+        Log.d(
+            TAG,
+            "Launch mode pref=$preferredMode → ${targetClass.simpleName} " +
+                "(mainAlive=${NovaApplication.isMainFlutterAlive()}, " +
+                "overlayAlive=${NovaApplication.isOverlayFlutterAlive()})",
+        )
 
         try {
             val screenshotPath = writeScreenshotToFile()
 
             val intent = Intent(this, targetClass).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+                )
                 putExtra(EXTRA_SCREENSHOT_PATH, screenshotPath)
                 putExtra(EXTRA_SCREEN_TEXT, latestScreenText)
                 putExtra(EXTRA_TIMESTAMP, latestTimestamp)
@@ -140,14 +160,13 @@ class AssistantActivity : Activity() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch main app: ${e.message}")
             try {
-                // Fallback: try the other activity class
-                val fallbackClass = if (targetClass == OverlayActivity::class.java) {
-                    MainActivity::class.java
-                } else {
-                    OverlayActivity::class.java
-                }
-                val intent = Intent(this, fallbackClass).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+                    )
                 }
                 startActivity(intent)
                 finish()

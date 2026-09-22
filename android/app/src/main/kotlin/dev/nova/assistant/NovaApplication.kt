@@ -1,22 +1,30 @@
 package dev.nova.assistant
 
+import android.app.Activity
 import android.app.Application
+import android.os.Bundle
 import android.util.Log
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.lang.ref.WeakReference
 
 /**
  * Scrubs oversized chat-history keys from Flutter SharedPreferences **without**
  * calling [getSharedPreferences]. Loading a 100MB+ prefs XML OOMs during
  * KXmlParser (POCO F1 / mid-RAM devices).
+ *
+ * Also tracks the live Flutter [Activity] so assistant launches can reuse a
+ * single engine instead of stacking OverlayActivity + MainActivity.
  */
 class NovaApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        instance = this
         scrubOversizedFlutterPrefs()
+        registerActivityLifecycleCallbacks(FlutterActivityTracker)
     }
 
     private fun scrubOversizedFlutterPrefs() {
@@ -169,5 +177,92 @@ class NovaApplication : Application() {
         private const val EMPTY_PREFS_XML =
             "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
                 "<map>\n</map>\n"
+
+        @Volatile
+        var instance: NovaApplication? = null
+            private set
+
+        /** True when [MainActivity] is created and not destroyed. */
+        fun isMainFlutterAlive(): Boolean = FlutterActivityTracker.mainAlive
+
+        /** True when [OverlayActivity] is created and not destroyed. */
+        fun isOverlayFlutterAlive(): Boolean = FlutterActivityTracker.overlayAlive
     }
+}
+
+/**
+ * Tracks whether a Flutter UI activity is already resident so assistant
+ * launches can avoid spawning a second Dart isolate / Gemma load.
+ */
+object FlutterActivityTracker : Application.ActivityLifecycleCallbacks {
+    private const val TAG = "FlutterActivityTracker"
+
+    @Volatile
+    var mainAlive: Boolean = false
+        private set
+
+    @Volatile
+    var overlayAlive: Boolean = false
+        private set
+
+    private var mainRef: WeakReference<Activity>? = null
+    private var overlayRef: WeakReference<Activity>? = null
+
+    override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
+        when (activity) {
+            is MainActivity -> {
+                mainAlive = true
+                mainRef = WeakReference(activity)
+                Log.i(TAG, "MainActivity created (overlayAlive=$overlayAlive)")
+            }
+            is OverlayActivity -> {
+                overlayAlive = true
+                overlayRef = WeakReference(activity)
+                Log.i(TAG, "OverlayActivity created (mainAlive=$mainAlive)")
+            }
+        }
+    }
+
+    override fun onActivityDestroyed(activity: Activity) {
+        when (activity) {
+            is MainActivity -> {
+                if (mainRef?.get() === activity) {
+                    mainAlive = false
+                    mainRef = null
+                    Log.i(TAG, "MainActivity destroyed")
+                }
+            }
+            is OverlayActivity -> {
+                if (overlayRef?.get() === activity) {
+                    overlayAlive = false
+                    overlayRef = null
+                    Log.i(TAG, "OverlayActivity destroyed")
+                }
+            }
+        }
+    }
+
+    /** Finish a live Overlay so Main can own the only Flutter engine. */
+    fun finishOverlayIfAlive() {
+        val overlay = overlayRef?.get()
+        if (overlay != null && !overlay.isFinishing) {
+            Log.i(TAG, "Finishing OverlayActivity to keep a single Flutter engine")
+            overlay.finish()
+        }
+    }
+
+    /** Finish a live Main when Overlay must take over (rare). */
+    fun finishMainIfAlive() {
+        val main = mainRef?.get()
+        if (main != null && !main.isFinishing) {
+            Log.i(TAG, "Finishing MainActivity to keep a single Flutter engine")
+            main.finish()
+        }
+    }
+
+    override fun onActivityStarted(activity: Activity) {}
+    override fun onActivityResumed(activity: Activity) {}
+    override fun onActivityPaused(activity: Activity) {}
+    override fun onActivityStopped(activity: Activity) {}
+    override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
 }

@@ -499,8 +499,9 @@ class ModelOrchestrator {
     List<ChatMessage> source,
     InferenceModel inferenceModel,
     String systemInstruction,
-    List<Tool> chatTools,
-  ) async {
+    List<Tool> chatTools, {
+    required bool thinkingMode,
+  }) async {
     final retained = _lastReplayableTurnPairs(source, historyKeepPairs);
     _activeChat = null;
     _lastChatSessionKey = null;
@@ -531,6 +532,8 @@ class ModelOrchestrator {
         systemInstruction: systemInstruction,
         tools: chatTools,
         supportImage: model.hasVision && _activeModelSupportsImage,
+        supportsFunctionCalls: chatTools.isNotEmpty,
+        isThinking: model.hasThinking && thinkingMode,
       );
       // _lastChatSessionKey will be reassigned on the next processMessage
       // pass; leave it null so the caller treats this as a fresh session.
@@ -1142,6 +1145,10 @@ class ModelOrchestrator {
       preferredBackend: preferredBackend,
       supportImage: supportImage,
       maxNumImages: supportImage ? 1 : null,
+      // float32 fixes scrambled digits on some GPUs (flutter_gemma 1.10+).
+      activationDataType: preferredBackend == PreferredBackend.gpu
+          ? ActivationDataType.float32
+          : null,
     );
     try {
       final model = await future.timeout(loadTimeout);
@@ -3091,6 +3098,8 @@ class ModelOrchestrator {
           systemInstruction: systemInstruction,
           tools: chatTools,
           supportImage: model.hasVision && _activeModelSupportsImage,
+          supportsFunctionCalls: chatTools.isNotEmpty,
+          isThinking: model.hasThinking && thinkingMode,
         );
         _lastChatSessionKey = sessionKey;
         if (wasNull && _pendingReplay.isNotEmpty) {
@@ -3148,6 +3157,8 @@ class ModelOrchestrator {
                 systemInstruction: systemInstruction,
                 tools: chatTools,
                 supportImage: model.hasVision && _activeModelSupportsImage,
+                supportsFunctionCalls: chatTools.isNotEmpty,
+                isThinking: model.hasThinking && thinkingMode,
               );
               try {
                 await _activeChat!.clearHistory(replayHistory: replay);
@@ -3236,6 +3247,7 @@ class ModelOrchestrator {
           inferenceModel,
           systemInstruction,
           chatTools,
+          thinkingMode: thinkingMode,
         );
         if (!ok) {
           yield InferenceResult(

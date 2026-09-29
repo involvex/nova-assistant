@@ -57,9 +57,9 @@ Nova is a Flutter-based mobile AI assistant that:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `flutter_gemma` | ^1.2.0 | Core Gemma inference engine |
-| `flutter_gemma_litertlm` | 1.0.2 | LiteRT LM inference backend |
-| `flutter_gemma_mediapipe` | 1.0.3 | MediaPipe inference backend |
+| `flutter_gemma` | ^1.11.0 | Core Gemma inference engine |
+| `flutter_gemma_litertlm` | ^1.8.4 | LiteRT LM inference backend |
+| `flutter_gemma_mediapipe` | ^1.0.7 | MediaPipe inference backend |
 
 ### Storage and Persistence
 

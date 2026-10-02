@@ -11,6 +11,7 @@ import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
+import 'package:nova_assistant/utils/stream_paint_throttle.dart';
 import 'package:nova_assistant/widgets/chat_bubble.dart';
 import 'package:nova_assistant/widgets/voice_input.dart';
 
@@ -127,6 +128,8 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
 
     try {
       String accumulated = '';
+      // Same coalescing as the main screen: no full rebuild per token.
+      final StreamPaintThrottle paintThrottle = StreamPaintThrottle();
 
       await for (final result in ModelOrchestrator.instance.processMessage(
         query: text,
@@ -139,6 +142,9 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
         if (!mounted) break;
 
         accumulated = result.text;
+        if (!paintThrottle.shouldPaint(isFinal: !result.isStreaming)) {
+          continue;
+        }
 
         final idx = _messages.lastIndexWhere((m) => m.id == assistantId);
         if (idx != -1) {

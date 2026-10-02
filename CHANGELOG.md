@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Z-Image Turbo on-device image generation: complete native host loop
+  (Qwen3 BPE tokenizer, `embed_tokens` lookup, `t_embedder` timestep MLP,
+  patchify/unpatchify, CFG + Euler denoising, VAE decode). Covers the
+  previously unrunnable 14-graph LiteRT set end to end at 256 px.
+- Ranged-HTTP safetensors extraction (`readRemoteSafetensorsHeader`,
+  `extractSafetensorsTensorsRemote`). Acquiring the Z-Image host tensors now
+  transfers only the ~780 MB actually needed instead of staging both
+  multi-GB base-checkpoint shards — a large cut in download time and phone
+  storage. Falls back to locally staged shards when a server ignores
+  `Range`.
+
+### Fixed
+
+- Z-Image Turbo no longer produced colour mush instead of an image. The spec
+  forced `guidance_scale = 1.0`, but Z-Image Turbo is guidance-distilled and
+  `pipeline_z_image.py`'s own example runs `guidance_scale = 0.0` (where
+  `do_classifier_free_guidance` is `guidance_scale > 0`). Running classifier-
+  free guidance over a distilled checkpoint oversaturates the output. The
+  spec now ships `steps = 8`, `guidance = 0.0` to match the reference, and
+  `ZImagePipeline` skips the uncond branch entirely when guidance is zero.
+- Safetensors extraction no longer buffers a whole tensor in the Dart heap
+  before writing. `embed_tokens` is a 778 MB matrix; the `copy` callback now
+  streams straight into the destination file.
+- Z-Image Turbo no longer allocates an unused latent buffer or emits a
+  misleading "Preparing latents" progress tick before dispatching to the
+  host-loop path.
+- Installed diffusion models that still need their host assets (tokenizer,
+  `embed_tokens`, `t_embedder`) are no longer a dead end. Settings now shows
+  an "assets needed for generation" state with a one-tap download, and the
+  generation sheet offers the same action on that error. Previously the only
+  route was uninstalling and re-downloading the multi-GB graphs.
+
 
 
 ## [0.4.8] - 2026-09-22

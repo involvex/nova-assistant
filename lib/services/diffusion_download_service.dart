@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:nova_assistant/models/diffusion_model_info.dart';
@@ -142,6 +143,7 @@ class DiffusionDownloadService {
         request.headers.set('Authorization', 'Bearer $hfToken');
       }
       final response = await request.close();
+      await response.drain<void>();
       if (response.statusCode != 200) return false;
       return response.headers.value(HttpHeaders.acceptRangesHeader) == 'bytes';
     } on Exception {
@@ -297,6 +299,209 @@ class DiffusionDownloadService {
       }
     } finally {
       await sink.close();
+    }
+  }
+
+  /// Downloads extra assets for a diffusion model from its base checkpoint
+  /// (e.g., the Qwen3 tokenizer).
+  ///
+  /// Only the tokenizer files are fetched here (~11 MB). The source shards
+  /// holding `embed_tokens` / `t_embedder` are deliberately NOT downloaded:
+  /// they are multi-GB but yield only ~780 MB of host tensors, so
+  /// `ZImageTensorExtraction.extractMissingRemote` pulls just those tensors by
+  /// HTTP range. Staging whole shards would cost several GB of transfer and
+  /// phone storage for the same result.
+  ///
+  /// Totals are `existing bytes + HEAD sizes of missing files`, so resumed
+  /// or partially-present downloads report honest progress. Large fresh
+  /// files use parallel range chunks (same path as [downloadModel]).
+  Future<void> downloadExtraAssets({
+    required DiffusionModel model,
+    required DiffusionExtraAssets extraAssets,
+    required Directory destDir,
+    String? hfToken,
+    void Function(int received, int total)? onProgress,
+  }) async {
+    final jobs = <({String repoId, String upstream, String local})>[
+      for (final file in extraAssets.tokenizerFiles)
+        (repoId: extraAssets.tokenizerRepoId, upstream: file, local: file),
+    ];
+
+    if (jobs.isEmpty) {
+      throw Exception('No extra assets defined for $model');
+    }
+
+    final Map<String, int> existingLengths = <String, int>{};
+    final Map<String, int> remoteSizes = <String, int>{};
+    int totalBytes = 0;
+    for (final job in jobs) {
+      final existsFile = File('${destDir.path}/${job.local}');
+      if (await existsFile.exists()) {
+        final int len = await existsFile.length();
+        existingLengths[job.local] = len;
+        totalBytes += len;
+      }
+    }
+
+    for (final job in jobs) {
+      if (existingLengths.containsKey(job.local)) continue;
+      final url = HuggingfaceHubService.resolveDownloadUrl(
+        job.repoId,
+        path: job.upstream,
+      );
+      final uri = Uri.parse(url);
+      try {
+        final headRequest = await _client.headUrl(uri);
+        if (hfToken != null && hfToken.isNotEmpty) {
+          headRequest.headers.set('Authorization', 'Bearer $hfToken');
+        }
+        final response = await headRequest.close();
+        await response.drain<void>();
+        if (response.statusCode == 200) {
+          final sizeStr = response.headers.value('content-length');
+          final size = sizeStr != null ? int.tryParse(sizeStr) ?? 0 : 0;
+          if (size > 0) {
+            remoteSizes[job.local] = size;
+            totalBytes += size;
+          }
+        }
+      } on Exception {
+        // HEAD is best-effort; the GET below reports the real failure.
+      }
+    }
+
+    if (totalBytes == 0) {
+      throw Exception(
+        'Could not determine total download size for extra assets of '
+        '$model — check network access and HuggingFace token for the gated '
+        'base checkpoint',
+      );
+    }
+
+    final downloadId =
+        'diffusion_extra_${model.name}_${DateTime.now().millisecondsSinceEpoch}';
+    await DownloadProgressService.instance.startDownload(
+      modelId: model.name,
+      url: extraAssets.tokenizerRepoId,
+      fileName: '${model.fileName}_extra_assets',
+      totalBytes: totalBytes,
+    );
+
+    int receivedBytes = 0;
+    DateTime? lastProgressReport;
+
+    Future<void> reportProgress(int delta) async {
+      receivedBytes += delta;
+      final now = DateTime.now();
+      if (onProgress != null &&
+          (lastProgressReport == null ||
+              now.difference(lastProgressReport!) >= _progressThrottle)) {
+        lastProgressReport = now;
+        onProgress(receivedBytes, totalBytes);
+      }
+      await DownloadProgressService.instance.updateProgress(
+        downloadId,
+        receivedBytes,
+      );
+    }
+
+    for (final job in jobs) {
+      await _downloadSingleFile(
+        repoId: job.repoId,
+        filePath: job.upstream,
+        localPath: job.local,
+        destDir: destDir,
+        hfToken: hfToken,
+        totalSize: existingLengths[job.local] ?? remoteSizes[job.local],
+        expectedSize: extraAssets.expectedSizes[job.local],
+        onProgress: reportProgress,
+      );
+    }
+
+    // Fail closed on tampered/truncated bytes while pins exist. Unpinned
+    // entries pass vacuously until pins are populated (see the field docs).
+    await extraAssets.verifyFilePins(destDir);
+
+    await DownloadProgressService.instance.completeDownload(downloadId);
+    if (onProgress != null) {
+      onProgress(totalBytes, totalBytes);
+    }
+  }
+
+  Future<void> _downloadSingleFile({
+    required String repoId,
+    required String filePath,
+    String? localPath,
+    required Directory destDir,
+    String? hfToken,
+    int? totalSize,
+    int? expectedSize,
+    required void Function(int) onProgress,
+  }) async {
+    final url = HuggingfaceHubService.resolveDownloadUrl(
+      repoId,
+      path: filePath,
+    );
+    final destPath = '${destDir.path}/${localPath ?? filePath}';
+
+    final existingFile = File(destPath);
+    if (await existingFile.exists()) {
+      final int existingLen = await existingFile.length();
+      // A pinned size that no longer matches means truncation/tampering —
+      // drop the file so the download below fetches it fresh instead of
+      // treating corrupt bytes as complete.
+      if (expectedSize != null &&
+          expectedSize > 0 &&
+          existingLen != expectedSize) {
+        debugPrint(
+          'DiffusionDownloadService: size drift for $destPath '
+          '(expected $expectedSize, got $existingLen) — re-downloading',
+        );
+        await existingFile.delete();
+      } else {
+        onProgress(existingLen);
+        return;
+      }
+    }
+
+    final destDirPath = p.dirname(destPath);
+    final dir = Directory(destDirPath);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+
+    final uri = Uri.parse(url);
+    final partialSize = await existingFile.exists()
+        ? await existingFile.length()
+        : 0;
+    final supportsRange = await _supportsRangeRequests(uri, hfToken);
+
+    if (supportsRange && partialSize > 0) {
+      await _resumeFile(
+        uri: uri,
+        destPath: destPath,
+        partialSize: partialSize,
+        hfToken: hfToken,
+        onProgress: onProgress,
+      );
+    } else if (supportsRange &&
+        partialSize == 0 &&
+        (totalSize ?? 0) > _chunkSize) {
+      await _downloadFileWithChunks(
+        uri: uri,
+        destPath: destPath,
+        totalSize: totalSize!,
+        hfToken: hfToken,
+        onProgress: onProgress,
+      );
+    } else {
+      await _downloadFileSingle(
+        uri: uri,
+        destPath: destPath,
+        offset: partialSize,
+        hfToken: hfToken,
+        onProgress: onProgress,
+      );
     }
   }
 }

@@ -41,7 +41,10 @@ import 'package:nova_assistant/services/platform_adaptation_service.dart';
 import 'package:nova_assistant/services/prompt_presets_service.dart';
 import 'package:nova_assistant/services/shizuku_service.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
+import 'package:nova_assistant/ai/router/routing_candidates.dart';
+import 'package:nova_assistant/utils/availability_check_gate.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
+import 'package:nova_assistant/utils/stream_paint_throttle.dart';
 import 'package:nova_assistant/widgets/message_list_view.dart';
 import 'package:nova_assistant/widgets/chat_input_bar.dart';
 import 'package:nova_assistant/widgets/chat_overlays.dart';
@@ -85,8 +88,11 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _shouldPreserveScreenshot = false;
   NovaModel? _selectedModel;
   CustomModel? _selectedCustomModel;
+  String? _selectedCloudProvider;
   final AttachmentManager _attachmentManager = AttachmentManager.instance;
   StreamSubscription<void>? _historyClearedSub;
+  StreamSubscription<String>? _conversationDeletedSub;
+  bool _detachedAfterDelete = false;
   StreamSubscription<String>? _statusSub;
   StreamSubscription<ContextBudgetEstimate>? _contextBudgetSub;
   ContextBudgetEstimate? _contextBudget;
@@ -102,6 +108,10 @@ class _AssistantScreenState extends State<AssistantScreen>
   bool _debugMode = false;
   int? _debugMemoryMb;
   Timer? _memoryPollTimer;
+  String? _targetLabelOverride;
+  String _lastTargetLabelQuery = '';
+  int _targetLabelRequest = 0;
+  DateTime? _lastAvailabilityCheck;
   Timer? _saveDebounceTimer;
   Completer<void>? _screenshotLoadedCompleter;
   bool _showSearch = false;
@@ -130,7 +140,9 @@ class _AssistantScreenState extends State<AssistantScreen>
     WidgetsBinding.instance.addObserver(this);
     _selectedModel = ModelOrchestrator.instance.preferredModelType;
     _selectedCustomModel = ModelOrchestrator.instance.preferredCustomModel;
-    if (_selectedCustomModel != null) {
+    _selectedCloudProvider =
+        ModelOrchestrator.instance.preferredCloudProviderId;
+    if (_selectedCustomModel != null || _selectedCloudProvider != null) {
       _selectedModel = null;
     }
     _loadThinkingMode();
@@ -148,7 +160,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     _loadHistory();
     _requestPermissions();
     _listenToModelStatus();
-    _checkModelAvailability();
+    _checkModelAvailability(force: true);
     unawaited(_refreshPromptStarters());
     _historyClearedSub = ModelOrchestrator.instance.historyClearedStream.listen(
       (_) {
@@ -163,6 +175,8 @@ class _AssistantScreenState extends State<AssistantScreen>
         }
       },
     );
+    _conversationDeletedSub = ChatHistoryService.conversationDeletedStream
+        .listen(_onConversationDeleted);
     _contextBudgetSub = ModelOrchestrator.instance.contextNearLimitStream.listen((
       estimate,
     ) {
@@ -201,6 +215,29 @@ class _AssistantScreenState extends State<AssistantScreen>
         }
       });
     }
+  }
+
+  /// Clears a stale view when the open conversation is deleted elsewhere
+  /// (history screen). Without this the deleted messages persist with
+  /// working Regenerate/Retry actions, and later sends silently drop
+  /// (the id no longer exists). After detach the next send starts a
+  /// fresh conversation instead of hanging off a dead id.
+  void _onConversationDeleted(String deletedId) {
+    if (!mounted) return;
+    final openId = widget.conversationId;
+    if (openId == null || openId != deletedId) return;
+    unawaited(ModelOrchestrator.instance.stopGeneration());
+    _detachedAfterDelete = true;
+    setState(() {
+      _messages.clear();
+      _followUpSuggestions = [];
+      _contextBudget = null;
+      _lastContextBudgetWarnPercent = 0;
+      _invalidateHistoryTokenEstimate();
+    });
+    ConversationSummaryService.instance.activeSummary = null;
+    ModelOrchestrator.instance.setPendingReplayMessages(const []);
+    unawaited(_refreshPromptStarters());
   }
 
   Future<void> _loadHistory() async {
@@ -248,7 +285,9 @@ class _AssistantScreenState extends State<AssistantScreen>
 
   Future<void> _saveMessages() async {
     final persistable = _messages.where(_isPersistableMessage).toList();
-    if (widget.conversationId != null) {
+    // Detached after delete (or no id): persist as a fresh conversation
+    // instead of hanging off a dead id.
+    if (widget.conversationId != null && !_detachedAfterDelete) {
       final conversation = await ChatHistoryService.getConversation(
         widget.conversationId!,
       );
@@ -259,6 +298,7 @@ class _AssistantScreenState extends State<AssistantScreen>
       }
     } else {
       await ChatHistoryService.save(persistable);
+      _detachedAfterDelete = false;
       final conversations = await ChatHistoryService.loadConversations();
       if (conversations.isNotEmpty) {
         await ConversationSummaryService.instance.maybeUpdateSummary(
@@ -371,7 +411,9 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   bool get _isAutoMode =>
-      _selectedModel == null && _selectedCustomModel == null;
+      _selectedModel == null &&
+      _selectedCustomModel == null &&
+      _selectedCloudProvider == null;
 
   NovaModel get _effectiveModel =>
       ModelOrchestrator.instance.predictEffectiveModel(
@@ -386,10 +428,63 @@ class _AssistantScreenState extends State<AssistantScreen>
         InferenceBackend.remote) {
       return 'Remote LAN';
     }
+    if (_selectedCloudProvider != null) {
+      return ModelOrchestrator.providerDisplayName(_selectedCloudProvider!);
+    }
     if (_selectedCustomModel != null) return _selectedCustomModel!.displayName;
-    if (_isAutoMode) return 'Auto → ${_effectiveModel.displayName}';
+    if (_isAutoMode) {
+      // NovaCore-backed target when the hybrid pipeline is on; the sync
+      // local prediction remains the fallback (and the limit-math source).
+      final override = _targetLabelOverride;
+      if (ModelOrchestrator.instance.novaCorePipelineEnabled &&
+          override != null) {
+        return 'Auto → $override';
+      }
+
+      return 'Auto → ${_effectiveModel.displayName}';
+    }
 
     return _effectiveModel.displayName;
+  }
+
+  /// Refreshes the NovaCore routing badge (debounced by input text, skipped
+  /// while generating). Only active with smart routing or a pinned cloud
+  /// provider — otherwise the sync local label is already correct.
+  Future<void> _refreshTargetLabel() async {
+    final orchestrator = ModelOrchestrator.instance;
+    if (!orchestrator.novaCorePipelineEnabled &&
+        orchestrator.preferredCloudProviderId == null) {
+      if (_targetLabelOverride != null && mounted) {
+        setState(() => _targetLabelOverride = null);
+      }
+
+      return;
+    }
+    if (_isGenerating || !mounted) {
+      return;
+    }
+    final query = _inputController.text;
+    if (query == _lastTargetLabelQuery) {
+      return;
+    }
+    _lastTargetLabelQuery = query;
+    final request = ++_targetLabelRequest;
+    try {
+      final target = await ModelOrchestrator.instance.predictEffectiveTarget(
+        query: query,
+        thinkingMode: _thinkingMode,
+        hasImage: _hasAttachments,
+        forcePrimaryModel: _isAutoMode,
+      );
+      if (!mounted || request != _targetLabelRequest) {
+        return;
+      }
+      if (target.label != _targetLabelOverride) {
+        setState(() => _targetLabelOverride = target.label);
+      }
+    } catch (_) {
+      // Badge is best-effort; the send path re-resolves anyway.
+    }
   }
 
   bool get _hasAttachments =>
@@ -988,12 +1083,23 @@ class _AssistantScreenState extends State<AssistantScreen>
         q.contains('illustration of');
   }
 
-  Future<void> _checkModelAvailability() async {
+  Future<void> _checkModelAvailability({bool force = false}) async {
     if (ModelOrchestrator.instance.inferenceBackend ==
         InferenceBackend.remote) {
       if (mounted) setState(() => _offlineMode = false);
       return;
     }
+    // Status bursts during cold engine loads must not re-stat every model
+    // file on disk each time (fresh-chat QueueBuffer jank).
+    final DateTime now = DateTime.now();
+    if (!shouldRunAvailabilityCheck(
+      now: now,
+      lastRun: _lastAvailabilityCheck,
+      force: force,
+    )) {
+      return;
+    }
+    _lastAvailabilityCheck = now;
 
     final manager = ModelManager.instance;
     bool anyInstalled = false;
@@ -1007,6 +1113,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     if (mounted) {
       setState(() => _offlineMode = !anyInstalled);
     }
+    unawaited(_refreshTargetLabel());
   }
 
   Widget _buildOfflineBanner() {
@@ -1110,6 +1217,7 @@ class _AssistantScreenState extends State<AssistantScreen>
     WidgetsBinding.instance.removeObserver(this);
     _prefsThemeSub?.cancel();
     _historyClearedSub?.cancel();
+    _conversationDeletedSub?.cancel();
     _statusSub?.cancel();
     _contextBudgetSub?.cancel();
     _memoryPollTimer?.cancel();
@@ -1169,7 +1277,7 @@ class _AssistantScreenState extends State<AssistantScreen>
         ModelOrchestrator.instance.releaseIdleResources(force: true);
       }
     } else if (state == AppLifecycleState.resumed) {
-      _checkModelAvailability();
+      _checkModelAvailability(force: true);
       _detectModelEviction();
       // singleTask assistant reuses MainActivity — initState won't re-run.
       unawaited(_reloadAssistantScreenshotIfNeeded());
@@ -1655,6 +1763,9 @@ class _AssistantScreenState extends State<AssistantScreen>
 
     try {
       String accumulated = '';
+      // Coalesce token bursts: full markdown re-layout per chunk starves
+      // the UI thread (QueueBuffer timeouts). Final chunk always paints.
+      final StreamPaintThrottle paintThrottle = StreamPaintThrottle();
 
       final hasImageAttachment =
           _currentScreenshot != null ||
@@ -1673,11 +1784,15 @@ class _AssistantScreenState extends State<AssistantScreen>
         forcePrimaryModel:
             _selectedModel == null &&
             _selectedCustomModel == null &&
+            _selectedCloudProvider == null &&
             !hasImageAttachment,
       )) {
         if (!mounted) break;
 
         accumulated = result.text;
+        if (!paintThrottle.shouldPaint(isFinal: !result.isStreaming)) {
+          continue;
+        }
 
         final idx = _messages.lastIndexWhere((m) => m.id == assistantId);
         if (idx != -1) {
@@ -1893,7 +2008,7 @@ class _AssistantScreenState extends State<AssistantScreen>
   }
 
   Future<void> _showModelSelectorSheet(BuildContext context) async {
-    final isAutoMode = _selectedModel == null && _selectedCustomModel == null;
+    final isAutoMode = _isAutoMode;
 
     final result = await showModalBottomSheet<String>(
       context: context,
@@ -1902,10 +2017,12 @@ class _AssistantScreenState extends State<AssistantScreen>
       builder: (context) => ModelSelectorSheet(
         currentSelection: _selectedModel,
         currentCustomModel: _selectedCustomModel,
+        currentCloudProvider: _selectedCloudProvider,
         isAutoMode: isAutoMode,
         onModelSelected: (model) {
           _selectedModel = model;
           _selectedCustomModel = null;
+          _selectedCloudProvider = null;
           if (model != null) {
             ModelOrchestrator.instance.preferredModelType = model;
             ModelOrchestrator.instance.preferredCustomModel = null;
@@ -1915,16 +2032,25 @@ class _AssistantScreenState extends State<AssistantScreen>
         onCustomModelSelected: (model) {
           _selectedCustomModel = model;
           _selectedModel = null;
+          _selectedCloudProvider = null;
           if (model != null) {
             ModelOrchestrator.instance.preferredCustomModel = model;
             ModelOrchestrator.instance.preferredModelType = null;
           }
           setState(() {});
         },
+        onCloudProviderSelected: (providerId) {
+          _selectedCloudProvider = providerId;
+          _selectedModel = null;
+          _selectedCustomModel = null;
+          ModelOrchestrator.instance.preferredCloudProvider = providerId;
+          setState(() {});
+        },
         onAutoModeChanged: (auto) {
           if (auto) {
             _selectedModel = null;
             _selectedCustomModel = null;
+            _selectedCloudProvider = null;
             ModelOrchestrator.instance.clearModelOverride();
           }
           setState(() {});
@@ -1954,6 +2080,15 @@ class _AssistantScreenState extends State<AssistantScreen>
     });
     ModelOrchestrator.instance.preferredCustomModel = imported;
     ModelOrchestrator.instance.preferredModelType = null;
+    // Newly imported models join smart routing by default (strict toggle
+    // sets would otherwise silently exclude everything imported later).
+    final Set<String>? enabled = await RoutingCandidates.loadIds();
+    if (enabled != null) {
+      await RoutingCandidates.saveIds(<String>{
+        ...enabled,
+        RoutingCandidates.customId(imported.id),
+      });
+    }
   }
 
   Future<void> _pickImageFromGallery() async {
@@ -2412,7 +2547,11 @@ class _AssistantScreenState extends State<AssistantScreen>
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      _selectedModel?.displayName ?? 'Auto',
+                      _selectedCloudProvider != null
+                          ? ModelOrchestrator.providerDisplayName(
+                              _selectedCloudProvider!,
+                            )
+                          : _selectedModel?.displayName ?? 'Auto',
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 12,

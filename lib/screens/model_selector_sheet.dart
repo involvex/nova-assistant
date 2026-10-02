@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:nova_assistant/ai/router/routing_candidates.dart';
+import 'package:nova_assistant/core/config/cloud_provider_config.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
@@ -10,9 +12,11 @@ import 'package:nova_assistant/widgets/model_card.dart';
 class ModelSelectorSheet extends StatefulWidget {
   final NovaModel? currentSelection;
   final CustomModel? currentCustomModel;
+  final String? currentCloudProvider;
   final bool isAutoMode;
   final void Function(NovaModel?) onModelSelected;
   final void Function(CustomModel?) onCustomModelSelected;
+  final void Function(String?) onCloudProviderSelected;
   final void Function(bool) onAutoModeChanged;
   final VoidCallback? onImportModel;
 
@@ -20,9 +24,11 @@ class ModelSelectorSheet extends StatefulWidget {
     super.key,
     required this.currentSelection,
     this.currentCustomModel,
+    this.currentCloudProvider,
     required this.isAutoMode,
     required this.onModelSelected,
     required this.onCustomModelSelected,
+    required this.onCloudProviderSelected,
     required this.onAutoModeChanged,
     this.onImportModel,
   });
@@ -35,6 +41,8 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
   late bool _isAutoMode;
   NovaModel? _selectedModel;
   CustomModel? _selectedCustomModel;
+  String? _selectedCloudProvider;
+  Set<String>? _enabledCandidates;
   final Set<NovaModel> _installedModels = {};
   List<CustomModel> _customModels = [];
 
@@ -44,8 +52,73 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
     _isAutoMode = widget.isAutoMode;
     _selectedModel = widget.currentSelection;
     _selectedCustomModel = widget.currentCustomModel;
+    _selectedCloudProvider = widget.currentCloudProvider;
     _loadInstalledModels();
     _loadCustomModels();
+    _loadCandidates();
+  }
+
+  Future<void> _loadCandidates() async {
+    final Set<String>? enabled = await RoutingCandidates.loadIds();
+    if (mounted) {
+      setState(() => _enabledCandidates = enabled);
+    }
+  }
+
+  /// All candidate ids for the currently known entries (used to
+  /// materialize the "everything on" default on first toggle).
+  Set<String> _allCandidateIds() {
+    return <String>{
+      for (final NovaModel model in NovaModel.values)
+        RoutingCandidates.localId(model.name),
+      for (final CustomModel model in _customModels)
+        RoutingCandidates.customId(model.id),
+      for (final CloudProviderEntry entry in kCloudProviders)
+        RoutingCandidates.cloudId(entry.id),
+    };
+  }
+
+  bool _candidateEnabled(String id) {
+    return RoutingCandidates.isEnabled(_enabledCandidates, id);
+  }
+
+  Future<void> _toggleCandidate(String id) async {
+    final Set<String> current = Set<String>.from(
+      _enabledCandidates ?? _allCandidateIds(),
+    );
+    if (current.contains(id)) {
+      current.remove(id);
+    } else {
+      current.add(id);
+    }
+    await RoutingCandidates.saveIds(current);
+    if (mounted) {
+      setState(() => _enabledCandidates = current);
+    }
+  }
+
+  Future<void> _resetCandidates() async {
+    final Set<String> all = _allCandidateIds();
+    await RoutingCandidates.saveIds(all);
+    if (mounted) {
+      setState(() => _enabledCandidates = all);
+    }
+  }
+
+  Widget _candidateToggle(String id) {
+    final bool enabled = _candidateEnabled(id);
+
+    return IconButton(
+      tooltip: enabled
+          ? 'Included in smart routing (tap to exclude)'
+          : 'Excluded from smart routing (tap to include)',
+      icon: Icon(
+        enabled ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+        size: 20,
+        color: enabled ? Colors.grey.shade500 : Colors.orange.shade300,
+      ),
+      onPressed: () => _toggleCandidate(id),
+    );
   }
 
   Future<void> _loadInstalledModels() async {
@@ -256,7 +329,10 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
                 icon: Icons.auto_awesome,
                 isSelected: _isAutoMode,
                 onTap: () {
-                  setState(() => _isAutoMode = true);
+                  setState(() {
+                    _isAutoMode = true;
+                    _selectedCloudProvider = null;
+                  });
                   widget.onAutoModeChanged(true);
                 },
               ),
@@ -324,11 +400,40 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
   }
 
   Widget _buildModelList() {
+    final theme = Theme.of(context);
+
     return ListView(
       shrinkWrap: true,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       children: [
         if (_isAutoMode) _buildAutoExplanation(),
+
+        // Routing candidates: eye toggles include entries in smart routing.
+        Row(
+          children: [
+            Text(
+              'Smart routing candidates',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade500,
+              ),
+            ),
+            const Spacer(),
+            if (_enabledCandidates != null &&
+                _enabledCandidates!.length < _allCandidateIds().length)
+              TextButton(
+                onPressed: _resetCandidates,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text('Reset all on'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
 
         // Built-in models
         ...NovaModel.values.map((model) {
@@ -338,20 +443,110 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
 
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: ModelCard(
-              model: model,
-              isSelected: isSelected,
-              isInstalled: isInstalled,
-              onTap: () {
-                setState(() {
-                  _selectedModel = model;
-                  _selectedCustomModel = null;
-                  _isAutoMode = false;
-                });
-                widget.onModelSelected(model);
-                widget.onCustomModelSelected(null);
-                widget.onAutoModeChanged(false);
-              },
+            child: Row(
+              children: [
+                Expanded(
+                  child: ModelCard(
+                    model: model,
+                    isSelected: isSelected,
+                    isInstalled: isInstalled,
+                    onTap: () {
+                      setState(() {
+                        _selectedModel = model;
+                        _selectedCustomModel = null;
+                        _selectedCloudProvider = null;
+                        _isAutoMode = false;
+                      });
+                      widget.onModelSelected(model);
+                      widget.onCustomModelSelected(null);
+                      widget.onCloudProviderSelected(null);
+                      widget.onAutoModeChanged(false);
+                    },
+                  ),
+                ),
+                _candidateToggle(RoutingCandidates.localId(model.name)),
+              ],
+            ),
+          );
+        }),
+
+        // Cloud providers (manual pin — bypasses smart routing)
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Text(
+              'Cloud',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade500,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              'needs API token',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ...kCloudProviders.map((entry) {
+          final isSelected = _selectedCloudProvider == entry.id;
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(
+                        color: isSelected
+                            ? theme.colorScheme.primary
+                            : Colors.grey.withValues(alpha: 0.3),
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    leading: Icon(
+                      Icons.cloud_outlined,
+                      color: isSelected
+                          ? theme.colorScheme.primary
+                          : Colors.grey.shade500,
+                    ),
+                    title: Text(
+                      entry.displayName,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      'Default model: ${entry.defaultModelId}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                    trailing: isSelected
+                        ? Icon(
+                            Icons.check_circle,
+                            color: theme.colorScheme.primary,
+                          )
+                        : null,
+                    onTap: () {
+                      setState(() {
+                        _selectedModel = null;
+                        _selectedCustomModel = null;
+                        _selectedCloudProvider = entry.id;
+                        _isAutoMode = false;
+                      });
+                      widget.onModelSelected(null);
+                      widget.onCustomModelSelected(null);
+                      widget.onCloudProviderSelected(entry.id);
+                      widget.onAutoModeChanged(false);
+                    },
+                  ),
+                ),
+                _candidateToggle(RoutingCandidates.cloudId(entry.id)),
+              ],
             ),
           );
         }),
@@ -390,38 +585,47 @@ class _ModelSelectorSheetState extends State<ModelSelectorSheet> {
 
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: CustomModelCard(
-                model: model,
-                isSelected: isSelected,
-                isDisabled: isUnsupported,
-                disabledReason: isUnsupported
-                    ? 'Not supported for inference'
-                    : null,
-                onTap: isUnsupported
-                    ? () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'GGUF models are not supported for inference. '
-                              'Use a .litertlm or .task model instead.',
-                            ),
-                          ),
-                        );
-                      }
-                    : () {
-                        setState(() {
-                          _selectedModel = null;
-                          _selectedCustomModel = model;
-                          _isAutoMode = false;
-                        });
-                        widget.onModelSelected(null);
-                        widget.onCustomModelSelected(model);
-                        widget.onAutoModeChanged(false);
-                      },
-                onDelete: () => _deleteCustomModel(model),
-                onEditContext: model.isGguf
-                    ? null
-                    : () => _editCustomModelContext(model),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: CustomModelCard(
+                      model: model,
+                      isSelected: isSelected,
+                      isDisabled: isUnsupported,
+                      disabledReason: isUnsupported
+                          ? 'Not supported for inference'
+                          : null,
+                      onTap: isUnsupported
+                          ? () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'GGUF models are not supported for inference. '
+                                    'Use a .litertlm or .task model instead.',
+                                  ),
+                                ),
+                              );
+                            }
+                          : () {
+                              setState(() {
+                                _selectedModel = null;
+                                _selectedCustomModel = model;
+                                _selectedCloudProvider = null;
+                                _isAutoMode = false;
+                              });
+                              widget.onModelSelected(null);
+                              widget.onCustomModelSelected(model);
+                              widget.onCloudProviderSelected(null);
+                              widget.onAutoModeChanged(false);
+                            },
+                      onDelete: () => _deleteCustomModel(model),
+                      onEditContext: model.isGguf
+                          ? null
+                          : () => _editCustomModelContext(model),
+                    ),
+                  ),
+                  _candidateToggle(RoutingCandidates.customId(model.id)),
+                ],
               ),
             );
           }),

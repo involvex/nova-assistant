@@ -122,3 +122,4 @@ android.backup/
 .serena/
 
 .cline/
+*.tar.gz

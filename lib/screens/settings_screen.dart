@@ -21,6 +21,8 @@ import 'package:nova_assistant/screens/assistant_screen.dart';
 import 'package:nova_assistant/screens/identity_config_screen.dart';
 import 'package:nova_assistant/screens/mcp_settings_screen.dart';
 import 'package:nova_assistant/screens/remote_inference_settings_screen.dart';
+import 'package:nova_assistant/screens/cloud_providers_settings_screen.dart';
+import 'package:nova_assistant/ai/nova_pipeline.dart';
 import 'package:nova_assistant/screens/knowledge_base_screen.dart';
 import 'package:nova_assistant/screens/memory_management_screen.dart';
 import 'package:nova_assistant/screens/user_memory_overview_screen.dart';
@@ -70,6 +72,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoCompact = true;
   bool _adultMode = false;
   bool _wifiOnlyDownloads = false;
+  bool _novaCorePipeline = false;
   bool _isAssistantRoleHeld = false;
   bool _screenTimeoutStream = true;
   bool _debugMode = false;
@@ -89,6 +92,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   StreamSubscription<String>? _modelStatusSub;
   NovaPaletteId _selectedPalette = NovaPaletteId.defaultTheme;
 
+  /// Extra-asset readiness per diffusion model. A model can be fully
+  /// installed (graphs present) yet still unable to generate, so the card
+  /// needs this to offer the asset download instead of only Uninstall.
+  final Map<DiffusionModel, bool> _extraAssetsReady = <DiffusionModel, bool>{};
+
+  /// Models currently fetching extra assets, to disable/spin their button.
+  final Set<DiffusionModel> _assetsDownloading = <DiffusionModel>{};
+
   @override
   void initState() {
     super.initState();
@@ -104,6 +115,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) setState(() => _installStatus = status);
     });
     _loadAppVersion();
+    unawaited(_refreshExtraAssetStatus());
+  }
+
+  /// Probes each installed diffusion model for its extra assets. Disk I/O, so
+  /// it runs after first frame rather than during build.
+  Future<void> _refreshExtraAssetStatus() async {
+    for (final DiffusionModel model in DiffusionModel.values) {
+      if (!ModelManager.instance.isDiffusionModelInstalled(model)) continue;
+      bool ready = false;
+      try {
+        ready = await ModelManager.instance.hasExtraAssets(model);
+      } catch (e) {
+        debugPrint('Settings: extra-asset probe failed for ${model.name}: $e');
+      }
+      if (!mounted) return;
+      setState(() => _extraAssetsReady[model] = ready);
+    }
+  }
+
+  /// Downloads the extra assets for an already-installed model and updates
+  /// the card in place. Previously the only way to get these was a full
+  /// uninstall + reinstall of the multi-GB graphs.
+  Future<void> _downloadDiffusionExtraAssets(
+    BuildContext context,
+    DiffusionModel model,
+  ) async {
+    if (_assetsDownloading.contains(model)) return;
+    setState(() {
+      _assetsDownloading.add(model);
+      _installStatus = 'Downloading ${model.displayName} assets...';
+    });
+
+    String? hfToken;
+    try {
+      hfToken = await ModelManager.getHuggingFaceToken();
+    } catch (e) {
+      debugPrint('Settings: failed to read HF token: $e');
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    var lastReportedPct = -1;
+    bool success = false;
+    try {
+      success = await ModelManager.instance.installExtraAssets(
+        model: model,
+        hfToken: hfToken,
+        onProgress: (int received, int total) {
+          if (!mounted || total <= 0) return;
+          final int pct = (received * 100 ~/ total).clamp(0, 100);
+          if (pct == lastReportedPct) return;
+          lastReportedPct = pct;
+          setState(
+            () => _installStatus =
+                'Downloading ${model.displayName} assets: $pct%',
+          );
+        },
+      );
+    } catch (e) {
+      debugPrint('Settings: extra-asset install threw for ${model.name}: $e');
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _assetsDownloading.remove(model);
+      _installStatus = '';
+      _extraAssetsReady[model] = success;
+    });
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          success
+              ? '${model.displayName} assets ready — image generation enabled'
+              : 'Could not fetch ${model.displayName} assets. The base '
+                    'checkpoint is gated: accept its licence on Hugging Face '
+                    'and check your token in Settings.',
+        ),
+        backgroundColor: success ? const Color(0xFF6C63FF) : Colors.orange,
+      ),
+    );
   }
 
   @override
@@ -143,6 +234,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _adultMode = prefs.getBool(AdultModePolicy.prefsKey) ?? true;
         _wifiOnlyDownloads =
             prefs.getBool(DownloadNetworkGate.wifiOnlyPrefsKey) ?? false;
+        _novaCorePipeline =
+            prefs.getBool(NovaPipeline.enabledPrefsKey) ?? false;
         _debugMode = prefs.getBool('settings_debug_mode') ?? false;
         _screenTimeoutStream =
             prefs.getBool('settings_screen_timeout_stream') ?? true;
@@ -575,6 +668,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           );
           if (context.mounted) setState(() {});
+        },
+      ),
+      _actionTile(
+        icon: Icons.cloud_outlined,
+        title: 'Cloud providers',
+        subtitle: 'OpenRouter, Groq, Opencode Zen, Kilo Gateway',
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => const CloudProvidersSettingsScreen(),
+            ),
+          );
+          if (context.mounted) setState(() {});
+        },
+      ),
+      _toggleTile(
+        icon: Icons.hub_outlined,
+        title: 'Smart routing (optional)',
+        subtitle: _novaCorePipeline
+            ? 'On — Nova decides per task: local or cloud'
+            : 'Off — local-first, everything runs on-device',
+        value: _novaCorePipeline,
+        onChanged: (v) async {
+          setState(() => _novaCorePipeline = v);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool(NovaPipeline.enabledPrefsKey, v);
+          await ModelOrchestrator.refreshSettings();
         },
       ),
       if (_installStatus.isNotEmpty)
@@ -1975,11 +2096,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Status line under a diffusion model's name.
+  String _diffusionStatusLabel(DiffusionModel model, bool installed) {
+    if (!installed) return 'Tap to install';
+    // Only Z-Image Turbo declares host-side extra assets; showing
+    // "assets missing" for a model that needs none would be wrong.
+    if (model.extraAssets.tokenizerFiles.isEmpty) return 'Installed';
+    return _extraAssetsReady[model] == false
+        ? 'Installed — assets needed for generation'
+        : 'Installed';
+  }
+
   Widget _diffusionModelCard(
     BuildContext context, {
     required DiffusionModel model,
   }) {
     final installed = ModelManager.instance.isDiffusionModelInstalled(model);
+    // Absent from the map means "not probed yet" — treat as ready so a model
+    // with no extra assets at all (e.g. FLUX.2-klein) is not flagged.
+    final assetsMissing = installed && _extraAssetsReady[model] == false;
 
     return GestureDetector(
       onTap: installed ? null : () => _downloadDiffusionModel(context, model),
@@ -2036,10 +2171,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    installed ? 'Installed' : 'Tap to install',
+                    _diffusionStatusLabel(model, installed),
                     style: TextStyle(
                       fontSize: 12,
-                      color: installed ? Colors.green[400] : Colors.grey[500],
+                      color: installed && assetsMissing
+                          ? Colors.orange[300]
+                          : (installed ? Colors.green[400] : Colors.grey[500]),
                     ),
                   ),
                 ],
@@ -2049,7 +2186,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.check_circle, color: Colors.green[400], size: 20),
+                  Icon(
+                    assetsMissing
+                        ? Icons.warning_amber_rounded
+                        : Icons.check_circle,
+                    color: assetsMissing
+                        ? Colors.orange[300]
+                        : Colors.green[400],
+                    size: 20,
+                  ),
+                  // Graphs installed but host assets absent: offer the
+                  // download instead of forcing a full reinstall.
+                  if (assetsMissing)
+                    _assetsDownloading.contains(model)
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : IconButton(
+                            tooltip: 'Download image assets (~800 MB)',
+                            icon: Icon(
+                              Icons.download_outlined,
+                              color: Colors.orange[300],
+                              size: 20,
+                            ),
+                            onPressed: () =>
+                                _downloadDiffusionExtraAssets(context, model),
+                          ),
                   IconButton(
                     tooltip: 'Uninstall',
                     icon: Icon(
@@ -2244,14 +2411,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
         sourceDirectory: modelDir.path,
       );
 
+      // Extra assets: staged shards download, then the host tensors
+      // (embed_tokens/t_embedder) are extracted + verified before
+      // installExtraAssets reports success. A false result keeps image
+      // generation gated with an explanatory message below.
       if (mounted) {
-        setState(() => _installStatus = '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${model.displayName} installed'),
-            backgroundColor: const Color(0xFF6C63FF),
-          ),
+        setState(() => _installStatus = 'Downloading extra assets...');
+        final success = await ModelManager.instance.installExtraAssets(
+          model: model,
+          hfToken: hfToken,
+          onProgress: (received, total) {
+            if (mounted && total > 0) {
+              final pct = (95 + ((received * 5) / total).floor()).clamp(95, 99);
+              setState(
+                () => _installStatus = 'Downloading extra assets: $pct%',
+              );
+            }
+          },
         );
+        if (mounted) setState(() => _installStatus = '');
+        if (success) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Extra assets downloaded'),
+                backgroundColor: Color(0xFF6C63FF),
+              ),
+            );
+          }
+        } else {
+          // Extra assets missing is not fatal — the model installed but
+          // image generation will stay gated until assets arrive.
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Model installed, but extra assets not available',
+                ),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
       }
     } catch (e) {
       if (mounted) {

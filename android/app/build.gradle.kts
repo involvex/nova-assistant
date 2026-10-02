@@ -32,6 +32,9 @@ android {
         getByName("main") {
             java.srcDirs("src/main/kotlin")
         }
+        getByName("test") {
+            java.srcDirs("src/test/kotlin")
+        }
     }
 
     signingConfigs {
@@ -96,4 +99,7 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
+
+    // JVM unit tests for the Z-Image Turbo host-loop math (no Android runtime).
+    testImplementation("junit:junit:4.13.2")
 }

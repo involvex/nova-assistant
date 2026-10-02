@@ -5,6 +5,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_gemma_litertlm/flutter_gemma_litertlm.dart';
 import 'package:flutter_gemma_mediapipe/flutter_gemma_mediapipe.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/ai/bootstrap.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/image_generation_service.dart';
 import 'package:nova_assistant/screens/assistant_screen.dart';
@@ -67,6 +68,7 @@ void main() async {
     // Parallel init: independent services that don't depend on each other.
     await Future.wait([
       MemoryService.initialize(),
+      NovaBootstrap.ensureInitialized(),
       TaskService.instance.initialize(),
       NoteService.instance.initialize(),
       NotificationService.instance.initialize(),

@@ -4,17 +4,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_assistant/models/inference_backend.dart';
 import 'package:nova_assistant/utils/secure_prefs.dart';
 
-/// Settings for OpenAI-compatible LAN remote inference.
+/// Settings for OpenAI-compatible remote inference (LAN + cloud).
 class RemoteInferenceConfig {
   const RemoteInferenceConfig({
     required this.baseUrl,
     required this.modelId,
     this.apiToken,
+    this.appendV1 = true,
   });
 
   final String baseUrl;
   final String modelId;
   final String? apiToken;
+
+  /// When true, `/v1` is inserted between [baseUrl] and the endpoint
+  /// (llama-server, OpenRouter `/api`, Groq `/openai`). Kilo
+  /// (`/api/gateway/...`) and Zen (`/zen/v1/...`) address endpoints
+  /// directly, so their providers set this to false.
+  final bool appendV1;
 
   static const backendPrefsKey = 'settings_inference_backend';
   static const baseUrlPrefsKey = 'settings_remote_base_url';
@@ -26,14 +33,16 @@ class RemoteInferenceConfig {
 
   Uri chatCompletionsUri() {
     final trimmed = baseUrl.replaceAll(RegExp(r'/+$'), '');
+    final infix = appendV1 ? '/v1' : '';
 
-    return Uri.parse('$trimmed/v1/chat/completions');
+    return Uri.parse('$trimmed$infix/chat/completions');
   }
 
   Uri modelsUri() {
     final trimmed = baseUrl.replaceAll(RegExp(r'/+$'), '');
+    final infix = appendV1 ? '/v1' : '';
 
-    return Uri.parse('$trimmed/v1/models');
+    return Uri.parse('$trimmed$infix/models');
   }
 
   Map<String, String> headers() {
@@ -94,12 +103,14 @@ class RemoteInferenceConfig {
     String? baseUrl,
     String? modelId,
     String? apiToken,
+    bool? appendV1,
     bool clearToken = false,
   }) {
     return RemoteInferenceConfig(
       baseUrl: baseUrl ?? this.baseUrl,
       modelId: modelId ?? this.modelId,
       apiToken: clearToken ? null : (apiToken ?? this.apiToken),
+      appendV1: appendV1 ?? this.appendV1,
     );
   }
 }

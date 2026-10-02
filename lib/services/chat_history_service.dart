@@ -39,6 +39,15 @@ class ChatHistoryService {
   static const _writeDebounceMs = 300;
   static const _compactAfterAppends = 50;
 
+  /// Broadcasts deleted conversation ids so open chat screens can clear
+  /// stale views (otherwise the deleted conversation persists on screen
+  /// with working Regenerate/Retry actions).
+  static final StreamController<String> _conversationDeletedController =
+      StreamController<String>.broadcast();
+
+  static Stream<String> get conversationDeletedStream =>
+      _conversationDeletedController.stream;
+
   static void reset() {
     _cachedConversations = null;
     _file = null;
@@ -313,6 +322,7 @@ class ChatHistoryService {
     final conversations = await loadConversations();
     final updated = conversations.where((c) => c.id != id).toList();
     await _saveConversationsInternal(updated);
+    _conversationDeletedController.add(id);
   }
 
   static Future<Conversation?> getConversation(String id) async {

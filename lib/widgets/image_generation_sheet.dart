@@ -40,6 +40,12 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
   int _selectedSize = 256;
   String? _error;
 
+  /// True when the current failure is "graphs installed, host assets absent",
+  /// which is recoverable via the Settings download action.
+  bool get _needsAssets =>
+      _error != null &&
+      (_error!.contains('extra assets') || _error!.contains('Extra assets'));
+
   @override
   void initState() {
     super.initState();
@@ -339,6 +345,16 @@ class _ImageGenerationSheetState extends State<ImageGenerationSheet> {
               ],
             ),
           ),
+          // Missing host assets are fixable in one tap; without this the
+          // message only tells the user to go hunting for the right screen.
+          if (_needsAssets) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _openSettings,
+              icon: const Icon(Icons.download_outlined, size: 18),
+              label: const Text('Download missing assets'),
+            ),
+          ],
         ],
         if (_generating) ...[
           const SizedBox(height: 14),

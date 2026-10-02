@@ -20,8 +20,22 @@ class MessageLimits {
   static int? deviceTotalMemMb;
 
   /// Updates the process-wide RAM cache used for KV recommendations.
+  ///
+  /// Null readings are ignored and the first real reading is latched: the KV
+  /// tier decides `maxTokens`, which is baked into the loaded LiteRT engine.
+  /// Letting the tier drift mid-session (unknown → 12 GB, say) forced a full
+  /// 30–120 s recompile of the 2.4 GB Gemma 4 engine on the second turn,
+  /// which is the "60 s load after one message" symptom.
   static void setDeviceTotalMemMb(int? mb) {
+    if (mb == null || mb <= 0) return;
     deviceTotalMemMb = mb;
+  }
+
+  /// Test seam: clears the latched RAM cache and KV tiers.
+  @visibleForTesting
+  static void resetDeviceTotalMemMbForTest() {
+    deviceTotalMemMb = null;
+    resetKvTokenLatch();
   }
 
   /// Fixed token overhead baked into Gemma 4 sessions (jinja FC template, etc.).
@@ -217,6 +231,26 @@ class MessageLimits {
     return value;
   }
 
+  /// Effective context for a custom-model load: [clampCustomContextTokens]
+  /// plus a large-weights cap for modest devices. A ≥2 GB file (e.g. a 4B
+  /// abliterated model) with 8192 KV tokens on GPU OOM-kills phones during
+  /// `litert_lm_engine_create` — uncatchable (SIGABRT/LMK). Cap to 4096
+  /// below 10 GB total RAM; smaller models and big devices are untouched.
+  static int effectiveCustomMaxTokens({
+    required int requested,
+    required int fileSizeBytes,
+    int? totalMemMb,
+  }) {
+    final clamped = clampCustomContextTokens(requested);
+    final sizeMb = fileSizeBytes / (1024 * 1024);
+    final modestDevice = totalMemMb == null || totalMemMb < 10240;
+    if (sizeMb >= 2000 && modestDevice && clamped > 4096) {
+      return 4096;
+    }
+
+    return clamped;
+  }
+
   static MessageLimitTier tierFor({
     NovaModel? model,
     bool isCustomModel = false,
@@ -288,6 +322,43 @@ class MessageLimits {
           totalMemMb: totalMemMb,
         );
     }
+  }
+
+  /// KV tokens the currently-loaded engine was built with, keyed by
+  /// `model|highContext`.
+  ///
+  /// `maxTokens` is baked into the LiteRT engine at create time, so the tier
+  /// must not drift while a model is resident: recomputing it per turn
+  /// (RAM reading arriving late, a different free-memory sample) forced a
+  /// 30–120 s recompile of the 2.4 GB Gemma 4 engine on the *second* turn.
+  /// Latch the first resolution and reuse it until [resetKvTokenLatch].
+  static final Map<String, int> _kvTokenLatches = <String, int>{};
+
+  /// Latched variant of [kvTokenLimitFor] used for engine-load decisions.
+  ///
+  /// Budget *checks* ([validateTokenBudget], [estimatePromptTokens]) keep using
+  /// the live [kvTokenLimitFor] so the UI context meter stays responsive; only
+  /// the value handed to `getActiveModel` goes through the latch.
+  static int kvTokenLimitForLoad(
+    NovaModel model, {
+    bool highContext = false,
+    int? totalMemMb,
+  }) {
+    final key = '${model.name}|high=$highContext';
+    return _kvTokenLatches.putIfAbsent(
+      key,
+      () => kvTokenLimitFor(
+        model,
+        highContext: highContext,
+        totalMemMb: totalMemMb,
+      ),
+    );
+  }
+
+  /// Drops latched KV tiers — call when the engine is torn down, or when the
+  /// user explicitly toggles high-context (a deliberate recompile).
+  static void resetKvTokenLatch() {
+    _kvTokenLatches.clear();
   }
 
   static int softLimit(MessageLimitTier tier, {bool hasAttachments = false}) {

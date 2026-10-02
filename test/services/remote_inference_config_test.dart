@@ -18,6 +18,33 @@ void main() {
       );
     });
 
+    test('skips /v1 infix for kilo and zen endpoints', () {
+      const kilo = RemoteInferenceConfig(
+        baseUrl: 'https://api.kilo.ai/api/gateway',
+        modelId: 'kilo-auto/free',
+        appendV1: false,
+      );
+      expect(
+        kilo.chatCompletionsUri().toString(),
+        'https://api.kilo.ai/api/gateway/chat/completions',
+      );
+      expect(
+        kilo.modelsUri().toString(),
+        'https://api.kilo.ai/api/gateway/models',
+      );
+
+      const zen = RemoteInferenceConfig(
+        baseUrl: 'https://opencode.ai/zen/v1',
+        modelId: 'claude-sonnet-4',
+        appendV1: false,
+      );
+      expect(
+        zen.chatCompletionsUri().toString(),
+        'https://opencode.ai/zen/v1/chat/completions',
+      );
+      expect(zen.modelsUri().toString(), 'https://opencode.ai/zen/v1/models');
+    });
+
     test('includes bearer token when set', () {
       const config = RemoteInferenceConfig(
         baseUrl: 'http://127.0.0.1:8080',

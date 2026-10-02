@@ -121,12 +121,108 @@ object DiffusionPipeline {
 
     Log.d(TAG, "Model unloaded")
   }
+  /**
+   * Z-Image Turbo end-to-end run. Graphs are 256 px-fixed, so larger
+   * requests clamp (a 512 silent misshape would be worse than a smaller
+   * image). Interpreters open lazily per phase inside [ZImageTfliteGraphs]
+   * and the pipeline releases each phase; the `finally` here is the
+   * backstop for mid-run failures.
+   */
+  private fun generateZImage(
+    config: GenerationConfig,
+    modelDir: File,
+    prompt: String,
+    onProgress: (String, Int) -> Unit,
+  ): PipelineResult {
+    if (config.size != ZImagePipeline.SIZE_PX) {
+      Log.w(TAG, "Z-Image graphs are 256px-fixed; clamping ${config.size} → 256")
+    }
+
+    val assetCheck = SafetensorsHeaderCheck.checkDerivedAssets(modelDir)
+    if (assetCheck is SafetensorsHeaderCheck.CheckResult.Failed) {
+      throw IllegalStateException(
+        "Z-Image host assets failed pre-check:\n" +
+          assetCheck.reasons.joinToString("\n") +
+          "\nReinstall extra assets from Settings.",
+      )
+    }
+    val tokenizer = try {
+      QwenBpeTokenizer.load(File(modelDir, "tokenizer"))
+    } catch (e: IllegalArgumentException) {
+      throw IllegalStateException(
+        "Z-Image tokenizer unreadable: ${e.message}. Reinstall extra assets from Settings.",
+        e,
+      )
+    }
+    val tWeights = try {
+      TEmbedderWeightsLoader.load(File(modelDir, "t_embedder.safetensors"))
+    } catch (e: IllegalStateException) {
+      throw IllegalStateException(
+        "Z-Image t_embedder unreadable: ${e.message}. Reinstall extra assets from Settings.",
+        e,
+      )
+    } catch (e: IllegalArgumentException) {
+      throw IllegalStateException(
+        "Z-Image t_embedder unreadable: ${e.message}. Reinstall extra assets from Settings.",
+        e,
+      )
+    }
+
+    val embedFile = File(modelDir, "embed_tokens.safetensors")
+    val graphs = ZImageTfliteGraphs(modelDir)
+    try {
+      val rgb = ZImagePipeline.generate(
+        graphs = graphs,
+        tokenize = { tokenizer.encode(it) },
+        rowsOf = { ids -> embedRows(embedFile, ids) },
+        weights = tWeights,
+        req = ZImagePipeline.Request(
+          prompt = prompt,
+          steps = config.steps,
+          guidance = config.guidanceScale,
+          seed = config.seed?.toLong() ?: kotlin.random.Random.nextLong(),
+        ),
+        onProgress = onProgress,
+      )
+      val pixels = ZImageHostLoop.chwToArgb(rgb, ZImagePipeline.SIZE_PX, ZImagePipeline.SIZE_PX)
+      val bitmap = Bitmap.createBitmap(
+        ZImagePipeline.SIZE_PX,
+        ZImagePipeline.SIZE_PX,
+        Bitmap.Config.ARGB_8888,
+      )
+      bitmap.setPixels(
+        pixels, 0, ZImagePipeline.SIZE_PX, 0, 0,
+        ZImagePipeline.SIZE_PX, ZImagePipeline.SIZE_PX,
+      )
+      val stream = ByteArrayOutputStream()
+      bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+      bitmap.recycle()
+      return PipelineResult(
+        imageBytes = stream.toByteArray(),
+        width = ZImagePipeline.SIZE_PX,
+        height = ZImagePipeline.SIZE_PX,
+      )
+    } finally {
+      try {
+        graphs.close()
+      } catch (_: Throwable) {
+      }
+      System.gc()
+    }
+  }
+
+  /** Flat embed rows re-chunked for [ZImagePipeline.rowsOf]. */
+  private fun embedRows(embedFile: File, ids: IntArray): Array<FloatArray> {
+    require(ids.isNotEmpty()) { "No token ids to embed" }
+    val flat = ZImageEmbedLookup.gatherRows(embedFile, ids)
+    val dim = ZImageHostLoop.EMBED_DIM
+    return Array(ids.size) { r -> flat.copyOfRange(r * dim, (r + 1) * dim) }
+  }
 
   private fun closeTextEncoder() {
     textEncoderInterpreter?.close()
     textEncoderInterpreter = null
   }
-
   private fun closeUnets() {
     unetMainInterpreters.forEach { it.close() }
     unetMainInterpreters = emptyList()
@@ -195,6 +291,16 @@ object DiffusionPipeline {
       ModelType.FLUX_2_KLEIN -> ImageGenerationModels.MODEL_SPECS[ImageGenerationModels.MODEL_FLUX_2_KLEIN]
     } ?: throw IllegalStateException("No model spec for ${config.modelType}")
 
+    val promptText = config.prompt.ifBlank { "A beautiful image" }
+
+    // Z-Image Turbo: full host loop (pre-check → tokenize → embed lookup →
+    // qwen_enc → DiT chunks → zvae). Graphs are 256 px-fixed; anything else
+    // is clamped below. Returns ahead of the latent pre-allocation below,
+    // which only the generic SD-style path consumes.
+    if (config.modelType == ModelType.Z_IMAGE_TURBO) {
+      return generateZImage(config, modelDir, promptText, onProgress)
+    }
+
     onProgress("Preparing latents", 5)
     val latentHeight = config.size / spec.latentHeightFactor
     val latentWidth = config.size / spec.latentWidthFactor
@@ -204,23 +310,6 @@ object DiffusionPipeline {
     val rng = kotlin.random.Random(seed)
     val latents = Array(latentHeight * latentWidth * latentChannels) {
       floatArrayOf((rng.nextFloat() - 0.5f) * 2f)
-    }
-
-    val promptText = config.prompt.ifBlank { "A beautiful image" }
-
-    // Z-Image Turbo LiteRT graphs expect host-side Qwen2 BPE + embed_tokens
-    // forming inputs_embeds[1,64,2560], then embx/refx + embc/refc before the
-    // DiT chunks — not raw UTF-8 into qwen_enc. Fail before mmap'ing the
-    // 3.5 GB encoder (that path also triggers TFLite "SUM failed to prepare").
-    if (config.modelType == ModelType.Z_IMAGE_TURBO) {
-      throw IllegalStateException(
-        "Z-Image Turbo is installed, but Nova's on-device runner is not " +
-          "wired for its LiteRT host loop yet. qwen_enc.tflite expects " +
-          "float inputs_embeds[1,64,2560] from Qwen2 BPE + embed_tokens " +
-          "(not raw text), plus embx/refx/embc/refc and CFG on the host. " +
-          "See DIFFUSION_MODEL_SPEC.md / Hub card litert-community/" +
-          "Z-Image-Turbo-LiteRT.",
-      )
     }
 
     onProgress("Loading text encoder", 8)

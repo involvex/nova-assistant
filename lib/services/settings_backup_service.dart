@@ -20,6 +20,8 @@ import 'package:nova_assistant/services/prompt_presets_service.dart';
 import 'package:nova_assistant/services/remote_inference_config.dart';
 import 'package:nova_assistant/services/tts_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
+import 'package:nova_assistant/ai/nova_pipeline.dart';
+import 'package:nova_assistant/core/config/cloud_provider_config.dart';
 
 /// Export/import user settings as JSON (no models or secrets).
 class SettingsBackupService {
@@ -76,6 +78,20 @@ class SettingsBackupService {
               prefs.getString(RemoteInferenceConfig.modelIdPrefsKey) ??
               RemoteInferenceConfig.defaultModelId,
           // Token intentionally omitted from backup — re-enter after import.
+          'novaCorePipeline':
+              prefs.getBool(NovaPipeline.enabledPrefsKey) ?? false,
+          'cloudProviders': {
+            for (final CloudProviderEntry entry in kCloudProviders)
+              entry.id: {
+                'baseUrl':
+                    prefs.getString(entry.baseUrlPrefsKey) ??
+                    entry.defaultBaseUrl,
+                'modelId':
+                    prefs.getString(entry.modelPrefsKey) ??
+                    entry.defaultModelId,
+                // Tokens intentionally omitted — re-enter after import.
+              },
+          },
         },
         'identity': {'config': identity.toJson(), 'isActive': identityActive},
         'mcp': {
@@ -268,6 +284,26 @@ class SettingsBackupService {
       assistant['remoteModelId'] as String? ??
           RemoteInferenceConfig.defaultModelId,
     );
+    await prefs.setBool(
+      NovaPipeline.enabledPrefsKey,
+      assistant['novaCorePipeline'] as bool? ?? false,
+    );
+    final cloudProviders = assistant['cloudProviders'] as Map<String, dynamic>?;
+    if (cloudProviders != null) {
+      for (final CloudProviderEntry entry in kCloudProviders) {
+        final raw = cloudProviders[entry.id];
+        if (raw is Map<String, dynamic>) {
+          await prefs.setString(
+            entry.baseUrlPrefsKey,
+            raw['baseUrl'] as String? ?? entry.defaultBaseUrl,
+          );
+          await prefs.setString(
+            entry.modelPrefsKey,
+            raw['modelId'] as String? ?? entry.defaultModelId,
+          );
+        }
+      }
+    }
   }
 
   Future<void> _importMcpSettings(

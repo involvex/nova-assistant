@@ -5,11 +5,11 @@ import 'package:nova_assistant/utils/message_limits.dart';
 void main() {
   group('MessageLimits', () {
     setUp(() {
-      MessageLimits.setDeviceTotalMemMb(null);
+      MessageLimits.resetDeviceTotalMemMbForTest();
     });
 
     tearDown(() {
-      MessageLimits.setDeviceTotalMemMb(null);
+      MessageLimits.resetDeviceTotalMemMbForTest();
     });
 
     test('SmolLM uses fast tier limits', () {
@@ -84,7 +84,7 @@ void main() {
     });
 
     test('kvTokenLimitFor Gemma 4 unknown RAM defaults to 4096', () {
-      MessageLimits.setDeviceTotalMemMb(null);
+      MessageLimits.resetDeviceTotalMemMbForTest();
       expect(
         MessageLimits.kvTokenLimitFor(NovaModel.gemma4E2b, highContext: false),
         4096,
@@ -92,7 +92,7 @@ void main() {
     });
 
     test('kvTokenLimitFor Gemma 4 highContext unknown RAM is 8192', () {
-      MessageLimits.setDeviceTotalMemMb(null);
+      MessageLimits.resetDeviceTotalMemMbForTest();
       expect(
         MessageLimits.kvTokenLimitFor(NovaModel.gemma4E2b, highContext: true),
         8192,
@@ -129,8 +129,56 @@ void main() {
       expect(MessageLimits.clampCustomContextTokens(8192), 8192);
     });
 
+    test('effectiveCustomMaxTokens caps 4B weights on modest devices', () {
+      const fourGB = 4 * 1024 * 1024 * 1024;
+      // 8 GB phone, 8192 requested → capped (the E4B OOM case).
+      expect(
+        MessageLimits.effectiveCustomMaxTokens(
+          requested: 8192,
+          fileSizeBytes: fourGB,
+          totalMemMb: 8192,
+        ),
+        4096,
+      );
+      // Unknown RAM → conservative cap.
+      expect(
+        MessageLimits.effectiveCustomMaxTokens(
+          requested: 8192,
+          fileSizeBytes: fourGB,
+        ),
+        4096,
+      );
+      // 12 GB phone → untouched.
+      expect(
+        MessageLimits.effectiveCustomMaxTokens(
+          requested: 8192,
+          fileSizeBytes: fourGB,
+          totalMemMb: 12288,
+        ),
+        8192,
+      );
+      // 1B weights → untouched even on small phones.
+      expect(
+        MessageLimits.effectiveCustomMaxTokens(
+          requested: 8192,
+          fileSizeBytes: 700 * 1024 * 1024,
+          totalMemMb: 4096,
+        ),
+        8192,
+      );
+      // Clamp bounds still apply underneath the cap.
+      expect(
+        MessageLimits.effectiveCustomMaxTokens(
+          requested: 100,
+          fileSizeBytes: fourGB,
+          totalMemMb: 8192,
+        ),
+        512,
+      );
+    });
+
     test('highContext empty session allows at least 4000 user chars', () {
-      MessageLimits.setDeviceTotalMemMb(null);
+      MessageLimits.resetDeviceTotalMemMbForTest();
       final maxChars = MessageLimits.maxUserCharsForInference(
         effectiveModel: NovaModel.gemma4E2b,
         highContext: true,
@@ -178,7 +226,7 @@ void main() {
     });
 
     test('12 GB device empty session allows long messages', () {
-      MessageLimits.setDeviceTotalMemMb(null);
+      MessageLimits.resetDeviceTotalMemMbForTest();
       final unknownRam = MessageLimits.maxUserCharsForInference(
         effectiveModel: NovaModel.gemma4E2b,
         highContext: false,
@@ -246,8 +294,49 @@ void main() {
       expect(gemma4 - smollm, greaterThanOrEqualTo(400));
     });
 
-    test('estimatePromptTokens flags near-limit prompts', () {
+    test('setDeviceTotalMemMb ignores null and zero readings', () {
+      MessageLimits.setDeviceTotalMemMb(12288);
       MessageLimits.setDeviceTotalMemMb(null);
+      MessageLimits.setDeviceTotalMemMb(0);
+      MessageLimits.setDeviceTotalMemMb(-1);
+      expect(MessageLimits.deviceTotalMemMb, 12288);
+    });
+
+    test('kvTokenLimitForLoad latches so a late RAM reading cannot '
+        'recompile the resident engine', () {
+      // First turn: RAM unknown → conservative 4096 tier gets latched.
+      final first = MessageLimits.kvTokenLimitForLoad(NovaModel.gemma4E2b);
+      expect(first, 4096);
+
+      // Second turn: the real reading finally arrives and would have selected
+      // a 16K tier. The latched value must not move, otherwise the loaded
+      // engine is torn down and recompiled (the 60 s reload).
+      MessageLimits.setDeviceTotalMemMb(12288);
+      expect(MessageLimits.kvTokenLimitForLoad(NovaModel.gemma4E2b), first);
+      // The live (non-load) resolution still reflects the new reading so the
+      // UI context meter stays accurate.
+      expect(MessageLimits.kvTokenLimitFor(NovaModel.gemma4E2b), 16384);
+    });
+
+    test('kvTokenLimitForLoad separates the high-context tier', () {
+      final normal = MessageLimits.kvTokenLimitForLoad(NovaModel.gemma4E2b);
+      final high = MessageLimits.kvTokenLimitForLoad(
+        NovaModel.gemma4E2b,
+        highContext: true,
+      );
+      expect(high, greaterThan(normal));
+    });
+
+    test('resetKvTokenLatch re-resolves the tier', () {
+      final first = MessageLimits.kvTokenLimitForLoad(NovaModel.gemma4E2b);
+      MessageLimits.resetKvTokenLatch();
+      MessageLimits.setDeviceTotalMemMb(12288);
+      expect(MessageLimits.kvTokenLimitForLoad(NovaModel.gemma4E2b), 16384);
+      expect(first, isNot(16384));
+    });
+
+    test('estimatePromptTokens flags near-limit prompts', () {
+      MessageLimits.resetDeviceTotalMemMbForTest();
       final estimate = MessageLimits.estimatePromptTokens(
         model: NovaModel.gemma4E2b,
         systemPrompt: 'x' * 12000,

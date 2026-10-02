@@ -24,6 +24,8 @@ void main() {
     lastGenerateArgs = null;
     DiffusionModel.debugForceInferenceReady = true;
     ImageGenerationService.instance.resetForTest();
+    // path_provider has no plugin under flutter_test — bypass disk I/O.
+    ImageGenerationService.instance.hasExtraAssetsOverride = (_) async => true;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           switch (call.method) {
@@ -44,6 +46,7 @@ void main() {
 
   tearDown(() {
     DiffusionModel.debugForceInferenceReady = false;
+    ImageGenerationService.instance.resetForTest();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
   });
@@ -85,6 +88,17 @@ void main() {
   testWidgets('shows runner-not-ready banner when host loop is unfinished', (
     tester,
   ) async {
+    // FLUX.2-klein has no native host loop yet; Z-Image Turbo does.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          switch (call.method) {
+            case 'isModelInstalled':
+              return true;
+            case 'getInstalledModels':
+              return <String>['FLUX.2-klein-4B-LiteRT'];
+          }
+          return null;
+        });
     DiffusionModel.debugForceInferenceReady = false;
     await pumpAndOpenSheet(tester);
 

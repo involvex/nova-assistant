@@ -5,6 +5,7 @@ import 'package:nova_assistant/services/chat_history_service.dart';
 import 'package:nova_assistant/services/export_service.dart';
 import 'package:nova_assistant/services/memory_service.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
+import 'package:nova_assistant/widgets/conversation_deleted_snackbar.dart';
 
 class ChatHistoryScreen extends StatefulWidget {
   const ChatHistoryScreen({super.key});
@@ -168,13 +169,8 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Conversation deleted'),
-          action: SnackBarAction(label: 'Undo', onPressed: _undoDelete),
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(conversationDeletedSnackBar(onUndo: _undoDelete));
     }
   }
 

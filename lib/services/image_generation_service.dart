@@ -21,6 +21,14 @@ class ImageGenerationService {
   /// Avoids a circular import with [ModelOrchestrator].
   static ImageGenMemoryHook? beforeGenerateHook;
 
+  /// Test seam: overrides the on-disk extra-assets check.
+  ///
+  /// Production leaves this null so [generateImage] consults
+  /// `ModelManager.hasExtraAssets` (path_provider disk I/O). Widget tests set
+  /// it to `(_) async => true` because path_provider has no plugin under
+  /// flutter_test.
+  Future<bool> Function(DiffusionModel)? hasExtraAssetsOverride;
+
   final _progressController = StreamController<GenProgress>.broadcast();
   Stream<GenProgress> get progressStream => _progressController.stream;
 
@@ -127,11 +135,24 @@ class ImageGenerationService {
       return null;
     }
 
-    // Fail before unloading Gemma — Z-Image/FLUX installs are download-only
-    // until the LiteRT host loop ships (avoids "Skipped N frames" jank).
+    // Fail before unloading Gemma — FLUX installs are download-only until
+    // its host loop ships (avoids "Skipped N frames" jank). Z-Image Turbo
+    // runs natively; missing extra assets are reported just below.
     if (!resolved.inferenceReady) {
       lastError = resolved.runnerNotReadyMessage;
       debugPrint('ImageGenerationService: ${resolved.runnerNotReadyMessage}');
+      return null;
+    }
+
+    // Extra-assets gate (tokenizer + embed_tokens + t_embedder).
+    final hasAssets = hasExtraAssetsOverride != null
+        ? await hasExtraAssetsOverride!(resolved)
+        : await ModelManager.instance.hasExtraAssets(resolved);
+    if (!hasAssets) {
+      lastError = resolved.runnerNotReadyMessage;
+      debugPrint(
+        'ImageGenerationService: extra assets missing for ${resolved.name}',
+      );
       return null;
     }
 
@@ -246,6 +267,7 @@ class ImageGenerationService {
   void resetForTest() {
     _isGenerating = false;
     lastError = null;
+    hasExtraAssetsOverride = null;
   }
 }
 

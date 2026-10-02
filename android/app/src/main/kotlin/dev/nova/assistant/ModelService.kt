@@ -8,7 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -30,7 +32,19 @@ class ModelService : Service() {
         const val CHANNEL_ID = "nova_model_channel"
         var isRunning = false
             private set
+
+        /**
+         * How long the service may sit without a keep-alive ping before it
+         * stops itself. A foreground service that never retires is a permanent
+         * wake-lock source and was a measurable contributor to the device
+         * heating up during long chat sessions. The Flutter side re-pings on
+         * every successful model load (see ModelOrchestrator._startModelKeepAlive).
+         */
+        const val IDLE_SHUTDOWN_MS = 5 * 60 * 1000L
     }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val idleShutdown = Runnable { stopSelfSafely("idle") }
 
     private var isModelLoaded = false
     private var loadedModelName: String? = null
@@ -52,6 +66,39 @@ class ModelService : Service() {
         }
 
         setupMethodChannel()
+        scheduleIdleShutdown()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "onStartCommand")
+        // START_NOT_STICKY: Android must not resurrect this service on its own.
+        // Returning START_STICKY kept an idle foreground service (and its
+        // wake lock) alive indefinitely, heating the device with no user
+        // benefit. Nova re-starts it explicitly whenever a model is loaded.
+        scheduleIdleShutdown()
+        return START_NOT_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun scheduleIdleShutdown() {
+        handler.removeCallbacks(idleShutdown)
+        handler.postDelayed(idleShutdown, IDLE_SHUTDOWN_MS)
+    }
+
+    private fun stopSelfSafely(reason: String) {
+        if (!isRunning) return
+        Log.d(TAG, "ModelService stopping ($reason)")
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(idleShutdown)
+        super.onDestroy()
+        isRunning = false
+        isModelLoaded = false
+        Log.d(TAG, "ModelService destroyed")
     }
 
     private fun createNotificationChannel() {
@@ -114,19 +161,5 @@ class ModelService : Service() {
     private fun updateNotification(text: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, buildNotification(text))
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "onStartCommand")
-        return START_STICKY
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    override fun onDestroy() {
-        super.onDestroy()
-        isRunning = false
-        isModelLoaded = false
-        Log.d(TAG, "ModelService destroyed")
     }
 }

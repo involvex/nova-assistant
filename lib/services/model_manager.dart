@@ -11,6 +11,8 @@ import 'package:path/path.dart' as p;
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/diffusion_model_info.dart';
 import 'package:nova_assistant/models/uncensored_model_catalog.dart';
+import 'package:nova_assistant/services/diffusion_download_service.dart';
+import 'package:nova_assistant/services/zimage_tensor_extraction.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/secure_prefs.dart';
 
@@ -1630,6 +1632,106 @@ class ModelManager {
 
   bool isDiffusionModelInstalled(DiffusionModel model) {
     return _diffusionModels.any((m) => m.model == model);
+  }
+
+  /// Checks if all required extra assets (tokenizer, embed_tokens, t_embedder)
+  /// exist for the given model.
+  Future<bool> hasExtraAssets(DiffusionModel model) async {
+    final modelDir = await findDiffusionModelPath(model);
+    if (modelDir == null) return false;
+    return await model.extraAssets.hasExtraAssets(Directory(modelDir));
+  }
+
+  /// Downloads extra assets for a diffusion model if they're not present.
+  ///
+  /// Returns true only when [hasExtraAssets] passes afterwards. Staging the
+  /// upstream shards alone is not success — the extracted
+  /// `embed_tokens.safetensors` / `t_embedder.safetensors` must exist, so
+  /// callers never show "downloaded" while generation stays gated.
+  Future<bool> installExtraAssets({
+    required DiffusionModel model,
+    String? hfToken,
+    void Function(int received, int total)? onProgress,
+  }) async {
+    final modelDir = await findDiffusionModelPath(model);
+    if (modelDir == null) {
+      debugPrint('ModelManager: model dir not found for ${model.name}');
+      return false;
+    }
+
+    final extraAssets = model.extraAssets;
+    if (await _extraAssetsReady(Directory(modelDir), extraAssets)) {
+      debugPrint(
+        'ModelManager: extra assets already present for ${model.name}',
+      );
+      return true;
+    }
+
+    try {
+      // Tokenizer files download directly (~11 MB). The two base-checkpoint
+      // shards are multi-GB but yield only ~780 MB of host tensors, so they
+      // are pulled by HTTP range in extractMissingRemote rather than staged
+      // whole — that saves several GB of transfer and phone storage.
+      await DiffusionDownloadService.instance.downloadExtraAssets(
+        model: model,
+        extraAssets: extraAssets,
+        destDir: Directory(modelDir),
+        hfToken: hfToken,
+        onProgress: onProgress,
+      );
+      bool extracted = await ZImageTensorExtraction.extractMissingRemote(
+        modelDir: Directory(modelDir),
+        model: model,
+        hfToken: hfToken,
+        onProgress: onProgress,
+      );
+      if (!extracted) {
+        // Ranges unavailable (or a transient failure): fall back to shards a
+        // previous run already staged locally, if any.
+        extracted = await ZImageTensorExtraction.extractMissing(
+          modelDir: Directory(modelDir),
+          model: model,
+        );
+      }
+      final verified = await _extraAssetsReady(
+        Directory(modelDir),
+        extraAssets,
+      );
+      if (!verified) {
+        debugPrint(
+          'ModelManager: extra assets for ${model.name} still incomplete '
+          'after download+extract (extraction pending or pins mismatched)',
+        );
+      }
+      return verified;
+    } catch (e) {
+      debugPrint(
+        'ModelManager: failed to download extra assets for ${model.name}: $e',
+      );
+      return false;
+    }
+  }
+
+  /// Existence ([hasExtraAssets]) plus structural shape/dtype checks plus
+  /// any populated file pins. All three must pass.
+  Future<bool> _extraAssetsReady(
+    Directory modelDir,
+    DiffusionExtraAssets extraAssets,
+  ) async {
+    if (!await extraAssets.hasExtraAssets(modelDir)) return false;
+    if (!await ZImageTensorExtraction.verifyDerivedAssets(
+      modelDir: modelDir,
+      assets: extraAssets,
+    )) {
+      return false;
+    }
+    try {
+      await extraAssets.verifyFilePins(modelDir);
+    } catch (e) {
+      debugPrint('ModelManager: extra-asset pin mismatch: $e');
+      return false;
+    }
+    return true;
   }
 
   Future<String?> findDiffusionModelPath(DiffusionModel model) async {

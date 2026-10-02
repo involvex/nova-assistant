@@ -11,9 +11,13 @@ class SecurePrefs {
 
   static const _secure = FlutterSecureStorage();
 
+  /// Bounds every platform-channel call: an unresponsive channel must never
+  /// hang the UI (or tests) forever — fall back to SharedPreferences instead.
+  static const _channelTimeout = Duration(seconds: 5);
+
   Future<String?> read(String key) async {
     try {
-      final value = await _secure.read(key: key);
+      final value = await _secure.read(key: key).timeout(_channelTimeout);
       if (value != null) return value;
     } catch (e) {
       debugPrint('SecurePrefs: failed to read $key from secure storage: $e');
@@ -35,7 +39,7 @@ class SecurePrefs {
 
   Future<void> write(String key, String value) async {
     try {
-      await _secure.write(key: key, value: value);
+      await _secure.write(key: key, value: value).timeout(_channelTimeout);
     } catch (e) {
       debugPrint('SecurePrefs: failed to write $key to secure storage: $e');
       throw Exception('Secure storage unavailable for key: $key');
@@ -44,7 +48,7 @@ class SecurePrefs {
 
   Future<void> delete(String key) async {
     try {
-      await _secure.delete(key: key);
+      await _secure.delete(key: key).timeout(_channelTimeout);
     } catch (e) {
       debugPrint('SecurePrefs: failed to delete $key from secure storage: $e');
       throw Exception('Secure storage unavailable for key: $key');
@@ -55,7 +59,7 @@ class SecurePrefs {
 
   Future<bool> containsKey(String key) async {
     try {
-      final value = await _secure.read(key: key);
+      final value = await _secure.read(key: key).timeout(_channelTimeout);
       if (value != null) return true;
     } catch (e) {
       debugPrint('SecurePrefs: failed to check $key in secure storage: $e');

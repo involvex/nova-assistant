@@ -34,6 +34,7 @@ import 'package:nova_assistant/utils/alarm_time_parser.dart';
 import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/generation_safety.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
+import 'package:nova_assistant/utils/image_gen_intent_parser.dart';
 import 'package:nova_assistant/utils/open_app_intent_parser.dart';
 import 'package:nova_assistant/utils/search_web_intent_parser.dart';
 import 'package:nova_assistant/utils/tool_call_parser.dart';
@@ -42,6 +43,13 @@ import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/session_history_reinjection.dart';
 import 'package:nova_assistant/services/image_generation_service.dart';
 import 'package:nova_assistant/models/diffusion_model_info.dart';
+import 'package:nova_assistant/ai/bootstrap.dart';
+import 'package:nova_assistant/ai/nova_core.dart';
+import 'package:nova_assistant/ai/nova_pipeline.dart';
+import 'package:nova_assistant/ai/router/intent.dart';
+import 'package:nova_assistant/ai/router/routing_candidates.dart';
+import 'package:nova_assistant/core/config/cloud_provider_config.dart';
+import 'package:nova_assistant/screen/screen_context.dart';
 
 enum DownloadConsent { download, pickFile, cancel }
 
@@ -137,12 +145,36 @@ class InferenceResult {
   });
 }
 
+/// NovaCore-backed routing prediction for UI badges and pre-send guards.
+///
+/// `providerId` is a registry id (`local-gemma`, `openrouter`, …);
+/// `localModel` is set only for on-device targets (KV-budget math).
+/// `label` is badge-ready (`'Gemma 4 E2B'`, `'OpenRouter'`, `'Remote LAN'`).
+class EffectiveTarget {
+  const EffectiveTarget({
+    required this.label,
+    required this.providerId,
+    this.localModel,
+    this.intent,
+    this.agentId,
+  });
+
+  final String label;
+  final String providerId;
+  final NovaModel? localModel;
+  final Intent? intent;
+  final String? agentId;
+
+  bool get isLocal => providerId.startsWith('local-');
+}
+
 class ModelOrchestrator {
   static final ModelOrchestrator instance = ModelOrchestrator._();
   ModelOrchestrator._();
 
   static const _prefsKey = 'preferred_model_override';
   static const _customPrefsKey = 'preferred_custom_model_id';
+  static const _cloudPrefsKey = 'settings_preferred_cloud_provider';
   SharedPreferences? _cachedPrefs;
   Future<SharedPreferences> _getPrefs() async {
     _cachedPrefs ??= await SharedPreferences.getInstance();
@@ -162,6 +194,8 @@ class ModelOrchestrator {
   bool _activeModelSupportsImage = false;
   NovaModel? _preferredModelOverride;
   CustomModel? _preferredCustomModelOverride;
+  String? _preferredCloudProviderId;
+  Set<String>? _enabledLocalCandidates;
   bool _modelOverrideDirty = false;
   bool _isInitialized = false;
   bool _batteryOptimizationEnabled = true;
@@ -174,6 +208,7 @@ class ModelOrchestrator {
     baseUrl: RemoteInferenceConfig.defaultBaseUrl,
     modelId: RemoteInferenceConfig.defaultModelId,
   );
+  bool _novaCorePipelineEnabled = false;
   List<ChatMessage> _pendingReplay = const [];
   List<ChatMessage> _lastReplaySource = const [];
 
@@ -256,7 +291,19 @@ class ModelOrchestrator {
 
   InferenceBackend get inferenceBackend => _inferenceBackend;
 
-  RemoteInferenceConfig get remoteInferenceConfig => _remoteConfig;
+  /// Beta hybrid pipeline: cloud turns route via `NovaCore`.
+  bool get novaCorePipelineEnabled => _novaCorePipelineEnabled;
+
+  /// Gradual rollout decision (pure, unit-tested via `NovaPipeline`).
+  static bool shouldDelegateToNovaCore({
+    required bool pipelineEnabled,
+    required String providerId,
+  }) {
+    return NovaPipeline.shouldDelegate(
+      pipelineEnabled: pipelineEnabled,
+      providerId: providerId,
+    );
+  }
 
   /// Cached assistant role (loaded at init / settings change).
   AssistantRole get assistantRole => _cachedRole;
@@ -276,6 +323,36 @@ class ModelOrchestrator {
     }
 
     return _completeOnceLocal(prompt, timeout);
+  }
+
+  Future<String?> _completeOnceRemote(String prompt, Duration timeout) async {
+    try {
+      final client = RemoteInferenceClient();
+      final buffer = StringBuffer();
+      await for (final chunk
+          in client
+              .streamChat(
+                config: _remoteConfig,
+                messages: [
+                  {
+                    'role': 'system',
+                    'content': 'You reply with JSON only. No markdown fences.',
+                  },
+                  {'role': 'user', 'content': prompt},
+                ],
+                temperature: 0.7,
+              )
+              .timeout(timeout)) {
+        buffer.write(chunk);
+      }
+      final text = buffer.toString().trim();
+
+      return text.isEmpty ? null : text;
+    } catch (e) {
+      debugPrint('[Nova] completeOnce remote failed: $e');
+
+      return null;
+    }
   }
 
   /// Creates a chat, retrying without tools if LiteRT returns null
@@ -320,36 +397,6 @@ class ModelOrchestrator {
     }
 
     return attempt(tools.isEmpty ? const [] : tools);
-  }
-
-  Future<String?> _completeOnceRemote(String prompt, Duration timeout) async {
-    try {
-      final client = RemoteInferenceClient();
-      final buffer = StringBuffer();
-      await for (final chunk
-          in client
-              .streamChat(
-                config: _remoteConfig,
-                messages: [
-                  {
-                    'role': 'system',
-                    'content': 'You reply with JSON only. No markdown fences.',
-                  },
-                  {'role': 'user', 'content': prompt},
-                ],
-                temperature: 0.7,
-              )
-              .timeout(timeout)) {
-        buffer.write(chunk);
-      }
-      final text = buffer.toString().trim();
-
-      return text.isEmpty ? null : text;
-    } catch (e) {
-      debugPrint('[Nova] completeOnce remote failed: $e');
-
-      return null;
-    }
   }
 
   Future<String?> _completeOnceLocal(String prompt, Duration timeout) async {
@@ -404,11 +451,28 @@ class ModelOrchestrator {
 
   void setKeepModelWarm(bool enabled) {
     _keepModelWarm = enabled;
+    // The keep-alive foreground service tracks the setting: turning keep-warm
+    // off must also retire the service, or it keeps a wake lock (and the heat
+    // that comes with it) for an engine that was just released.
+    if (!enabled) {
+      _stopModelKeepAlive();
+    } else if (_activeModel != null && _activeModelType != null) {
+      _startModelKeepAlive(_activeModelType!.displayName);
+    }
     _resetIdleTimer();
   }
 
   void setHighContextEnabled(bool enabled) {
     _highContextEnabled = enabled;
+  }
+
+  /// Clears the latched KV tier so the next load picks up the new setting.
+  ///
+  /// Only for *deliberate* user-initiated changes (high-context toggle,
+  /// engine reset). Background pref reloads must not call this — that is the
+  /// 60 s recompile the latch exists to prevent.
+  void invalidateKvTokenLatch() {
+    MessageLimits.resetKvTokenLatch();
   }
 
   void setAutoCompactEnabled(bool enabled) {
@@ -665,6 +729,7 @@ class ModelOrchestrator {
     if (_preferredModelOverride == model) return;
     _preferredModelOverride = model;
     _preferredCustomModelOverride = null;
+    _preferredCloudProviderId = null;
     _modelOverrideDirty = true;
     if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
       _streamingCompleter!.complete();
@@ -685,7 +750,6 @@ class ModelOrchestrator {
   }
 
   CustomModel? get preferredCustomModel => _preferredCustomModelOverride;
-
   set preferredCustomModel(CustomModel? model) {
     final sameId = _preferredCustomModelOverride?.id == model?.id;
     final sameCtx =
@@ -694,6 +758,7 @@ class ModelOrchestrator {
     if (sameId && sameCtx) return;
     _preferredCustomModelOverride = model;
     _preferredModelOverride = null;
+    _preferredCloudProviderId = null;
     _modelOverrideDirty = true;
     if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
       _streamingCompleter!.complete();
@@ -722,6 +787,42 @@ class ModelOrchestrator {
     unawaited(
       _persistPreferredModel(null).catchError((Object e) {
         debugPrint('ModelOrchestrator: failed to persist model: $e');
+      }),
+    );
+  }
+
+  /// Manually pinned cloud provider id (`kilo-gateway`, `openrouter`, …) or
+  /// null for automatic routing. Persists across restarts. Pinning cloud
+  /// needs no engine teardown — the warm on-device model stays loaded as
+  /// fallback, and cloud turns bypass the smart-routing flag (explicit user
+  /// choice, same as the LAN backend toggle).
+  String? get preferredCloudProviderId => _preferredCloudProviderId;
+
+  set preferredCloudProvider(String? providerId) {
+    if (_preferredCloudProviderId == providerId) return;
+    _preferredCloudProviderId = providerId;
+    if (providerId != null) {
+      _preferredModelOverride = null;
+      _preferredCustomModelOverride = null;
+      unawaited(
+        _persistPreferredModel(null).catchError((Object e) {
+          debugPrint('ModelOrchestrator: failed to persist model: $e');
+        }),
+      );
+      unawaited(
+        _persistPreferredCustomModel(null).catchError((Object e) {
+          debugPrint('ModelOrchestrator: failed to persist custom model: $e');
+        }),
+      );
+    }
+    _modelOverrideDirty = true;
+    if (_streamingCompleter != null && !_streamingCompleter!.isCompleted) {
+      _streamingCompleter!.complete();
+    }
+    _tryStopGeneration();
+    unawaited(
+      _persistPreferredCloudProvider(providerId).catchError((Object e) {
+        debugPrint('ModelOrchestrator: failed to persist cloud provider: $e');
       }),
     );
   }
@@ -784,8 +885,25 @@ class ModelOrchestrator {
     }
   }
 
+  Future<void> _persistPreferredCloudProvider(String? providerId) async {
+    final prefs = await _getPrefs();
+    if (providerId == null || providerId.isEmpty) {
+      await prefs.remove(_cloudPrefsKey);
+    } else {
+      await prefs.setString(_cloudPrefsKey, providerId);
+    }
+  }
+
   Future<void> _loadPreferredModel() async {
     final prefs = await _getPrefs();
+    final cloudId = prefs.getString(_cloudPrefsKey);
+    if (cloudId != null && cloudId.isNotEmpty) {
+      _preferredCloudProviderId = cloudId;
+      _preferredCustomModelOverride = null;
+      _preferredModelOverride = null;
+
+      return;
+    }
     final customId = prefs.getString(_customPrefsKey);
     if (customId != null && customId.isNotEmpty) {
       final custom = ModelManager.instance.getCustomModelById(customId);
@@ -836,16 +954,23 @@ class ModelOrchestrator {
     _remoteConfig = await RemoteInferenceConfig.fromPrefsAsync();
     _batteryAwareSwitching =
         prefs.getBool('settings_battery_aware_switching') ?? true;
+    _novaCorePipelineEnabled =
+        prefs.getBool(NovaPipeline.enabledPrefsKey) ?? false;
+    _enabledLocalCandidates = RoutingCandidates.enabledLocalModels(
+      await RoutingCandidates.loadIds(),
+    );
 
     // Warm RAM cache so Gemma 4 KV follows Edge Gallery-style tiers.
+    // `setDeviceTotalMemMb` latches the first real reading, so a null or
+    // late-arriving sample can never move the KV tier under a resident model.
     final totalMem = await MemoryDiagnosticsService.instance.readTotalMemMb();
     MessageLimits.setDeviceTotalMemMb(totalMem);
 
-    // maxTokens is baked into the loaded LiteRT engine — reload when KV tier
-    // changes (high-context toggle or RAM cache becoming available).
-    // Defer the actual engine close to the next sendMessage so the user can
-    // toggle the setting without waiting 30-120s for a same-model cold reload.
+    // maxTokens is baked into the loaded LiteRT engine. A *user-initiated*
+    // high-context toggle is a deliberate recompile; a background pref reload
+    // is not, so only clear the KV latch when the user actually changed it.
     if (highContextChanged && _isInitialized) {
+      invalidateKvTokenLatch();
       _activeChat = null;
       _lastChatSessionKey = null;
       // Stale model will be detected by _getOrCreateModel via the
@@ -859,6 +984,7 @@ class ModelOrchestrator {
   void clearModelOverride() {
     _preferredModelOverride = null;
     _preferredCustomModelOverride = null;
+    _preferredCloudProviderId = null;
     _modelOverrideDirty = false;
     unawaited(
       _persistPreferredModel(null).catchError((Object e) {
@@ -868,6 +994,11 @@ class ModelOrchestrator {
     unawaited(
       _persistPreferredCustomModel(null).catchError((Object e) {
         debugPrint('ModelOrchestrator: failed to clear custom model: $e');
+      }),
+    );
+    unawaited(
+      _persistPreferredCloudProvider(null).catchError((Object e) {
+        debugPrint('ModelOrchestrator: failed to clear cloud provider: $e');
       }),
     );
   }
@@ -900,6 +1031,13 @@ class ModelOrchestrator {
   void _startModelKeepAlive(String modelName) {
     if (kIsWeb) return;
     if (!_canAccessPlatformChannel()) return;
+    // The keep-alive is a foreground service (a wake lock). With keep-warm off
+    // the engine is released on idle anyway, so the service bought nothing and
+    // only cost battery / heat.
+    if (!_keepModelWarm) {
+      _stopModelKeepAlive();
+      return;
+    }
     const channel = MethodChannel('dev.nova.assistant/model_service');
     channel
         .invokeMethod<bool>('start', {'modelName': modelName})
@@ -1060,6 +1198,9 @@ class ModelOrchestrator {
   }
 
   /// Predicts which [NovaModel] will run without loading the engine.
+  ///
+  /// Local-only helper kept for message-limit math (KV budgets are always
+  /// local). Routing decisions live in [predictEffectiveTarget].
   NovaModel predictEffectiveModel({
     required String query,
     bool thinkingMode = false,
@@ -1082,12 +1223,131 @@ class ModelOrchestrator {
       return selector.primaryHeavy;
     }
 
-    return _selectModel(
+    return _selectModelConstrained(
       query: query,
       screenshot: hasImage ? Uint8List(0) : null,
       hasImageAttachments: hasImage,
       thinkingMode: thinkingMode,
     );
+  }
+
+  /// NovaCore-backed routing prediction for UI badges and pre-send guards.
+  ///
+  /// Local-first: explicit local pins stay local with the same precedence as
+  /// `processMessage`, a pinned cloud provider targets its registry id, and
+  /// the Remote-LAN backend reports directly without touching NovaCore.
+  /// Everything else resolves through `NovaCore` (intent router → strategy →
+  /// offline gate), falling back to the legacy local selection when NovaCore
+  /// is unavailable.
+  Future<EffectiveTarget> predictEffectiveTarget({
+    required String query,
+    bool thinkingMode = false,
+    bool hasImage = false,
+    bool forcePrimaryModel = false,
+  }) async {
+    if (_preferredCustomModelOverride != null) {
+      final custom = _preferredCustomModelOverride!;
+
+      return EffectiveTarget(
+        label: custom.displayName,
+        providerId: 'local-custom',
+      );
+    }
+    final String? manualCloud = _preferredCloudProviderId;
+    if (manualCloud != null && manualCloud.isNotEmpty) {
+      // No NovaCore needed: an explicit pin always targets its provider
+      // (offline gating happens per turn, not for the badge).
+      return EffectiveTarget(
+        label: providerDisplayName(manualCloud),
+        providerId: manualCloud,
+      );
+    }
+    if (_inferenceBackend == InferenceBackend.remote) {
+      return const EffectiveTarget(label: 'Remote LAN', providerId: 'openai');
+    }
+    if (_preferredModelOverride != null) {
+      final local = predictEffectiveModel(
+        query: query,
+        thinkingMode: thinkingMode,
+        hasImage: hasImage,
+        forcePrimaryModel: forcePrimaryModel,
+      );
+
+      return EffectiveTarget(
+        label: local.displayName,
+        providerId: 'local-gemma',
+        localModel: local,
+      );
+    }
+    if (forcePrimaryModel) {
+      final primary = selector.primaryHeavy;
+
+      return EffectiveTarget(
+        label: primary.displayName,
+        providerId: 'local-gemma',
+        localModel: primary,
+      );
+    }
+
+    try {
+      final core = NovaBootstrap.core;
+      final plan = await core.resolve(query, hasImage: hasImage);
+      if (plan.providerId.startsWith('local-')) {
+        final local = predictEffectiveModel(
+          query: query,
+          thinkingMode: thinkingMode,
+          hasImage: hasImage,
+        );
+
+        return EffectiveTarget(
+          label: local.displayName,
+          providerId: plan.providerId,
+          localModel: local,
+          intent: plan.intent,
+          agentId: plan.agentId,
+        );
+      }
+
+      return EffectiveTarget(
+        label: providerDisplayName(plan.providerId),
+        providerId: plan.providerId,
+        intent: plan.intent,
+        agentId: plan.agentId,
+      );
+    } catch (e) {
+      debugPrint('predictEffectiveTarget fallback to local: $e');
+      final local = predictEffectiveModel(
+        query: query,
+        thinkingMode: thinkingMode,
+        hasImage: hasImage,
+      );
+
+      return EffectiveTarget(
+        label: local.displayName,
+        providerId: 'local-gemma',
+        localModel: local,
+      );
+    }
+  }
+
+  /// Human-readable badge for a provider id.
+  static String providerDisplayName(String providerId) {
+    if (providerId == 'openai') {
+      return 'Remote LAN';
+    }
+    for (final CloudProviderEntry entry in kCloudProviders) {
+      if (entry.id == providerId) {
+        return entry.displayName;
+      }
+    }
+    if (providerId == 'local-qwen') {
+      return 'Qwen (local)';
+    }
+    if (providerId == 'local-custom') {
+      return 'Custom (local)';
+    }
+
+    return 'Gemma (local)';
   }
 
   Duration _loadTimeoutFor(NovaModel model) {
@@ -1105,6 +1365,7 @@ class ModelOrchestrator {
 
   Future<void> _teardownPartialLoad() async {
     _loadEpoch++;
+    MessageLimits.resetKvTokenLatch();
     try {
       await _activeModel?.close();
     } catch (e) {
@@ -1332,6 +1593,7 @@ class ModelOrchestrator {
   Future<void> resetInferenceSession() async {
     _idleTimer?.cancel();
     _idleTimer = null;
+    MessageLimits.resetKvTokenLatch();
     _stopBatteryCheck();
     _previousModelBeforeBattery = null;
     await _tryStopGeneration();
@@ -2050,6 +2312,31 @@ class ModelOrchestrator {
         } catch (_) {}
       }
 
+      // Native GPU/OpenCL memory from the torn-down engine is often not
+      // reclaimed yet when the first gate ran — re-measure right before the
+      // native load, where an OOM would kill the process uncatchably
+      // (SIGABRT/LMK, "Lost connection to device").
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      final preLoadAvail = await mem.readAvailableMemMb();
+      final preLoadMinFree = PlatformAdaptationService.instance
+          .minFreeRamMbForFileSizeMb(
+            fileSize / (1024 * 1024),
+            totalMemMb: mem.lastTotalMemMb,
+          );
+      if (preLoadMinFree != null &&
+          preLoadAvail != null &&
+          preLoadAvail < preLoadMinFree) {
+        yield InferenceResult(
+          text:
+              'Memory is still being freed after unloading the previous model '
+              '($preLoadAvail MB free, need ~$preLoadMinFree MB). '
+              'Wait a few seconds and send your prompt again.',
+          model: selector.primaryHeavy,
+          isStreaming: false,
+        );
+        return;
+      }
+
       await ModelManager.instance.registerDiskModel(
         filePath: modelPath,
         fileName: customModel.fileName,
@@ -2064,6 +2351,26 @@ class ModelOrchestrator {
       final backend = (total != null && total < 6656)
           ? PreferredBackend.cpu
           : PreferredBackend.gpu;
+      final requestedMaxTokens = MessageLimits.clampCustomContextTokens(
+        customModel.maxContextTokens,
+      );
+      final effectiveMaxTokens = MessageLimits.effectiveCustomMaxTokens(
+        requested: requestedMaxTokens,
+        fileSizeBytes: fileSize,
+        totalMemMb: total,
+      );
+      if (effectiveMaxTokens < requestedMaxTokens) {
+        _statusController.add(
+          'Capped context to $effectiveMaxTokens tokens for device RAM '
+          '(model file ${(fileSize / (1024 * 1024)).round()} MB).',
+        );
+      }
+      debugPrint(
+        '[Nova] custom load vitals: file=${(fileSize / (1024 * 1024)).round()}MB '
+        'backend=${backend.name} maxTokens=$effectiveMaxTokens '
+        'availMemMb=$preLoadAvail totalMemMb=$total '
+        'pssMb=${mem.lastPssMb}',
+      );
       // #region agent log
       _debugLog(
         hypothesisId: 'F',
@@ -2079,9 +2386,7 @@ class ModelOrchestrator {
       );
       // #endregion
       inferenceModel = await _loadActiveModelWithTimeout(
-        maxTokens: MessageLimits.clampCustomContextTokens(
-          customModel.maxContextTokens,
-        ),
+        maxTokens: effectiveMaxTokens,
         timeout: const Duration(seconds: 120),
         supportImage: needsImageSupport,
         preferredBackend: backend,
@@ -2448,8 +2753,13 @@ class ModelOrchestrator {
   NovaModel? get downloadConsentModel => _downloadConsentModel;
   String? get downloadConsentUrl => _downloadConsentUrl;
 
+  /// KV tokens the *loaded engine* must be built with.
+  ///
+  /// Latched (see [MessageLimits.kvTokenLimitForLoad]) so a late-arriving
+  /// RAM reading cannot silently change `maxTokens` under a resident model
+  /// and trigger a full 30–120 s recompile on the next turn.
   int _tokenLimitFor(NovaModel model) {
-    return MessageLimits.kvTokenLimitFor(
+    return MessageLimits.kvTokenLimitForLoad(
       model,
       highContext: _highContextEnabled,
     );
@@ -2622,6 +2932,39 @@ class ModelOrchestrator {
     return selected;
   }
 
+  /// [_selectModel] constrained to toggled routing candidates (model
+  /// selector toggles). Untouched when everything is enabled (null) or the
+  /// pick is enabled; otherwise falls back by preference order so the pool
+  /// can never run empty and routing never dead-ends.
+  NovaModel _selectModelConstrained({
+    required String query,
+    Uint8List? screenshot,
+    bool hasImageAttachments = false,
+    bool thinkingMode = false,
+  }) {
+    final NovaModel selected = _selectModel(
+      query: query,
+      screenshot: screenshot,
+      hasImageAttachments: hasImageAttachments,
+      thinkingMode: thinkingMode,
+    );
+    final Set<String>? enabled = _enabledLocalCandidates;
+    if (enabled == null || enabled.contains(selected.name)) {
+      return selected;
+    }
+    for (final NovaModel candidate in <NovaModel>[
+      selector.primaryHeavy,
+      selector.fastModel,
+      ...NovaModel.values,
+    ]) {
+      if (enabled.contains(candidate.name)) {
+        return candidate;
+      }
+    }
+
+    return selected;
+  }
+
   /// Prefer FastVLM for screen/vision turns when free RAM is tight so warm
   /// Gemma 4 + MediaProjection do not LMK the process.
   Future<NovaModel> _resolveVisionModelForRam(NovaModel preferred) async {
@@ -2656,8 +2999,13 @@ class ModelOrchestrator {
   }
 
   /// First installed vision-capable catalog model, or null.
+  /// Honors routing-candidate toggles (a toggled-off model never loads).
   Future<NovaModel?> _installedVisionModel() async {
     for (final candidate in const [NovaModel.fastvlm, NovaModel.gemma4E2b]) {
+      final Set<String>? enabled = _enabledLocalCandidates;
+      if (enabled != null && !enabled.contains(candidate.name)) {
+        continue;
+      }
       final fileName = ModelHuggingFaceURLs.fileNameFor(candidate);
       if (await ModelManager.instance.isInstalledOnDisk(fileName)) {
         return candidate;
@@ -2668,6 +3016,209 @@ class ModelOrchestrator {
   }
 
   static const _maxToolRounds = 5;
+
+  static const _novaCoreTimeout = Duration(seconds: 120);
+
+  /// Smart-routing path: when `NovaCore` resolves the turn to a true cloud
+  /// provider, the whole turn runs through the new stack (intent router →
+  /// strategy → offline gate → agent → provider). Local-first remains the
+  /// default — auto cloud routing needs the pipeline flag, while a manually
+  /// pinned cloud provider ([preferredCloudProviderId]) always delegates
+  /// (explicit user choice, same as the LAN backend toggle). The Remote-LAN
+  /// backend keeps its untouched legacy path below.
+  ///
+  /// Returns null when the on-device path should handle the turn (flag off
+  /// without a pin, local provider, bootstrap unavailable, routing failure).
+  /// Cloud provider errors surface as an explicit error result — never a
+  /// silent local fallback that would confuse the user.
+  Future<InferenceResult?> _tryNovaCoreDelegation({
+    required String query,
+    Uint8List? screenshot,
+    bool hasImageAttachments = false,
+    bool thinkingMode = false,
+    int attachmentCount = 0,
+    bool hasDocuments = false,
+    String ragContext = '',
+    String attachmentContext = '',
+  }) async {
+    final String? manualCloud = _preferredCloudProviderId;
+    if (!_novaCorePipelineEnabled && manualCloud == null) {
+      return null;
+    }
+    late final NovaCore core;
+    try {
+      core = NovaBootstrap.core;
+    } catch (e) {
+      debugPrint('NovaCore delegation skipped (bootstrap): $e');
+
+      return null;
+    }
+
+    final bool hasImage =
+        (screenshot != null && screenshot.isNotEmpty) || hasImageAttachments;
+    late final String providerId;
+    late final String agentId;
+    List<String> reasons = const <String>[];
+    String? modelId;
+    try {
+      final plan = await core.resolve(
+        query,
+        hasImage: hasImage,
+        providerOverride: manualCloud,
+        thinkingMode: thinkingMode,
+        attachmentCount: attachmentCount,
+        hasDocuments: hasDocuments,
+      );
+      providerId = plan.providerId;
+      agentId = plan.agentId;
+      reasons = plan.reasons;
+      modelId = plan.modelId;
+    } catch (e) {
+      debugPrint('NovaCore delegation skipped (resolve): $e');
+
+      return null;
+    }
+
+    if (!shouldDelegateToNovaCore(
+      pipelineEnabled: _novaCorePipelineEnabled || manualCloud != null,
+      providerId: providerId,
+    )) {
+      return null;
+    }
+
+    _statusController.add(
+      'Smart routing ($agentId via $providerId'
+      '${modelId != null ? ' · $modelId' : ''})'
+      '${reasons.isNotEmpty ? ' — ${reasons.first}' : ''}…',
+    );
+    final String combinedSystem = <String>[
+      ragContext,
+      attachmentContext,
+    ].where((s) => s.isNotEmpty).join('\n\n');
+    try {
+      final StringBuffer buffer = StringBuffer();
+      await for (final String chunk
+          in core
+              .handle(
+                query,
+                systemPrompt: combinedSystem.isEmpty ? null : combinedSystem,
+                hasImage: hasImage,
+                includeScreenshot: screenshot == null,
+                screenContext: screenshot != null && screenshot.isNotEmpty
+                    ? ScreenContext(screenshotBytes: screenshot)
+                    : null,
+                providerOverride: manualCloud,
+                thinkingMode: thinkingMode,
+                attachmentCount: attachmentCount,
+                hasDocuments: hasDocuments,
+              )
+              .timeout(_novaCoreTimeout)) {
+        buffer.write(chunk);
+      }
+      final String text = buffer.toString().trim();
+
+      return InferenceResult(
+        text: text.isEmpty
+            ? 'Cloud provider $providerId returned an empty response.'
+            : text,
+        model: selector.primaryHeavy,
+        isStreaming: false,
+      );
+    } catch (e) {
+      debugPrint('NovaCore delegation failed ($providerId): $e');
+
+      return InferenceResult(
+        text:
+            'Cloud request via $providerId failed: $e\n'
+            'Check the Cloud providers settings (URL, model, token) or turn '
+            'off Smart routing to use on-device inference.',
+        model: selector.primaryHeavy,
+        isStreaming: false,
+        inferenceTimeMs: null,
+      );
+    }
+  }
+
+  /// Runs the diffusion pipeline for a host-side image intent.
+  ///
+  /// Returns a short plain-text answer when nothing is installed, so the chat
+  /// stays usable instead of surfacing a raw tool error.
+  Future<InferenceResult> _runDeterministicImageGen(String prompt) async {
+    final service = ImageGenerationService.instance;
+    final model = await service.resolveInstalledModel();
+    final base = selector.primaryHeavy;
+
+    if (model == null) {
+      return InferenceResult(
+        text:
+            'No diffusion model is installed, so I cannot generate images '
+            'yet. Download Z-Image-Turbo or FLUX.2-klein in Settings to enable '
+            'on-device image generation.',
+        model: base,
+        isStreaming: false,
+        toolCalls: [
+          {
+            'name': 'generate_image',
+            'args': {'prompt': prompt},
+            'result': {'success': false, 'error': 'no_model'},
+          },
+        ],
+      );
+    }
+
+    if (!model.inferenceReady) {
+      return InferenceResult(
+        text: model.runnerNotReadyMessage,
+        model: base,
+        isStreaming: false,
+        toolCalls: [
+          {
+            'name': 'generate_image',
+            'args': {'prompt': prompt, 'model': model.fileName},
+            'result': {'success': false, 'error': 'runner_not_ready'},
+          },
+        ],
+      );
+    }
+
+    final bytes = await service.generateImage(
+      prompt,
+      model: model,
+      size: ImageSize.size256,
+    );
+
+    if (bytes == null || bytes.isEmpty) {
+      return InferenceResult(
+        text:
+            service.lastError ??
+            'Image generation failed. Check that a diffusion model is '
+                'installed and try again.',
+        model: base,
+        isStreaming: false,
+        toolCalls: [
+          {
+            'name': 'generate_image',
+            'args': {'prompt': prompt, 'model': model.fileName},
+            'result': {'success': false, 'error': 'generate_failed'},
+          },
+        ],
+      );
+    }
+
+    return InferenceResult(
+      text: 'Generated an image for "$prompt".',
+      model: base,
+      isStreaming: false,
+      imageBytes: bytes,
+      toolCalls: [
+        {
+          'name': 'generate_image',
+          'args': {'prompt': prompt, 'model': model.fileName},
+          'result': {'success': true, 'bytes': bytes.length},
+        },
+      ],
+    );
+  }
 
   Stream<InferenceResult> processMessage({
     required String query,
@@ -2817,6 +3368,17 @@ class ModelOrchestrator {
         return;
       }
 
+      // Deterministic image-gen shortcut — "generate an image of X" must not
+      // depend on the LLM emitting a `generate_image` tool call, and must not
+      // pay the model load cost just to reach the diffusion pipeline.
+      final imagePrompt = ImageGenIntentParser.tryParse(query);
+      if (imagePrompt != null) {
+        _statusController.add('Generating image...');
+        final result = await _runDeterministicImageGen(imagePrompt);
+        yield result;
+        return;
+      }
+
       // Check if there are image attachments that need vision processing
       final hasImageAttachments = attachments.any((att) {
         if (att.type != AttachedDataType.file) return false;
@@ -2846,6 +3408,28 @@ class ModelOrchestrator {
             ) ??
             '',
       );
+
+      // Smart routing (opt-in): cloud turns run through NovaCore, which
+      // decides per task where the request goes. Local-first stays the
+      // default — without the flag everything runs on-device as before.
+      // (Deterministic device shortcuts above keep precedence.)
+      final novaDelegated = await _tryNovaCoreDelegation(
+        query: query,
+        screenshot: screenshot,
+        hasImageAttachments: hasImageAttachments,
+        thinkingMode: thinkingMode,
+        attachmentCount: attachments.length,
+        hasDocuments: attachments.any(
+          (a) => a.filePath != null && !DocumentExtractor.isImageFile(a.name),
+        ),
+        ragContext: ragContext,
+        attachmentContext: _capContextInjection(attachmentContext),
+      );
+      if (novaDelegated != null) {
+        yield novaDelegated;
+
+        return;
+      }
 
       if (_inferenceBackend == InferenceBackend.remote) {
         yield* _processRemoteMessage(
@@ -2914,7 +3498,7 @@ class ModelOrchestrator {
           if (vision != null) model = vision;
         }
       } else {
-        model = _selectModel(
+        model = _selectModelConstrained(
           query: query,
           screenshot: screenshot,
           hasImageAttachments: hasImageAttachments,
@@ -4341,6 +4925,7 @@ class ModelOrchestrator {
     instance._cachedRole = AssistantRole.fromString(roleName);
     instance._cachedIdentity = await IdentityService.getIdentity();
     await instance._loadRuntimeSettings(invalidateChatOnAdultChange: true);
+    await NovaBootstrap.refreshProviderConfigs();
   }
 
   /// Pre-warms the default model at app startup (opt-in via settings).

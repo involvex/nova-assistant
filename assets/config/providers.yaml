@@ -1,0 +1,19 @@
+# Nova provider strategy (build asset, read-only).
+# Local-first: simple/automation stay on-device unless the user enables
+# smart routing. Cloud turns follow the routing preset chain
+# (Free/Balanced/Max in settings); coding/fallback keys below are kept for
+# backward compatibility and non-cloud mappings.
+# Copilot skipped (no stable API); Zen / Kilo Gateway are OpenAI-compatible.
+simple:
+  provider: local-gemma
+coding:
+  provider: kilo-gateway
+vision:
+  provider: local-gemma
+automation:
+  provider: local-qwen
+fallback:
+  provider: kilo-gateway
+# Known provider ids:
+# local-gemma, local-qwen (on-device .litertlm/.task)
+# kilo-gateway, openrouter, groq, opencode-zen, openai (OpenAI-compatible /v1)

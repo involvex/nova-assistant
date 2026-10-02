@@ -24,9 +24,17 @@ object ImageGenerationModels {
   )
 
   val MODEL_SPECS = mapOf(
-    // Hub I/O (256 px): qwen_enc expects inputs_embeds[1,64,2560] (host BPE +
-    // embed_tokens), DiT uses embx/refx + embc/refc then zc_main*, latent is
-    // [1,16,32,32] — not SD-style 4ch/8×. See DIFFUSION_MODEL_SPEC.md.
+    // Verified graph signatures (256 px, float32) are documented in
+    // docs/z-image-turbo-litert.md. Two shapes matter and differ from SD:
+    // the latent is [1,16,32,32] (16ch, 8x downscale) and the patch embed
+    // takes [1,256,64] = 16x16 patches x (16ch * 2 * 2). The unified DiT
+    // sequence is 256 image tokens + 32 context tokens = 288.
+    //
+    // qwen_enc.tflite consumes inputs_embeds[1,64,2560] rather than text, so
+    // the host owns tokenization: QwenBpeTokenizer (BPE), ZImageEmbedLookup
+    // (embed_tokens rows), TEmbedderWeightsLoader (t_embedder MLP), and
+    // SafetensorsHeaderCheck (fail-closed pre-check). ZImagePipeline then
+    // orchestrates the DiT chunks; the order below matches its phase sequence.
     MODEL_Z_IMAGE_TURBO to ModelGraphSpec(
       textEncoder = listOf("qwen_enc.tflite"),
       unetMain = listOf(
@@ -43,8 +51,12 @@ object ImageGenerationModels {
       ),
       unetFinal = listOf("zc_final.tflite"),
       vae = listOf("zvae.tflite"),
-      defaultSteps = 4,
-      defaultGuidanceScale = 1.0f,
+      // Turbo is guidance-distilled: `pipeline_z_image.py`'s own example runs
+      // guidance_scale=0.0 (do_classifier_free_guidance == guidance > 0), and
+      // forcing CFG on a distilled checkpoint oversaturates into colour mush.
+      // 0.0 also lets ZImagePipeline skip the whole uncond DiT pass (~2x faster).
+      defaultSteps = 8,
+      defaultGuidanceScale = 0.0f,
       latentChannels = 16,
       latentHeightFactor = 8,
       latentWidthFactor = 8,

@@ -54,13 +54,13 @@ object ZImagePipeline {
     require(req.steps >= 1) { "steps must be >= 1" }
 
     onProgress("Encoding prompt", 8)
-    val condCtx = branchContext(graphs, tokenize, rowsOf, req.prompt)
+    val condCtx = branchContext(graphs, tokenize, rowsOf, req.prompt, onLog)
     onLog(tensorStats("condCtx", condCtx))
     // `do_classifier_free_guidance == guidance_scale > 0` in pipeline_z_image.py.
     // Z-Image Turbo ships guidance-distilled, so guidance 0 must run the DiT
     // once: the uncond pass is a second full sweep of all 6 908 MB blocks.
     val useCfg = req.guidance > 0f
-    val uncondCtx = if (useCfg) branchContext(graphs, tokenize, rowsOf, req.uncondPrompt) else null
+    val uncondCtx = if (useCfg) branchContext(graphs, tokenize, rowsOf, req.uncondPrompt, onLog) else null
     graphs.releaseTextEncoder()
     graphs.releaseContextGraphs()
 
@@ -82,13 +82,15 @@ object ZImagePipeline {
       val sigmaNext = sigmas[step + 1]
       val pos = ZImageHostLoop.timestepEmbeddingForSigma(sigma, weights)
       if (step == 0) onLog(tensorStats("pos0", pos))
-      val condNoise = denoiseBranch(graphs, latent, condCtx, pos)
+      // Tag only the first step: per-block lines x 8 steps would drown logcat.
+      val tag = if (step == 0) "s0" else ""
+      val condNoise = denoiseBranch(graphs, latent, condCtx, pos, onLog, tag)
       if (step == 0) onLog(tensorStats("condNoise0", condNoise))
       // With CFG off the only negation is the pipeline's unconditional
       // `noise_pred = -noise_pred`, which applyClassifierFreeGuidance
       // already folds in at guidance 0.
       val guided = if (useCfg) {
-        val uncondNoise = denoiseBranch(graphs, latent, checkNotNull(uncondCtx), pos)
+        val uncondNoise = denoiseBranch(graphs, latent, checkNotNull(uncondCtx), pos, onLog)
         ZImageHostLoop.applyClassifierFreeGuidance(condNoise, uncondNoise, req.guidance)
       } else {
         ZImageHostLoop.applyClassifierFreeGuidance(condNoise, condNoise, 0f)
@@ -120,6 +122,7 @@ object ZImagePipeline {
     tokenize: (String) -> IntArray,
     rowsOf: (IntArray) -> Array<FloatArray>,
     prompt: String,
+    onLog: (String) -> Unit = {},
   ): FloatArray {
     val ids = tokenize(prompt).take(MAX_PROMPT_TOKENS).toIntArray()
     // Empty prompts (the CFG uncond branch) encode as all-zero embeds.
@@ -134,6 +137,7 @@ object ZImagePipeline {
     }
     val paddedIn = flatten(leftPadTo(inRows, ZImageHostLoop.EMBED_SEQUENCE_TOKENS))
     val capFeats = graphs.qwenEnc(paddedIn)
+    onLog(tensorStats("capFeats", capFeats))
     require(capFeats.size == ZImageHostLoop.EMBED_SEQUENCE_TOKENS * ZImageHostLoop.EMBED_DIM) {
       "qwen_enc must return [64,2560], got ${capFeats.size} values"
     }
@@ -154,9 +158,10 @@ object ZImagePipeline {
       "context must be $CONTEXT_TOKENS rows, got ${padded.features.size}"
     }
     val embc = graphs.embc(flatten(padded.features))
+    onLog(tensorStats("ctxEmbc", embc))
     val x = FloatArray(X_CTX_SIZE)
     val mask = FloatArray(X_CTX_SIZE)
-    return graphs.refc(embc, x, mask)
+    return graphs.refc(embc, x, mask).also { onLog(tensorStats("ctxRefc", it)) }
   }
 
   /** One DiT pass for a branch at the current sigma → velocity `[16,32,32]`. */
@@ -165,6 +170,8 @@ object ZImagePipeline {
     latent: FloatArray,
     ctx: FloatArray,
     pos: FloatArray,
+    onLog: (String) -> Unit = {},
+    tag: String = "",
   ): FloatArray {
     require(ctx.size == CONTEXT_TOKENS * ZImageHostLoop.MODEL_DIM) {
       "ctx must be [32,3840], got ${ctx.size} values"
@@ -176,14 +183,20 @@ object ZImagePipeline {
       LATENT_HW,
     )
     val imgT = graphs.embx(img)
+    if (tag.isNotEmpty()) onLog(tensorStats(tag + "Embx", imgT))
     val imgR = graphs.refx(imgT, FloatArray(X_IMG_SIZE), FloatArray(X_IMG_SIZE), pos)
+    if (tag.isNotEmpty()) onLog(tensorStats(tag + "Refx", imgR))
     var hidden = concatRows(imgR, IMAGE_TOKENS, ctx, CONTEXT_TOKENS, ZImageHostLoop.MODEL_DIM)
     val x = FloatArray(X_FULL_SIZE)
     val mask = FloatArray(X_FULL_SIZE)
     for (block in 0..5) {
       hidden = graphs.mainBlock(block, hidden, x, mask, pos)
+      if (tag.isNotEmpty() && (block == 0 || block == 5)) {
+        onLog(tensorStats(tag + "Main$block", hidden))
+      }
     }
     val velocity = graphs.final(hidden, pos)
+    if (tag.isNotEmpty()) onLog(tensorStats(tag + "Final", velocity))
     require(velocity.size == UNIFIED_TOKENS * ZImageHostLoop.patchDim(ZImageHostLoop.LATENT_CHANNELS)) {
       "final must return [288,64], got ${velocity.size} values"
     }

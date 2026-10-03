@@ -184,7 +184,17 @@ object DiffusionPipeline {
           Log.d(TAG, "ZIMG tokens n=${ids.size} head=${ids.take(12).joinToString(",")} tail=${ids.takeLast(6).joinToString(",")}")
           ids
         },
-        rowsOf = { ids -> embedRows(embedFile, ids) },
+        rowsOf = { ids ->
+          val rows = embedRows(embedFile, ids)
+          var rmin = Float.MAX_VALUE
+          var rmax = -Float.MAX_VALUE
+          for (row in rows) for (v in row) {
+            if (v < rmin) rmin = v
+            if (v > rmax) rmax = v
+          }
+          Log.d(TAG, "ZIMG embedRows ids=${ids.size} range=[$rmin,$rmax]")
+          rows
+        },
         weights = tWeights,
         req = ZImagePipeline.Request(
           prompt = prompt,

@@ -169,6 +169,9 @@ object DiffusionPipeline {
     }
 
     val embedFile = File(modelDir, "embed_tokens.safetensors")
+    // Build marker: bump when the Z-Image path changes so a logcat line
+    // proves which code actually ran on the device.
+    Log.d(TAG, "ZIMG-DIAG2 steps=${config.steps} guidance=${config.guidanceScale} size=${config.size}")
     val graphs = ZImageTfliteGraphs(modelDir)
     try {
       val rgb = ZImagePipeline.generate(
@@ -176,7 +179,11 @@ object DiffusionPipeline {
         // Chat-templated, not raw: Z-Image's text encoder was trained on
         // apply_chat_template output. A bare prompt leaves it conditioning on
         // out-of-distribution text and the sample degenerates to noise.
-        tokenize = { tokenizer.encodeChatPrompt(it) },
+        tokenize = { text ->
+          val ids = tokenizer.encodeChatPrompt(text)
+          Log.d(TAG, "ZIMG tokens n=${ids.size} head=${ids.take(12).joinToString(",")} tail=${ids.takeLast(6).joinToString(",")}")
+          ids
+        },
         rowsOf = { ids -> embedRows(embedFile, ids) },
         weights = tWeights,
         req = ZImagePipeline.Request(
@@ -186,6 +193,7 @@ object DiffusionPipeline {
           seed = config.seed?.toLong() ?: kotlin.random.Random.nextLong(),
         ),
         onProgress = onProgress,
+        onLog = { line -> Log.d(TAG, "ZIMG $line") },
       )
       val pixels = ZImageHostLoop.chwToArgb(rgb, ZImagePipeline.SIZE_PX, ZImagePipeline.SIZE_PX)
       val bitmap = Bitmap.createBitmap(

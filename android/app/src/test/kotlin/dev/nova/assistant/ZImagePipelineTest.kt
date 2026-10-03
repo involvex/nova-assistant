@@ -232,6 +232,31 @@ class ZImagePipelineTest {
   }
 
   @Test
+  fun `tensorStats summarizes distribution`() {
+    val line = ZImagePipeline.tensorStats("probe", floatArrayOf(1f, 2f, 3f, 4f))
+    assertTrue(line.startsWith("probe: n=4 "))
+    assertTrue(line.contains("mean=2.5000"))
+    assertTrue(line.contains("min=1.0000"))
+    assertTrue(line.contains("max=4.0000"))
+  }
+
+  @Test
+  fun `generate emits log lines at every stage`() {
+    val lines = ArrayList<String>()
+    ZImagePipeline.generate(
+      FakeGraphs(), ::tokenize, ::rowsOf, weights, req, onLog = { lines.add(it) },
+    )
+    assertTrue(lines.any { it.startsWith("condCtx:") })
+    assertTrue(lines.any { it.startsWith("latent0:") })
+    assertTrue(lines.any { it.startsWith("sigmas=") })
+    assertTrue(lines.any { it.startsWith("pos0:") })
+    assertTrue(lines.any { it.startsWith("condNoise0:") })
+    assertTrue(lines.any { it.startsWith("step1/1 latent:") })
+    assertTrue(lines.any { it.startsWith("denorm:") })
+    assertTrue(lines.any { it.startsWith("rgb:") })
+  }
+
+  @Test
   fun `gaussian latent is seeded and finite`() {
     val a = ZImagePipeline.gaussianLatent(kotlin.random.Random(3L), 1024)
     val b = ZImagePipeline.gaussianLatent(kotlin.random.Random(3L), 1024)

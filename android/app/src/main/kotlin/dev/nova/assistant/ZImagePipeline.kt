@@ -49,11 +49,13 @@ object ZImagePipeline {
     weights: ZImageHostLoop.TimestepEmbedderWeights,
     req: Request,
     onProgress: (String, Int) -> Unit = { _, _ -> },
+    onLog: (String) -> Unit = {},
   ): FloatArray {
     require(req.steps >= 1) { "steps must be >= 1" }
 
     onProgress("Encoding prompt", 8)
     val condCtx = branchContext(graphs, tokenize, rowsOf, req.prompt)
+    onLog(tensorStats("condCtx", condCtx))
     // `do_classifier_free_guidance == guidance_scale > 0` in pipeline_z_image.py.
     // Z-Image Turbo ships guidance-distilled, so guidance 0 must run the DiT
     // once: the uncond pass is a second full sweep of all 6 908 MB blocks.
@@ -67,7 +69,9 @@ object ZImagePipeline {
       Random(req.seed),
       ZImageHostLoop.LATENT_CHANNELS * LATENT_HW * LATENT_HW,
     )
+    onLog(tensorStats("latent0", latent))
     val sigmas = ZImageHostLoop.sigmaSchedule(req.steps, IMAGE_TOKENS)
+    onLog("sigmas=" + sigmas.joinToString(",") { "%.4f".format(java.util.Locale.US, it) })
 
     for (step in 0 until req.steps) {
       onProgress(
@@ -77,7 +81,9 @@ object ZImagePipeline {
       val sigma = sigmas[step]
       val sigmaNext = sigmas[step + 1]
       val pos = ZImageHostLoop.timestepEmbeddingForSigma(sigma, weights)
+      if (step == 0) onLog(tensorStats("pos0", pos))
       val condNoise = denoiseBranch(graphs, latent, condCtx, pos)
+      if (step == 0) onLog(tensorStats("condNoise0", condNoise))
       // With CFG off the only negation is the pipeline's unconditional
       // `noise_pred = -noise_pred`, which applyClassifierFreeGuidance
       // already folds in at guidance 0.
@@ -88,12 +94,15 @@ object ZImagePipeline {
         ZImageHostLoop.applyClassifierFreeGuidance(condNoise, condNoise, 0f)
       }
       ZImageHostLoop.eulerStep(latent, guided, sigma, sigmaNext)
+      onLog("step${step + 1}/${req.steps} " + tensorStats("latent", latent))
     }
     graphs.releaseDenoiseGraphs()
 
     onProgress("Decoding image", 92)
     val denorm = ZImageHostLoop.denormalizeLatents(latent)
+    onLog(tensorStats("denorm", denorm))
     val rgb = graphs.vae(denorm)
+    onLog(tensorStats("rgb", rgb))
     graphs.releaseVae()
     require(rgb.size == 3 * SIZE_PX * SIZE_PX) {
       "vae must return [3,256,256], got ${rgb.size} values"
@@ -231,6 +240,35 @@ object ZImagePipeline {
     first.copyInto(out, 0)
     second.copyInto(out, first.size)
     return out
+  }
+
+  /**
+   * One-line distribution summary for logcat triage: mean/std/min/max.
+   *
+   * A healthy run shows condCtx std well above 0 (conditioning present),
+   * condNoise0 std of order 1 (the DiT actually responds), latent std
+   * shrinking across steps, and rgb spanning roughly [0,1]. Flat zeros or a
+   * std stuck at ~1.0 in `rgb` point at the stage that collapsed.
+   */
+  fun tensorStats(name: String, v: FloatArray): String {
+    var min = Float.MAX_VALUE
+    var max = -Float.MAX_VALUE
+    var sum = 0.0
+    var sum2 = 0.0
+    for (x in v) {
+      if (x < min) min = x
+      if (x > max) max = x
+      sum += x
+      sum2 += x * x
+    }
+    val n = v.size.toDouble()
+    val mean = if (n > 0) sum / n else 0.0
+    val variance = if (n > 0) (sum2 / n - mean * mean).coerceAtLeast(0.0) else 0.0
+    // Locale.US: String.format follows the device locale, which would render
+    // "2,5000" on de-DE and break log parsing.
+    return "$name: n=${v.size} mean=%.4f std=%.4f min=%.4f max=%.4f".format(
+      java.util.Locale.US, mean, sqrt(variance), min, max,
+    )
   }
 
   /** Seeded standard-normal latent via Box-Muller. */

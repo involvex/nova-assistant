@@ -171,8 +171,24 @@ object DiffusionPipeline {
     val embedFile = File(modelDir, "embed_tokens.safetensors")
     // Build marker: bump when the Z-Image path changes so a logcat line
     // proves which code actually ran on the device.
-    Log.d(TAG, "ZIMG-DIAG2 steps=${config.steps} guidance=${config.guidanceScale} size=${config.size}")
+    Log.d(TAG, "ZIMG-DIAG3 steps=${config.steps} guidance=${config.guidanceScale} size=${config.size}")
+    val graphSizes = modelDir.listFiles()
+      ?.filter { it.isFile && it.extension == "tflite" }
+      ?.sortedBy { it.name }
+      ?.joinToString(", ") { it.name + "=" + it.length() }
+    Log.d(TAG, "ZIMG files: $graphSizes")
     val graphs = ZImageTfliteGraphs(modelDir)
+    // Zero-probes: the previous run showed qwen_enc exploding to std 5e10
+    // and embx to std 419 on valid inputs. Feeding zeros separates a broken
+    // graph file/conversion (still explodes: weights or kernels are bad,
+    // independent of any host input) from input-triggered divergence
+    // (zeros come back at bias scale, so the host inputs are the trigger).
+    val qwenZero = graphs.qwenEnc(
+      FloatArray(ZImageHostLoop.EMBED_SEQUENCE_TOKENS * ZImageHostLoop.EMBED_DIM),
+    )
+    Log.d(TAG, "ZIMG " + ZImagePipeline.tensorStats("qwenZero", qwenZero))
+    val embxZero = graphs.embx(FloatArray(ZImagePipeline.X_IMG_SIZE))
+    Log.d(TAG, "ZIMG " + ZImagePipeline.tensorStats("embxZero", embxZero))
     try {
       val rgb = ZImagePipeline.generate(
         graphs = graphs,

@@ -57,6 +57,31 @@ class ZImageTfliteGraphs(
 ) : ZImageGraphs {
   private val interpreters = HashMap<String, Interpreter>()
 
+  /**
+   * Direct [ByteBuffer] pool keyed by `"<graph>#in<slot>"` / `"<graph>#out0"`.
+   *
+   * `runForMultipleInputsOutputs` requires direct buffers, and this model's
+   * tensors are large: a 908 MB block takes 4 x 4.4 MB inputs plus a 4.4 MB
+   * output *per call*, and a run is 6 blocks + `z_refx` + `z_embx` + `zc_final`
+   * per step across 8 steps. Allocating fresh direct buffers every call leaves
+   * hundreds of MB uncollected — direct memory is only reclaimed on GC — which
+   * is what pushed PSS past MIUI's 6 GB third-party cap and got the process
+   * killed mid-generation. One buffer per slot keeps the working set flat.
+   */
+  private val pooled = HashMap<String, ByteBuffer>()
+
+  private fun pooledBuffer(key: String, floats: Int): ByteBuffer {
+    val need = floats * 4
+    val cached = pooled[key]
+    if (cached != null && cached.capacity() >= need) {
+      cached.clear()
+      return cached
+    }
+    val fresh = ByteBuffer.allocateDirect(need).order(ByteOrder.nativeOrder())
+    pooled[key] = fresh
+    return fresh
+  }
+
   private fun get(name: String): Interpreter {
     return interpreters.getOrPut(name) {
       val file = File(modelDir, name)
@@ -85,14 +110,17 @@ class ZImageTfliteGraphs(
       require(interp.getInputTensor(i).dataType() == DataType.FLOAT32) {
         "$graphName input $i must be FLOAT32"
       }
-      toBuffer(values)
+      val buffer = pooledBuffer("$graphName#in$i", want)
+      buffer.asFloatBuffer().put(values)
+      buffer.rewind()
+      buffer
     }.toTypedArray()
     val outShape = interp.getOutputTensor(0).shape()
     require(interp.getOutputTensor(0).dataType() == DataType.FLOAT32) {
       "$graphName output must be FLOAT32"
     }
     val outCount = outShape.fold(1) { a, b -> a * b }
-    val outBuffer = ByteBuffer.allocateDirect(outCount * 4).order(ByteOrder.nativeOrder())
+    val outBuffer = pooledBuffer("$graphName#out0", outCount)
     interp.runForMultipleInputsOutputs(buffers, mapOf(0 to outBuffer))
     outBuffer.rewind()
     val out = FloatArray(outCount)
@@ -152,6 +180,9 @@ class ZImageTfliteGraphs(
   }
 
   private fun release(name: String) {
+    // Direct buffers are GC-managed but not promptly reclaimed, so drop the
+    // slots alongside the interpreter instead of waiting on a collection.
+    pooled.keys.filter { it.startsWith("$name#") }.forEach { pooled.remove(it) }
     try {
       interpreters.remove(name)?.close()
     } catch (_: Throwable) {
@@ -159,16 +190,12 @@ class ZImageTfliteGraphs(
   }
 
   companion object {
-    private fun toBuffer(values: FloatArray): ByteBuffer {
-      val buffer = ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder())
-      buffer.asFloatBuffer().put(values)
-      buffer.rewind()
-      return buffer
-    }
-
     private fun defaultOpen(file: File): Interpreter {
       val options = Interpreter.Options().apply {
-        setNumThreads(2)
+        // Leave one core for the UI thread; the denoise sweep is compute-bound
+        // so this is the single biggest lever on generation wall time.
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        setNumThreads((cores - 1).coerceIn(2, 6))
         try {
           setUseXNNPACK(false)
         } catch (_: Throwable) {

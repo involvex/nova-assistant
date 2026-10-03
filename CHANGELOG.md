@@ -13,6 +13,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Qwen3 BPE tokenizer, `embed_tokens` lookup, `t_embedder` timestep MLP,
   patchify/unpatchify, CFG + Euler denoising, VAE decode). Covers the
   previously unrunnable 14-graph LiteRT set end to end at 256 px.
+- Z-Image text encoder is now fed chat-templated prompts. `pipeline_z_image.py`
+  applies the Qwen3 chat template before tokenising
+  (`<|im_start|>user\n…<|im_end|>\n<|im_start|>assistant\n`), but the host
+  loop passed the bare string. The encoder saw out-of-distribution text, the
+  conditioning was near-noise, and generation produced random colours rather
+  than a recognisable image. `QwenBpeTokenizer.encodeChatPrompt` splices the
+  special tokens as ids, because the GPT-2 pre-tokenizer would otherwise
+  shred `<|im_start|>` into separate pieces.
+- Image-gen prompts no longer keep the punctuation users type between the ask
+  and the subject: "generate an image of: a cat" produced the literal prompt
+  `": a cat"`, and a leading `:` degrades the diffusion prompt.
+- Image-gen asks behind a greeting ("hey, generate an image of a fox") are
+  recognised instead of falling through to the LLM, which had no reliable way
+  to emit the tool call and simply echoed the message. Greeting stripping runs
+  before the "about existing images" guard, so non-image asks are unaffected.
+- Beginner chat mode no longer drops generated images: its streaming
+  `copyWith` omitted `imageData`, so a successful generation rendered as
+  "Generated an image for …" with no image attached.
+- Direct TFLite ByteBuffers are pooled per tensor slot and released with their
+  interpreter. Allocating ~22 MB of fresh direct buffers per graph call left
+  hundreds of MB unreclaimed (direct memory is only freed on GC), which is
+  what pushed PSS past MIUI's hard 6 GB third-party cap and got the process
+  killed mid-generation.
 - Ranged-HTTP safetensors extraction (`readRemoteSafetensorsHeader`,
   `extractSafetensorsTensorsRemote`). Acquiring the Z-Image host tensors now
   transfers only the ~780 MB actually needed instead of staging both

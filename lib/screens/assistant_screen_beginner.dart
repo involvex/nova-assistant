@@ -160,6 +160,11 @@ class _AssistantScreenBeginnerState extends State<AssistantScreenBeginner> {
               thinking: result.thinking,
               inferenceTimeMs:
                   result.inferenceTimeMs ?? _messages[idx].inferenceTimeMs,
+              // Beginner mode dropped this, so a successful generation
+              // rendered as "Generated an image for ..." with no image.
+              // ChatMessage.copyWith is null-safe, so omitting it keeps any
+              // bytes already attached.
+              imageData: result.imageBytes,
             );
           });
           _scrollToBottom();

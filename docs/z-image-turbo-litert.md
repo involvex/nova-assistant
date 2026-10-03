@@ -181,6 +181,33 @@ mask is all-`false`, which is consistent with the graphs baking it in.
 attention-mask input. The encoder is causal, so the host must **left-pad** —
 right padding would shift the real tokens' positions and change the output.
 
+**Chat template** — the prompt is *not* tokenized raw. `encode_prompt` applies
+the tokenizer's chat template first:
+
+```python
+messages = [{"role": "user", "content": prompt}]
+prompt = tokenizer.apply_chat_template(messages, tokenize=False,
+                                       add_generation_prompt=True,
+                                       enable_thinking=True)
+```
+
+With no tools and no system message that renders exactly:
+
+```
+<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n
+```
+
+The host therefore calls `QwenBpeTokenizer.encodeChatPrompt`, which splices
+`<|im_start|>`/`<|im_end|>` (ids 151644/151645) as **ids** rather than
+encoding the literal text — the GPT-2 pre-tokenizer would split
+`<|im_start|>` into `<`, `|`, `im`, `_start`, `|` and never reach those ids.
+Skipping the template leaves the encoder conditioned on text unlike anything
+in training, which is what made generation degenerate to random colours.
+
+Note the ids are confirmed from the staged `tokenizer.json`, whose
+`added_tokens_decoder` has empty `content` for 151643-151645 but names
+151646 as `<|object_ref_start|>`, fixing 151644/151645 immediately before it.
+
 **Timestep** — the pipeline feeds `(1000 - t) / 1000` where
 `t = sigma * 1000`, i.e. `1 - sigma`. The transformer then applies
 `t_scale = 1000.0`, so the `t_embedder` sees `1000 * (1 - sigma)`.

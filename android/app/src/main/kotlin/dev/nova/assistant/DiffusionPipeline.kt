@@ -173,7 +173,10 @@ object DiffusionPipeline {
     try {
       val rgb = ZImagePipeline.generate(
         graphs = graphs,
-        tokenize = { tokenizer.encode(it) },
+        // Chat-templated, not raw: Z-Image's text encoder was trained on
+        // apply_chat_template output. A bare prompt leaves it conditioning on
+        // out-of-distribution text and the sample degenerates to noise.
+        tokenize = { tokenizer.encodeChatPrompt(it) },
         rowsOf = { ids -> embedRows(embedFile, ids) },
         weights = tWeights,
         req = ZImagePipeline.Request(

@@ -59,6 +59,21 @@ class ImageGenIntentParser {
     caseSensitive: false,
   );
 
+  /// A greeting or interjection before the real ask: "hey, generate an image
+  /// of a fox", "ok so draw me a cat". Dropped so the verb-first anchor below
+  /// still matches. Without this the parser falls through to the LLM, which
+  /// has no reliable way to emit the tool call and just echoes the message.
+  ///
+  /// Trailing whitespace is required so a word glued to the subject is never
+  /// eaten. This is safe because stripping happens before the match and the
+  /// remainder must still satisfy an image-ask regex: "a picture of sofas" does
+  /// not start with "so" and is untouched, while "so draw me a cat" becomes
+  /// "draw me a cat".
+  static final RegExp _leadingInterjection = RegExp(
+    r'^(?:hey|hello|hi|yo|ok|okay|so|um|well|please|pls)\s*[!,.]?\s+',
+    caseSensitive: false,
+  );
+
   /// Bare noun form: "a picture of a lighthouse", "ein Bild von einem Turm".
   static final RegExp _bareNoun = RegExp(
     '^\\s*(?:ein[e]?\\s+|a\\s+|an\\s+)?'
@@ -90,6 +105,12 @@ class ImageGenIntentParser {
     caseSensitive: false,
   );
 
+  /// Separators users type between the ask and the subject: "image of: a cat",
+  /// "picture - a lighthouse", "image, a red apple". They are not part of the
+  /// subject — a leading ":" reaches the diffusion model as the first token of
+  /// the prompt and visibly degrades the result.
+  static final RegExp _leadingSeparator = RegExp(r'^[\s:;,\-–—.]+');
+
   /// A usable subject: at least two real word characters.
   static final RegExp _hasSubject = RegExp(r'[A-Za-z0-9äöüßÄÖÜ]{2,}');
 
@@ -102,9 +123,20 @@ class ImageGenIntentParser {
 
   /// Returns the diffusion prompt when [query] clearly asks for a new image.
   static String? tryParse(String query) {
-    final trimmed = query.trim();
+    final original = query.trim();
+    if (original.isEmpty) return null;
+    // `_notImage` sees the ORIGINAL wording so "hey, describe this image"
+    // stays in the chat; the regexes then run on the greeting-stripped text.
+    if (_notImage.hasMatch(original)) return null;
+
+    var trimmed = original;
+    while (true) {
+      final next = trimmed.replaceFirst(_leadingInterjection, '');
+      if (next == trimmed) break;
+      trimmed = next;
+    }
+
     if (trimmed.isEmpty) return null;
-    if (_notImage.hasMatch(trimmed)) return null;
 
     final match =
         _verbFirst.firstMatch(trimmed) ??
@@ -113,6 +145,8 @@ class ImageGenIntentParser {
     if (match == null) return null;
 
     var prompt = (match.group(1) ?? '').trim();
+    // Separators first: "of: a cat" only exposes the connector afterwards.
+    prompt = prompt.replaceFirst(_leadingSeparator, '').trim();
     prompt = prompt.replaceAll(_leadingConnectors, '').trim();
 
     // "generate an image of" leaves only a connector behind — let the LLM ask

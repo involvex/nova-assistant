@@ -4,6 +4,17 @@ import java.io.File
 import java.util.regex.Pattern
 
 /**
+ * Special token ids, confirmed against the staged `tokenizer.json`:
+ * 151646 is `<|object_ref_start|>`, which fixes 151644/151645 immediately
+ * before it as `<|im_start|>`/`<|im_end|>`.
+ *
+ * `internal` so tests assert against the same constants the encoder splices,
+ * rather than re-hardcoding them.
+ */
+internal const val IM_START = 151644
+internal const val IM_END = 151645
+
+/**
  * Byte-level BPE tokenizer for the Qwen3 text encoder (`Z-Image Turbo`).
  *
  * Pure JVM (no Android imports) so encoding is unit-testable. Qwen3 uses the
@@ -46,6 +57,37 @@ class QwenBpeTokenizer private constructor(
         )
       }
     }
+    return out.toIntArray()
+  }
+
+  /**
+   * Encodes [prompt] wrapped in the Qwen3 chat template Z-Image was trained
+   * with.
+   *
+   * `pipeline_z_image.py` applies the template before tokenising
+   * (`tokenize=False, add_generation_prompt=True, enable_thinking=True`), so
+   * the encoder never sees a bare prompt in training. Feeding the raw string
+   * conditions it on out-of-distribution text and the sample degenerates to
+   * noise, which is what produced flat random colours.
+   *
+   * With no tools and no system message the template renders exactly
+   * `<|im_start|>user` NL `{prompt}` `<|im_end|>` NL `<|im_start|>assistant` NL,
+   * where NL is a newline. The special tokens are spliced in as ids because the
+   * GPT-2 pre-tokenizer would otherwise split `<|im_start|>` into `<`, `|`,
+   * `im`, `_start`, `|` and never reach these ids.
+   *
+   * Nothing is truncated here: the caller owns the 32-context-token budget and
+   * truncates after this call, so the wrapper always stays intact.
+   */
+  fun encodeChatPrompt(prompt: String): IntArray {
+    val out = ArrayList<Int>()
+    out.add(IM_START)
+    out.addAll(encode("user\n").toList())
+    out.addAll(encode(prompt).toList())
+    out.add(IM_END)
+    out.addAll(encode("\n").toList())
+    out.add(IM_START)
+    out.addAll(encode("assistant\n").toList())
     return out.toIntArray()
   }
 
@@ -169,6 +211,25 @@ class QwenBpeTokenizer private constructor(
     private fun byteToUnicode(byte: Byte): String {
       val c = byteToChar[byte.toInt() and 0xFF]
       return c.toString()
+    }
+
+    /**
+     * Test seam: the `vocab.json` keys [text] needs when there are no merges.
+     *
+     * Byte-level BPE rewrites each byte to a distinct Unicode char (byte 32 is
+     * U+0120, byte 10 is U+010A), so a caller cannot derive the alphabet by
+     * reading the source text. Tests use this to build a synthetic vocab that
+     * is guaranteed to cover what [encode] will look up.
+     */
+    internal fun byteLevelKeys(text: String): List<String> {
+      val keys = ArrayList<String>()
+      val matcher = PRETOKENIZER.matcher(text)
+      while (matcher.find()) {
+        for (byte in matcher.group().toByteArray(Charsets.UTF_8)) {
+          keys.add(byteToUnicode(byte))
+        }
+      }
+      return keys
     }
 
     private fun getPairs(word: List<String>): Set<Pair<String, String>> {

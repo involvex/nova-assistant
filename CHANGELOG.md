@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
 
+- Migrate on-device inference from discontinued `flutter_gemma` packages to Flutter Edge AI 2.0 (`flutter_edge_ai`, `flutter_edge_ai_litertlm`, `flutter_edge_ai_mediapipe`, `flutter_edge_ai_speech`). Raise minimum Flutter SDK to 3.44.
 
 ## [0.4.8] - 2026-09-22
 

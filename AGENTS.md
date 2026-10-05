@@ -35,7 +35,7 @@ When a developer says *use the nova_dev skill to setup and build the app* or
 
 Nova is a Flutter-based mobile AI assistant that:
 
-- Runs AI models entirely on-device using `flutter_gemma`
+- Runs AI models entirely on-device using `flutter_edge_ai` (Flutter Edge AI)
 - Supports multiple inference engines (LiteRtLm, MediaPipe)
 - Provides voice input, screen capture, and tool execution capabilities
 - Uses RAG (Retrieval-Augmented Generation) with local memory
@@ -57,9 +57,9 @@ Nova is a Flutter-based mobile AI assistant that:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `flutter_gemma` | ^1.11.0 | Core Gemma inference engine |
-| `flutter_gemma_litertlm` | ^1.8.4 | LiteRT LM inference backend |
-| `flutter_gemma_mediapipe` | ^1.0.7 | MediaPipe inference backend |
+| `flutter_edge_ai` | ^2.0.0 | Core on-device inference engine |
+| `flutter_edge_ai_litertlm` | ^1.8.7 | LiteRT LM inference backend |
+| `flutter_edge_ai_mediapipe` | ^1.0.9 | MediaPipe inference backend |
 
 ### Storage and Persistence
 
@@ -409,7 +409,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 // 3. Package imports
-import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // 4. Project imports

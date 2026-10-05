@@ -28,7 +28,7 @@ import 'package:nova_assistant/services/user_preferences_service.dart';
 import 'package:nova_assistant/services/mcp_service.dart';
 import 'package:nova_assistant/platform/screenshot_service.dart';
 import 'package:nova_assistant/platform/overlay_service.dart';
-import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:nova_assistant/tools/tool_definitions.dart';
 import 'package:nova_assistant/widgets/in_chat_search_bar.dart';
 import 'package:nova_assistant/screens/chat_history_screen.dart';

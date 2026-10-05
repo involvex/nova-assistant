@@ -2,12 +2,11 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_gemma/flutter_gemma.dart';
-import 'package:flutter_gemma_speech/flutter_gemma_speech.dart';
+import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Speaks assistant responses via on-device TTS (Matcha via flutter_gemma).
+/// Speaks assistant responses via on-device TTS (Matcha via Flutter Edge AI).
 // ignore_for_file: experimental_member_use
 class TtsService {
   static TtsService? _instance;
@@ -35,12 +34,6 @@ class TtsService {
     final prefs = await SharedPreferences.getInstance();
     _enabled = prefs.getBool(_enabledKey) ?? true;
 
-    try {
-      await FlutterGemma.initialize(ttsBackends: [LiteRtTtsBackend()]);
-    } on Exception catch (e) {
-      debugPrint('TtsService: backend init failed: $e');
-    }
-
     _playerStateSub = _player.playerStateStream.listen((state) {
       _speaking = state.playing;
     });
@@ -65,7 +58,7 @@ class TtsService {
 
     try {
       await _ensureModelInstalled();
-      final synth = await FlutterGemma.getActiveTts();
+      final synth = await FlutterEdgeAi.getActiveTts();
       final pcm = await synth.synthesize(cleaned);
       await _playPcm(pcm, synth.sampleRate);
       await synth.close();
@@ -84,7 +77,7 @@ class TtsService {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_modelInstalledKey) ?? false) {
       try {
-        await FlutterGemma.getActiveTts();
+        await FlutterEdgeAi.getActiveTts();
         return;
       } on Exception {
         await prefs.setBool(_modelInstalledKey, false);
@@ -92,7 +85,7 @@ class TtsService {
     }
 
     try {
-      await FlutterGemma.installTts()
+      await FlutterEdgeAi.installTts()
           .fromNetwork(_ttsModelUrl)
           .ofType(TtsModelType.matcha)
           .install();

@@ -12,7 +12,7 @@ UI (screens / widgets)
         │
    ModelOrchestrator  ←── MemoryService (RAG), MCP, Tasks, Notes
         │
-   flutter_gemma / LiteRT-LM
+   flutter_edge_ai / LiteRT-LM
         │
    Platform channels → Android (tools, screenshot, assistant key)
 ```

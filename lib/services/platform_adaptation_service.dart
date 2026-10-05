@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 

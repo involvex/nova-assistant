@@ -50,7 +50,7 @@ count. `15360 = 4 x 3840` is the modulation block width. Consequences:
 
 ## Status: host loop implemented and verified
 
-The published repo ships **only 14 `.tflite` graphs** (9.78 GB, verified via
+The published repo ships **only 13 `.tflite` graphs** (9.78 GB, verified via
 the HF tree API) plus a README and one sample PNG. It contains no conversion
 scripts and no reference host loop, so everything below had to be derived
 from the diffusers reference.
@@ -288,7 +288,7 @@ phone, not a snappy one.
 |---|---|
 | `ZImageHostLoop.kt` | host-side math (pure JVM, no Android dependencies) |
 | `ZImagePipeline.kt` | orchestration: phases, CFG branches, CFG/Euler loop |
-| `ZImageGraphs.kt` | per-phase lazy `Interpreter` lifecycle over the 14 graphs |
+| `ZImageGraphs.kt` | per-phase lazy `Interpreter` lifecycle over the 13 graphs |
 | `QwenBpeTokenizer.kt` | Qwen3 BPE from `tokenizer/` (pre-tokenizer + byte-level) |
 | `ZImageEmbedLookup.kt` | mmap row gather from `embed_tokens.safetensors` |
 | `TEmbedderWeightsLoader.kt` | loads the MLP into [ZImageHostLoop.TimestepEmbedderWeights] |

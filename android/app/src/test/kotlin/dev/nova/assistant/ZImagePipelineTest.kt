@@ -247,10 +247,13 @@ class ZImagePipelineTest {
       FakeGraphs(), ::tokenize, ::rowsOf, weights, req, onLog = { lines.add(it) },
     )
     assertTrue(lines.any { it.startsWith("condCtx:") })
+    assertTrue(lines.any { it.startsWith("paddedIn:") })
     assertTrue(lines.any { it.startsWith("latent0:") })
     assertTrue(lines.any { it.startsWith("sigmas=") })
     assertTrue(lines.any { it.startsWith("pos0:") })
     assertTrue(lines.any { it.startsWith("capFeats:") })
+    assertTrue(lines.any { it.startsWith("capFeatsPad:") })
+    assertTrue(lines.any { it.startsWith("capFeatsReal:") })
     assertTrue(lines.any { it.startsWith("ctxEmbc:") })
     assertTrue(lines.any { it.startsWith("ctxRefc:") })
     assertTrue(lines.any { it.startsWith("s0Embx:") })
@@ -262,6 +265,30 @@ class ZImagePipelineTest {
     assertTrue(lines.any { it.startsWith("step1/1 latent:") })
     assertTrue(lines.any { it.startsWith("denorm:") })
     assertTrue(lines.any { it.startsWith("rgb:") })
+  }
+
+  @Test
+  fun `branchContext splits capFeats into pad and real regions`() {
+    val lines = ArrayList<String>()
+    // Test tokenize yields 10 ids: 54 zero pad rows, 10 real rows echoed
+    // back by FakeGraphs.qwenEnc.
+    ZImagePipeline.branchContext(FakeGraphs(), ::tokenize, ::rowsOf, "a cat", onLog = { lines.add(it) })
+    assertTrue(lines.any { it.startsWith("paddedIn:") })
+    val pad = lines.firstOrNull { it.startsWith("capFeatsPad:") }
+    val real = lines.firstOrNull { it.startsWith("capFeatsReal:") }
+    assertTrue(pad != null && pad.contains("n=138240") && pad.contains("mean=0.0000") && pad.contains("std=0.0000"))
+    // Real rows are (r * 2560 + c) * 1e-4 for r in 0..9 (n=25600, mean ~1.28).
+    // Parsed with tolerance: float summation order must not decide the test.
+    val realMean = real?.let { Regex("mean=(-?[0-9.]+)").find(it)?.groupValues?.get(1)?.toDoubleOrNull() }
+    assertTrue(real != null && real.contains("n=25600") && realMean != null && realMean > 1.2 && realMean < 1.4)
+  }
+
+  @Test
+  fun `branchContext with empty prompt logs pad region but no real region`() {
+    val lines = ArrayList<String>()
+    ZImagePipeline.branchContext(FakeGraphs(), ::tokenize, ::rowsOf, "", onLog = { lines.add(it) })
+    assertTrue(lines.any { it.startsWith("capFeatsPad:") })
+    assertTrue(lines.none { it.startsWith("capFeatsReal:") })
   }
 
   @Test

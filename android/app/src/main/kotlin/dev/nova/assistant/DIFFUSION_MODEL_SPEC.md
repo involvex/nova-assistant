@@ -11,7 +11,7 @@ These specs drive `ImageGenerationModels.MODEL_SPECS` and `DiffusionPipeline`.
 
 **Repo**: `litert-community/Z-Image-Turbo-LiteRT`  
 **Base**: Tongyi-MAI Z-Image-Turbo (S3-DiT, int8 LiteRT graphs)  
-**Files**: 14 `.tflite` files (9.78 GB)  
+**Files**: 13 `.tflite` files (9.78 GB, verified against the upstream tree API)  
 **Runtime (upstream)**: LiteRT `CompiledModel` + shared `Environment`, GPU FP32  
 **Tokenizer**: **Not in the TFLite graph** — host must run Qwen2 BPE and
 `embed_tokens` to build `inputs_embeds`, then feed `qwen_enc.tflite`.

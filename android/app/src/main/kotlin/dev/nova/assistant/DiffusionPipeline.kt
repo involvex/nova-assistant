@@ -146,6 +146,17 @@ object DiffusionPipeline {
           "\nReinstall extra assets from Settings.",
       )
     }
+    // Byte-level gate: shapes alone cannot catch a corrupt graph (qwen_enc
+    // matched the published size exactly while emitting std-5e10 outputs),
+    // and a bad 3.5 GB encoder wastes a multi-minute run producing static.
+    val integrity = ZImageGraphIntegrity.verify(modelDir)
+    if (integrity is ZImageGraphIntegrity.CheckResult.Failed) {
+      throw IllegalStateException(
+        "Z-Image graph files failed integrity check:\n" +
+          integrity.reasons.joinToString("\n") +
+          "\nDelete the listed files and reinstall the model from Settings.",
+      )
+    }
     val tokenizer = try {
       QwenBpeTokenizer.load(File(modelDir, "tokenizer"))
     } catch (e: IllegalArgumentException) {
@@ -171,7 +182,7 @@ object DiffusionPipeline {
     val embedFile = File(modelDir, "embed_tokens.safetensors")
     // Build marker: bump when the Z-Image path changes so a logcat line
     // proves which code actually ran on the device.
-    Log.d(TAG, "ZIMG-DIAG3 steps=${config.steps} guidance=${config.guidanceScale} size=${config.size}")
+    Log.d(TAG, "ZIMG-DIAG4 steps=${config.steps} guidance=${config.guidanceScale} size=${config.size}")
     val graphSizes = modelDir.listFiles()
       ?.filter { it.isFile && it.extension == "tflite" }
       ?.sortedBy { it.name }

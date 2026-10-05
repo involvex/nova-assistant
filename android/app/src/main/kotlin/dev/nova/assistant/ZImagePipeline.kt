@@ -136,10 +136,20 @@ object ZImagePipeline {
       rows
     }
     val paddedIn = flatten(leftPadTo(inRows, ZImageHostLoop.EMBED_SEQUENCE_TOKENS))
+    onLog(tensorStats("paddedIn", paddedIn))
     val capFeats = graphs.qwenEnc(paddedIn)
     onLog(tensorStats("capFeats", capFeats))
     require(capFeats.size == ZImageHostLoop.EMBED_SEQUENCE_TOKENS * ZImageHostLoop.EMBED_DIM) {
       "qwen_enc must return [64,2560], got ${capFeats.size} values"
+    }
+    // Per-region split: inputs were left-padded, so rows [0, padRows) saw
+    // zero embeds (a healthy encoder returns ~zeros there) while rows
+    // [padRows, 64) carry the real tokens. A global explosion with a clean
+    // pad region points at the weights/runtime; an exploding pad region
+    // points at masking/position handling instead.
+    val padRows = ZImageHostLoop.EMBED_SEQUENCE_TOKENS - ids.size
+    if (padRows > 0) {
+      onLog(tensorStats("capFeatsPad", flatten(rowsOfRange(capFeats, 0, padRows))))
     }
     // Inputs were left-padded, so the real rows are the LAST ids.size rows;
     // "first n real rows" are the head of that tail (n ≤ 32).
@@ -149,6 +159,9 @@ object ZImagePipeline {
       offsetRows = ZImageHostLoop.EMBED_SEQUENCE_TOKENS - ids.size,
       count = real,
     )
+    if (real > 0) {
+      onLog(tensorStats("capFeatsReal", flatten(firstReal)))
+    }
     val padded = ZImageHostLoop.padContext(
       if (firstReal.isEmpty()) arrayOf(FloatArray(ZImageHostLoop.EMBED_DIM)) else firstReal,
       ZImageHostLoop.EMBED_DIM,

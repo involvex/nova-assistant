@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Z-Image graph integrity gate: the 14 published `.tflite` graphs are now
+  verified by size + SHA-256 against the HuggingFace LFS oids before the
+  3.5 GB encoder is mmap'd. Shapes alone could not catch a corrupt graph,
+  and a bad encoder wastes a multi-minute run producing static. Verified
+  files are remembered in a `.zimage_integrity.json` marker (size + mtime)
+  so ~10 GB is not re-hashed every generation; mismatches fail closed with
+  a delete-and-reinstall message.
+- Z-Image text diagnostics now log `paddedIn` plus per-region `capFeatsPad`
+  (zero-padded rows) and `capFeatsReal` (real token rows) stats, so the next
+  conditioning-scale anomaly shows exactly which region diverges.
 - Z-Image Turbo on-device image generation: complete native host loop
   (Qwen3 BPE tokenizer, `embed_tokens` lookup, `t_embedder` timestep MLP,
   patchify/unpatchify, CFG + Euler denoising, VAE decode). Covers the

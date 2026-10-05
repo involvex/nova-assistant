@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1146,7 +1146,7 @@ class ModelOrchestrator {
       data: {
         'activeModelType': _activeModelType?.name,
         'hasActiveModel': _activeModel != null,
-        'flutterHasActive': FlutterGemma.hasActiveModel(),
+        'flutterHasActive': FlutterEdgeAi.hasActiveModel(),
       },
     );
     // #endregion
@@ -1175,7 +1175,7 @@ class ModelOrchestrator {
         message: 'Idle release finished',
         data: {
           'elapsedMs': DateTime.now().millisecondsSinceEpoch - releaseStarted,
-          'flutterHasActive': FlutterGemma.hasActiveModel(),
+          'flutterHasActive': FlutterEdgeAi.hasActiveModel(),
         },
       );
       // #endregion
@@ -1401,7 +1401,7 @@ class ModelOrchestrator {
         (modelToLoad != null
             ? _loadTimeoutFor(modelToLoad)
             : const Duration(seconds: 120));
-    final future = FlutterGemma.getActiveModel(
+    final future = FlutterEdgeAi.getActiveModel(
       maxTokens: tokenLimit,
       preferredBackend: preferredBackend,
       supportImage: supportImage,
@@ -1852,9 +1852,9 @@ class ModelOrchestrator {
 
     // Clear flutter_gemma's internal state whenever we need a fresh engine
     // (different model OR vision support mismatch).
-    if (FlutterGemma.hasActiveModel()) {
+    if (FlutterEdgeAi.hasActiveModel()) {
       try {
-        await FlutterGemma.clearActiveInferenceIdentity();
+        await FlutterEdgeAi.clearActiveInferenceIdentity();
       } catch (e) {
         debugPrint('Error clearing active identity: $e');
       }
@@ -2306,9 +2306,9 @@ class ModelOrchestrator {
 
       // Clear BEFORE register — clearing after install() leaves no active model.
       await _teardownActiveModel();
-      if (FlutterGemma.hasActiveModel()) {
+      if (FlutterEdgeAi.hasActiveModel()) {
         try {
-          await FlutterGemma.clearActiveInferenceIdentity();
+          await FlutterEdgeAi.clearActiveInferenceIdentity();
         } catch (_) {}
       }
 
@@ -2380,7 +2380,7 @@ class ModelOrchestrator {
           'fileName': customModel.fileName,
           'backend': backend.name,
           'totalMemMb': total,
-          'hasActive': FlutterGemma.hasActiveModel(),
+          'hasActive': FlutterEdgeAi.hasActiveModel(),
         },
         runId: 'post-fix',
       );
@@ -4891,9 +4891,9 @@ class ModelOrchestrator {
   }
 
   Future<void> _clearActiveInferenceIdentity() async {
-    if (!FlutterGemma.hasActiveModel()) return;
+    if (!FlutterEdgeAi.hasActiveModel()) return;
     try {
-      await FlutterGemma.clearActiveInferenceIdentity();
+      await FlutterEdgeAi.clearActiveInferenceIdentity();
     } catch (e) {
       debugPrint('Error clearing active inference identity: $e');
     }

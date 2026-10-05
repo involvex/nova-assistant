@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   storage. Falls back to locally staged shards when a server ignores
   `Range`.
 
+### Changed
+
+- Migrate on-device inference from discontinued `flutter_gemma` packages to Flutter Edge AI 2.0 (`flutter_edge_ai`, `flutter_edge_ai_litertlm`, `flutter_edge_ai_mediapipe`, `flutter_edge_ai_speech`). Raise minimum Flutter SDK to 3.44.
+
 ### Fixed
 
 - Z-Image Turbo no longer produced colour mush instead of an image. The spec
@@ -63,8 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an "assets needed for generation" state with a one-tap download, and the
   generation sheet offers the same action on that error. Previously the only
   route was uninstalling and re-downloading the multi-GB graphs.
-
-
 
 ## [0.4.8] - 2026-09-22
 

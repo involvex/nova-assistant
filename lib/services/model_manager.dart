@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
@@ -817,7 +817,7 @@ class ModelManager {
       }
 
       try {
-        final builder = FlutterGemma.installModel(
+        final builder = FlutterEdgeAi.installModel(
           modelType: modelType,
           fileType: fileType,
         ).fromFile(canonicalPath);
@@ -1083,12 +1083,12 @@ class ModelManager {
       // "Remove" only clears prefs and leaves multi-GB weights on device.
       final deleted = await _deleteModelFile(model.fileName);
       try {
-        await FlutterGemma.uninstallModel(modelId);
+        await FlutterEdgeAi.uninstallModel(modelId);
       } catch (e) {
-        debugPrint('ModelManager: FlutterGemma.uninstallModel: $e');
+        debugPrint('ModelManager: FlutterEdgeAi.uninstallModel: $e');
       }
       try {
-        await FlutterGemma.uninstallModel(model.fileName);
+        await FlutterEdgeAi.uninstallModel(model.fileName);
       } catch (_) {}
       _installedModels.removeWhere((m) => m.id == modelId);
       _pathCache.remove(model.fileName);
@@ -1114,9 +1114,9 @@ class ModelManager {
 
       final deleted = await _deleteModelFile(customModel.fileName);
       try {
-        await FlutterGemma.uninstallModel(customModel.fileName);
+        await FlutterEdgeAi.uninstallModel(customModel.fileName);
       } catch (e) {
-        debugPrint('ModelManager: FlutterGemma.uninstallModel custom: $e');
+        debugPrint('ModelManager: FlutterEdgeAi.uninstallModel custom: $e');
       }
       _customModels.removeWhere((m) => m.id == modelId);
       _pathCache.remove(customModel.fileName);
@@ -1240,7 +1240,7 @@ class ModelManager {
   /// Register a model already on disk (no download).
   ///
   /// If [deferInstall] is false (default), registers with flutter_gemma
-  /// immediately by calling `FlutterGemma.installModel().fromFile().install()`.
+  /// immediately by calling `FlutterEdgeAi.installModel().fromFile().install()`.
   /// This makes the model available for inference.
   ///
   /// If [deferInstall] is true, skips the flutter_gemma registration and just
@@ -1296,7 +1296,7 @@ class ModelManager {
     int registeredSize = actualSize;
 
     try {
-      await FlutterGemma.installModel(
+      await FlutterEdgeAi.installModel(
         modelType: modelType,
         fileType: fileType,
       ).fromFile(filePath).install();
@@ -1313,7 +1313,7 @@ class ModelManager {
       if (altPath != null && altPath != filePath) {
         try {
           registeredSize = await File(altPath).length();
-          await FlutterGemma.installModel(
+          await FlutterEdgeAi.installModel(
             modelType: modelType,
             fileType: fileType,
           ).fromFile(altPath).install();

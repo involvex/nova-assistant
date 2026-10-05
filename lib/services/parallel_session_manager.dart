@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
@@ -290,11 +290,11 @@ class ParallelSessionManager {
   /// Get or create a model for inference
   Future<InferenceModel?> _getOrCreateModel(NovaModel model) async {
     try {
-      if (!FlutterGemma.hasActiveModel()) {
+      if (!FlutterEdgeAi.hasActiveModel()) {
         return null;
       }
 
-      return await FlutterGemma.getActiveModel(
+      return await FlutterEdgeAi.getActiveModel(
         maxTokens: _tokenLimitFor(model),
         preferredBackend: PreferredBackend.gpu,
         supportImage: model.hasVision,

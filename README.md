@@ -17,7 +17,7 @@ Also available to other agents via [`.agents/skills/nova-dev`](.agents/skills/no
 
 ## Features
 
-- **On-device AI** — Gemma / LiteRT via `flutter_gemma`
+- **On-device AI** — Gemma / LiteRT via `flutter_edge_ai` (Flutter Edge AI)
 - **Multi-model** — SmolLM, FastVLM, Gemma 3 1B, Gemma 4 E2B + custom import
 - **Voice** — speech-to-text input
 - **Screen awareness** — MediaProjection screenshots for vision models
@@ -91,7 +91,7 @@ There is **no** `android.backup/` — that stale tree was removed.
 ## Architecture (brief)
 
 1. UI → `ModelOrchestrator.processMessage`
-2. RAG + model select + `flutter_gemma` stream
+2. RAG + model select + `flutter_edge_ai` stream
 3. Tool calls → Dart services or Android `ToolExecutor`
 4. Idle / lifecycle unload **after** streaming completes
 
@@ -133,6 +133,6 @@ MIT — see [LICENSE](LICENSE).
 ## Acknowledgments
 
 - [Flutter](https://flutter.dev/)
-- [flutter_gemma](https://pub.dev/packages/flutter_gemma)
+- [flutter_edge_ai](https://pub.dev/packages/flutter_edge_ai)
 - [Gemma](https://ai.google.dev/gemma)
 - [HuggingFace](https://huggingface.co/)

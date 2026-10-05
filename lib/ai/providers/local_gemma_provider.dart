@@ -1,10 +1,10 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:nova_assistant/ai/providers/ai_provider.dart';
 import 'package:nova_assistant/ai/providers/provider_capabilities.dart';
 import 'package:nova_assistant/models/model_info.dart';
 
-/// Adapter around the existing on-device Gemma engine (`flutter_gemma`).
+/// Adapter around the existing on-device Gemma engine (`flutter_edge_ai`).
 ///
 /// Wraps the exact semantics the [ModelOrchestrator] relies on today:
 /// single active model, `supportImage` for vision models, native tool-call
@@ -54,7 +54,7 @@ class LocalGemmaProvider implements AIProvider {
 
   @override
   Stream<String> chatStream(AIRequest request) async* {
-    final InferenceModel engine = await FlutterGemma.getActiveModel(
+    final InferenceModel engine = await FlutterEdgeAi.getActiveModel(
       supportImage: model.hasVision && request.hasImage,
     );
     final InferenceChat chat = await engine.createChat(

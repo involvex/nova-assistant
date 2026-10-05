@@ -3,7 +3,7 @@ import 'package:nova_assistant/ai/providers/provider_capabilities.dart';
 import 'package:nova_assistant/models/model_info.dart';
 
 /// Local Qwen adapter. Decision: `.litertlm` / `.task` via the existing
-/// `flutter_gemma` engine + `CustomModel` import path (no GGUF).
+/// `flutter_edge_ai` engine + `CustomModel` import path (no GGUF).
 ///
 /// Reuses the Gemma engine wrapper until a dedicated Qwen backend lands;
 /// provider id stays stable (`local-qwen`) so strategy config never changes.

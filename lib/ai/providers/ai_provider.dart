@@ -4,7 +4,7 @@ import 'package:nova_assistant/ai/providers/provider_capabilities.dart';
 
 /// Single chat turn, provider-agnostic.
 ///
-/// Deliberately decoupled from [ChatMessage] and `flutter_gemma` so cloud
+/// Deliberately decoupled from [ChatMessage] and `flutter_edge_ai` so cloud
 /// providers (OpenAI-compatible, OpenRouter, Groq, Opencode Zen,
 /// Kilo Gateway) can reuse the same DTO.
 class ChatTurn {
@@ -50,7 +50,7 @@ class AIRequest {
 }
 
 /// Unified provider interface. Nova Core may only depend on this,
-/// never on `flutter_gemma`, `HttpClient` or `MethodChannel` directly.
+/// never on `flutter_edge_ai`, `HttpClient` or `MethodChannel` directly.
 abstract class AIProvider {
   String get id;
 

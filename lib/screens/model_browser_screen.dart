@@ -582,7 +582,7 @@ class _ModelBrowserScreenState extends State<ModelBrowserScreen> {
         ...UncensoredModelCatalog.recommended.map(_uncensoredTile),
         const SizedBox(height: 4),
         Text(
-          'GGUF models cannot run on flutter_gemma — only LiteRT '
+          'GGUF models cannot run on flutter_edge_ai — only LiteRT '
           '(.litertlm / .task) conversions are listed.',
           style: TextStyle(fontSize: 11, color: Colors.grey[600]),
         ),

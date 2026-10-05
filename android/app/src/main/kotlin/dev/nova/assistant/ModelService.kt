@@ -143,7 +143,7 @@ class ModelService : Service() {
         // 1. Load the Gemma .litertlm via LiteRT-LM JNI
         // 2. Initialize the inference session
         // 3. Set isModelLoaded = true
-        // For now, we use Flutter's flutter_gemma plugin which runs in the Flutter isolate.
+        // For now, we use Flutter's flutter_edge_ai plugin which runs in the Flutter isolate.
         // ModelService's real job is keeping that Flutter engine warm.
         isModelLoaded = true
         loadedModelName = modelName

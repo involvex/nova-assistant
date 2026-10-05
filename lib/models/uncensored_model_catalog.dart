@@ -2,7 +2,7 @@ import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:nova_assistant/services/huggingface_hub_service.dart';
 
 /// Curated uncensored chat models that ship LiteRT-native assets
-/// (`.litertlm` / `.task`) and can run through flutter_gemma as
+/// (`.litertlm` / `.task`) and can run through flutter_edge_ai as
 /// [CustomModel]s.
 ///
 /// Every entry was verified against the HuggingFace Hub tree API before
@@ -11,7 +11,7 @@ import 'package:nova_assistant/services/huggingface_hub_service.dart';
 /// rejects downloads whose digest mismatches, so tampered or substituted
 /// upstream assets cannot be installed.
 ///
-/// GGUF-only repos must NOT be listed: flutter_gemma cannot execute GGUF
+/// GGUF-only repos must NOT be listed: flutter_edge_ai cannot execute GGUF
 /// weights.
 class UncensoredModelEntry {
   final String repoId;

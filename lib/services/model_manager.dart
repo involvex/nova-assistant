@@ -199,7 +199,7 @@ class ModelManager {
     void Function(int progress)? onProgress,
   }) async {
     // Serialize installs — concurrent Gemma 4 onboarding + Gemma 3 fallback
-    // races corrupt flutter_gemma's active identity (POCO F1).
+    // races corrupt flutter_edge_ai's active identity (POCO F1).
     while (_installLock != null) {
       await _installLock;
     }
@@ -456,7 +456,7 @@ class ModelManager {
       _statusController.add('Installing $fileName...');
 
       // Delegate to installFromFile — copies to docs dir, registers with
-      // flutter_gemma, and renames to canonical filename.
+      // flutter_edge_ai, and renames to canonical filename.
       final installed = await installFromFile(
         filePath: tempFile.path,
         modelType: modelType,
@@ -772,7 +772,7 @@ class ModelManager {
 
       if (ext != '.litertlm' && ext != '.task') {
         final hint = ext == '.gguf'
-            ? ' — GGUF cannot run on flutter_gemma; find a LiteRT '
+            ? ' — GGUF cannot run on flutter_edge_ai; find a LiteRT '
                   '(.litertlm/.task) conversion'
             : '';
         _statusController.add(
@@ -897,17 +897,17 @@ class ModelManager {
         return null;
       }
 
-      // GGUF cannot be used for inference with flutter_gemma
+      // GGUF cannot be used for inference with flutter_edge_ai
       if (ext == '.gguf' || isGguf) {
         _statusController.add(
-          'GGUF models cannot run on-device here — flutter_gemma needs a '
+          'GGUF models cannot run on-device here — flutter_edge_ai needs a '
           'LiteRT conversion (.litertlm or .task). Look for a LiteRT '
           'version of this model.',
         );
         return null;
       }
 
-      // Call installFromFile to copy and register with flutter_gemma
+      // Call installFromFile to copy and register with flutter_edge_ai
       final installed = await installFromFile(
         filePath: filePath,
         modelType: modelType,
@@ -993,9 +993,9 @@ class ModelManager {
     return customModel;
   }
 
-  /// Replicates flutter_gemma's filename base-name extraction so we can
-  /// compute the canonical install path BEFORE calling into flutter_gemma.
-  /// This avoids a post-install rename that would invalidate flutter_gemma's
+  /// Replicates flutter_edge_ai's filename base-name extraction so we can
+  /// compute the canonical install path BEFORE calling into flutter_edge_ai.
+  /// This avoids a post-install rename that would invalidate flutter_edge_ai's
   /// internal path mappings.
   static String _deriveBaseName(String filename) {
     String result = filename;
@@ -1018,7 +1018,7 @@ class ModelManager {
     return filename.replaceFirst(RegExp(r'^nova_download_\d+_'), '');
   }
 
-  /// Find the canonical filename for a model given its flutter_gemma spec name
+  /// Find the canonical filename for a model given its flutter_edge_ai spec name
   /// and model type.
   ///
   /// Matches exact names, and also temp download names that *contain* a known
@@ -1079,7 +1079,7 @@ class ModelManager {
         (m) => m.id == modelId,
         orElse: () => throw Exception('Model not found'),
       );
-      // Prefer disk delete even if flutter_gemma unregister fails — otherwise
+      // Prefer disk delete even if flutter_edge_ai unregister fails — otherwise
       // "Remove" only clears prefs and leaves multi-GB weights on device.
       final deleted = await _deleteModelFile(model.fileName);
       try {
@@ -1239,11 +1239,11 @@ class ModelManager {
 
   /// Register a model already on disk (no download).
   ///
-  /// If [deferInstall] is false (default), registers with flutter_gemma
+  /// If [deferInstall] is false (default), registers with flutter_edge_ai
   /// immediately by calling `FlutterEdgeAi.installModel().fromFile().install()`.
   /// This makes the model available for inference.
   ///
-  /// If [deferInstall] is true, skips the flutter_gemma registration and just
+  /// If [deferInstall] is true, skips the flutter_edge_ai registration and just
   /// tracks the model in Nova's internal list. Use this during prefetch to
   /// avoid loading models into GPU memory at startup. The model will be
   /// properly registered when actually needed.
@@ -1291,7 +1291,7 @@ class ModelManager {
       return;
     }
 
-    // Actually install with flutter_gemma (loads model into memory)
+    // Actually install with flutter_edge_ai (loads model into memory)
     bool success = false;
     int registeredSize = actualSize;
 
@@ -1306,7 +1306,7 @@ class ModelManager {
       // Try finding alternative in models/ directory
       if (wasAlreadyInstalled) {
         // If we already had this model tracked but install failed,
-        // don't delete the file - it might just be a flutter_gemma state issue
+        // don't delete the file - it might just be a flutter_edge_ai state issue
         rethrow;
       }
       final altPath = await _findModelFile(fileName);

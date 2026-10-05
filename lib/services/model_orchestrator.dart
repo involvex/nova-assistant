@@ -1406,7 +1406,8 @@ class ModelOrchestrator {
       preferredBackend: preferredBackend,
       supportImage: supportImage,
       maxNumImages: supportImage ? 1 : null,
-      // float32 fixes scrambled digits on some GPUs (flutter_gemma 1.10+).
+      // float32 fixes scrambled digits on some GPUs (since flutter_gemma 1.10,
+      // carried over to flutter_edge_ai).
       activationDataType: preferredBackend == PreferredBackend.gpu
           ? ActivationDataType.float32
           : null,
@@ -1736,7 +1737,7 @@ class ModelOrchestrator {
 
     // Vision models must always load with vision enabled. Lazy enablement
     // (only when screenshot != null) left the engine at max_num_images:0;
-    // flutter_gemma's singleton then ignored a later supportImage:true.
+    // flutter_edge_ai's singleton then ignored a later supportImage:true.
     final needsImageSupport = model.hasVision;
 
     // Return cached model if same type, image support, AND token limit match
@@ -1837,7 +1838,7 @@ class ModelOrchestrator {
     }
 
     // --- Switching / Loading new model ---
-    // Close any previous model and clear flutter_gemma's active identity.
+    // Close any previous model and clear flutter_edge_ai's active identity.
     // Always clear when vision flag or model type changes — singleton reuse
     // otherwise keeps a non-vision engine.
     if (_activeModel != null) {
@@ -1850,7 +1851,7 @@ class ModelOrchestrator {
       _activeChat = null;
     }
 
-    // Clear flutter_gemma's internal state whenever we need a fresh engine
+    // Clear flutter_edge_ai's internal state whenever we need a fresh engine
     // (different model OR vision support mismatch).
     if (FlutterEdgeAi.hasActiveModel()) {
       try {
@@ -1870,7 +1871,7 @@ class ModelOrchestrator {
     );
 
     try {
-      // First, ensure the model is registered with flutter_gemma
+      // First, ensure the model is registered with flutter_edge_ai
       final fileName = ModelHuggingFaceURLs.fileNameFor(modelToLoad);
       final existsOnDisk = await ModelManager.instance.isInstalledOnDisk(
         fileName,
@@ -2714,7 +2715,7 @@ class ModelOrchestrator {
     required bool hasImageAttachments,
   }) async* {
     // GGUF support requires llamadart package, which currently conflicts with
-    // flutter_gemma_litertlm native libraries. Show a clear error message.
+    // flutter_edge_ai_litertlm native libraries. Show a clear error message.
     yield InferenceResult(
       text:
           'GGUF models are not supported for inference.\n\n'

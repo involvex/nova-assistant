@@ -72,7 +72,7 @@ Repos such as
 and
 [Z-Image-Turbo-LiteRT](https://huggingface.co/litert-community/Z-Image-Turbo-LiteRT)
 are **LiteRT `CompiledModel` multi-graph diffusion pipelines** (many `.tflite`
-chunks + host tokenizer/scheduler), not `flutter_gemma` / LiteRT-LM chat
+chunks + host tokenizer/scheduler), not `flutter_edge_ai` / LiteRT-LM chat
 (`.litertlm` / `.task`) models.
 
 Nova ships a separate native LiteRT GPU diffusion pipeline for on-device image

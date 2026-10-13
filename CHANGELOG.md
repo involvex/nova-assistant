@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.4.9] - 2026-10-14
+
+### Changed
+
+- On-device Z-Image Turbo produces coherent images (RoPE host loop + pad tokens)
 ### Added
 
 - Z-Image graph integrity gate: the 14 published `.tflite` graphs are now

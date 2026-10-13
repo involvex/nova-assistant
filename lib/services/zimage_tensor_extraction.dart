@@ -160,8 +160,9 @@ class ZImageTensorExtraction {
       if (assets.padTokensFile.isNotEmpty) {
         final File padFile = File('${modelDir.path}/${assets.padTokensFile}');
         if (!await padFile.exists()) return false;
-        final SafetensorsHeader padHeader =
-            await readSafetensorsHeader(padFile);
+        final SafetensorsHeader padHeader = await readSafetensorsHeader(
+          padFile,
+        );
         try {
           _requirePadTokenShapes(padHeader, padFile.path);
         } catch (e) {

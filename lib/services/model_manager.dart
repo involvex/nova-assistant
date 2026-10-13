@@ -1634,8 +1634,8 @@ class ModelManager {
     return _diffusionModels.any((m) => m.model == model);
   }
 
-  /// Checks if all required extra assets (tokenizer, embed_tokens, t_embedder)
-  /// exist for the given model.
+  /// Checks if all required extra assets (tokenizer, embed_tokens, t_embedder,
+  /// pad_tokens) exist for the given model.
   Future<bool> hasExtraAssets(DiffusionModel model) async {
     final modelDir = await findDiffusionModelPath(model);
     if (modelDir == null) return false;

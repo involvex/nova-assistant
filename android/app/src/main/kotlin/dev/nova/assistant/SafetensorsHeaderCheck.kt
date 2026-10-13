@@ -79,7 +79,13 @@ object SafetensorsHeaderCheck {
   )
 
   /**
-   * Mirrors Dart `verifyDerivedAssets`: both extracted files must exist and
+   * Learned DiT pad tokens. Upstream stores `[3840]` or `[1,3840]`; dtype is
+   * BF16 or F32 depending on the shard. [checkPadTokens] accepts either.
+   */
+  val EXPECTED_PAD_TOKEN_NAMES: List<String> = listOf("cap_pad_token", "x_pad_token")
+
+  /**
+   * Mirrors Dart `verifyDerivedAssets`: derived files must exist and
    * carry the documented tensors. Returns [CheckResult.Failed] with every
    * reason instead of throwing, so the pipeline can surface one message.
    */
@@ -87,6 +93,7 @@ object SafetensorsHeaderCheck {
     val reasons = ArrayList<String>()
     val embedFile = File(modelDir, "embed_tokens.safetensors")
     val tEmbedderFile = File(modelDir, "t_embedder.safetensors")
+    val padTokensFile = File(modelDir, "pad_tokens.safetensors")
     if (!embedFile.isFile) {
       reasons.add("Missing ${embedFile.absolutePath} (run extraction first)")
     } else {
@@ -96,6 +103,45 @@ object SafetensorsHeaderCheck {
       reasons.add("Missing ${tEmbedderFile.absolutePath} (run extraction first)")
     } else {
       checkFile(tEmbedderFile, EXPECTED_T_EMBEDDER, reasons)
+    }
+    if (!padTokensFile.isFile) {
+      reasons.add(
+        "Missing ${padTokensFile.absolutePath} " +
+          "(reinstall extra assets — learned cap/x pad tokens)",
+      )
+    } else {
+      checkPadTokens(padTokensFile, reasons)
+    }
+    return if (reasons.isEmpty()) CheckResult.Ok else CheckResult.Failed(reasons)
+  }
+
+  /** Flexible gate for pad tokens: BF16|F32 and [3840]|[1,3840]. */
+  fun checkPadTokens(
+    file: File,
+    reasons: MutableList<String> = ArrayList(),
+  ): CheckResult {
+    val header: ParsedHeader = try {
+      parseHeader(file)
+    } catch (t: Throwable) {
+      reasons.add("${file.name}: unreadable header (${t.message})")
+      return CheckResult.Failed(reasons)
+    }
+    for (name in EXPECTED_PAD_TOKEN_NAMES) {
+      val got = header.tensors[name]
+      if (got == null) {
+        reasons.add("${file.name}: tensor '$name' not found")
+        continue
+      }
+      if (got.dtype != "BF16" && got.dtype != "F32") {
+        reasons.add("${file.name}: '$name' dtype ${got.dtype}, expected BF16 or F32")
+      }
+      val count = got.shape.fold(1) { a, b -> a * b }
+      if (count != 3840) {
+        reasons.add(
+          "${file.name}: '$name' shape ${got.shape} " +
+            "(expected 3840 elements as [3840] or [1,3840])",
+        )
+      }
     }
     return if (reasons.isEmpty()) CheckResult.Ok else CheckResult.Failed(reasons)
   }

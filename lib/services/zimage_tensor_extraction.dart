@@ -13,6 +13,7 @@ import 'package:nova_assistant/services/safetensors_extractor.dart';
 /// host only needs:
 /// - `embed_tokens` `[151936,2560]` bf16 (~778 MB) → [embedTokensFile]
 /// - `t_embedder.mlp.{0,2}.{weight,bias}` fp32 (~2 MB) → [tEmbedderFile]
+/// - `cap_pad_token` / `x_pad_token` `[1,3840]` F32 (~30 KB) → [padTokensFile]
 class ZImageTensorExtraction {
   const ZImageTensorExtraction._();
 
@@ -26,6 +27,13 @@ class ZImageTensorExtraction {
         't_embedder.mlp.0.bias': (dtype: 'F32', shape: <int>[1024]),
         't_embedder.mlp.2.weight': (dtype: 'F32', shape: <int>[256, 1024]),
         't_embedder.mlp.2.bias': (dtype: 'F32', shape: <int>[256]),
+      };
+
+  /// Learned DiT pad tokens (Tongyi `transformer.py`).
+  static const Map<String, ({String dtype, List<int> shape})> padTokenTensors =
+      <String, ({String dtype, List<int> shape})>{
+        'cap_pad_token': (dtype: 'F32', shape: <int>[1, 3840]),
+        'x_pad_token': (dtype: 'F32', shape: <int>[1, 3840]),
       };
 
   /// Finds the `embed_tokens` key in a staged text-encoder shard.
@@ -81,24 +89,27 @@ class ZImageTensorExtraction {
     required File dest,
   }) async {
     final SafetensorsHeader header = await readSafetensorsHeader(source);
-    for (final MapEntry<String, ({String dtype, List<int> shape})> want
-        in tEmbedderTensors.entries) {
-      final SafetensorsTensorEntry? got = header.entries[want.key];
-      if (got == null) {
-        throw StateError('Tensor "${want.key}" not found in ${source.path}');
-      }
-      if (got.dtype != want.value.dtype ||
-          !_sameShape(got.shape, want.value.shape)) {
-        throw StateError(
-          'Tensor "${want.key}" is ${got.dtype}${got.shape}, expected '
-          '${want.value.dtype}${want.value.shape}',
-        );
-      }
-    }
+    _requireTensorTable(header, tEmbedderTensors, source.path);
     await extractSafetensorsTensors(
       source: source,
       names: <String, String>{
         for (final String k in tEmbedderTensors.keys) k: k,
+      },
+      dest: dest,
+    );
+  }
+
+  /// Carves learned `cap_pad_token` / `x_pad_token` from the transformer shard.
+  static Future<void> extractPadTokens({
+    required File source,
+    required File dest,
+  }) async {
+    final SafetensorsHeader header = await readSafetensorsHeader(source);
+    _requirePadTokenShapes(header, source.path);
+    await extractSafetensorsTensors(
+      source: source,
+      names: <String, String>{
+        for (final String k in padTokenTensors.keys) k: k,
       },
       dest: dest,
     );
@@ -145,6 +156,19 @@ class ZImageTensorExtraction {
           return false;
         }
       }
+
+      if (assets.padTokensFile.isNotEmpty) {
+        final File padFile = File('${modelDir.path}/${assets.padTokensFile}');
+        if (!await padFile.exists()) return false;
+        final SafetensorsHeader padHeader =
+            await readSafetensorsHeader(padFile);
+        try {
+          _requirePadTokenShapes(padHeader, padFile.path);
+        } catch (e) {
+          debugPrint('ZImageTensorExtraction: pad tokens mismatch: $e');
+          return false;
+        }
+      }
       return true;
     } catch (e) {
       debugPrint('ZImageTensorExtraction: derived verification failed: $e');
@@ -183,13 +207,14 @@ class ZImageTensorExtraction {
     final HttpClient http = client ?? HttpClient();
     if (owns) http.connectionTimeout = const Duration(seconds: 30);
     try {
-      // Two shards share one progress stream; each job reports its own bytes
-      // and `completed` carries earlier jobs forward.
+      // Jobs share one progress stream; each reports its own bytes and
+      // `completed` carries earlier jobs forward.
       const int tEmbedderBytes = 1024 * 256 * 4 * 2 + (1024 + 256) * 4;
+      const int padTokenBytes = 3840 * 4 * 2; // two [1,3840] F32 vectors
       final int embedBytes =
           embedTokensShape.fold<int>(1, (int a, int b) => a * b) *
           (SafetensorsTensorEntry.bytesPerElement['BF16'] ?? 2);
-      final int total = embedBytes + tEmbedderBytes;
+      final int total = embedBytes + tEmbedderBytes + padTokenBytes;
       int completed = 0;
 
       Future<bool> run({
@@ -197,12 +222,14 @@ class ZImageTensorExtraction {
         required String upstream,
         required String derivedRelative,
         required int expectedBytes,
+        required String kind,
       }) async {
         final bool ok = await _extractRemoteOne(
           modelDir: modelDir,
           repoId: repoId,
           upstream: upstream,
           derivedRelative: derivedRelative,
+          kind: kind,
           token: hfToken,
           client: http,
           onProgress: (int fetched) =>
@@ -220,14 +247,25 @@ class ZImageTensorExtraction {
         upstream: assets.embedTokensSource,
         derivedRelative: assets.embedTokensFile,
         expectedBytes: embedBytes,
+        kind: 'embed',
       );
       final bool tOk = await run(
         repoId: assets.tEmbedderRepoId,
         upstream: assets.tEmbedderSource,
         derivedRelative: assets.tEmbedderFile,
         expectedBytes: tEmbedderBytes,
+        kind: 't_embedder',
       );
-      return embedOk && tOk;
+      final bool padOk = assets.padTokensFile.isEmpty
+          ? true
+          : await run(
+              repoId: assets.tEmbedderRepoId,
+              upstream: assets.tEmbedderSource,
+              derivedRelative: assets.padTokensFile,
+              expectedBytes: padTokenBytes,
+              kind: 'pad_tokens',
+            );
+      return embedOk && tOk && padOk;
     } finally {
       if (owns) http.close(force: true);
     }
@@ -241,6 +279,7 @@ class ZImageTensorExtraction {
     required String repoId,
     required String upstream,
     required String derivedRelative,
+    required String kind,
     required String? token,
     required HttpClient client,
     required void Function(int) onProgress,
@@ -260,16 +299,23 @@ class ZImageTensorExtraction {
 
       // Validate the header before transferring anything — the embed_tokens
       // range alone is ~780 MB, so a wrong key must fail here, not midway.
-      final bool isEmbedTokens = upstream.contains('text_encoder');
       final Map<String, String> names;
-      if (isEmbedTokens) {
-        final String key = findEmbedTokensKeyInHeader(header);
-        names = <String, String>{key: 'embed_tokens'};
-      } else {
-        _requireTEmbedderShapes(header, upstream);
-        names = <String, String>{
-          for (final String k in tEmbedderTensors.keys) k: k,
-        };
+      switch (kind) {
+        case 'embed':
+          final String key = findEmbedTokensKeyInHeader(header);
+          names = <String, String>{key: 'embed_tokens'};
+        case 't_embedder':
+          _requireTensorTable(header, tEmbedderTensors, upstream);
+          names = <String, String>{
+            for (final String k in tEmbedderTensors.keys) k: k,
+          };
+        case 'pad_tokens':
+          _requirePadTokenShapes(header, upstream);
+          names = <String, String>{
+            for (final String k in padTokenTensors.keys) k: k,
+          };
+        default:
+          throw StateError('Unknown extract kind: $kind');
       }
 
       await extractSafetensorsTensorsRemote(
@@ -298,10 +344,14 @@ class ZImageTensorExtraction {
     }
   }
 
-  /// Validates the documented `t_embedder` dtype/shape table against a header.
-  static void _requireTEmbedderShapes(SafetensorsHeader header, String label) {
+  /// Validates a fixed dtype/shape table against a header.
+  static void _requireTensorTable(
+    SafetensorsHeader header,
+    Map<String, ({String dtype, List<int> shape})> table,
+    String label,
+  ) {
     for (final MapEntry<String, ({String dtype, List<int> shape})> want
-        in tEmbedderTensors.entries) {
+        in table.entries) {
       final SafetensorsTensorEntry? got = header.entries[want.key];
       if (got == null) {
         throw StateError('Tensor "${want.key}" not found in $label');
@@ -311,6 +361,27 @@ class ZImageTensorExtraction {
         throw StateError(
           'Tensor "${want.key}" is ${got.dtype}${got.shape}, expected '
           '${want.value.dtype}${want.value.shape}',
+        );
+      }
+    }
+  }
+
+  /// Pad tokens accept `[3840]` or `[1,3840]` and F32 or BF16.
+  static void _requirePadTokenShapes(SafetensorsHeader header, String label) {
+    for (final String name in padTokenTensors.keys) {
+      final SafetensorsTensorEntry? got = header.entries[name];
+      if (got == null) {
+        throw StateError('Tensor "$name" not found in $label');
+      }
+      if (got.dtype != 'F32' && got.dtype != 'BF16') {
+        throw StateError(
+          'Tensor "$name" is ${got.dtype}, expected F32 or BF16',
+        );
+      }
+      final int count = got.shape.fold<int>(1, (int a, int b) => a * b);
+      if (count != 3840) {
+        throw StateError(
+          'Tensor "$name" shape ${got.shape} expected 3840 elements',
         );
       }
     }
@@ -368,6 +439,17 @@ class ZImageTensorExtraction {
               extractTEmbedder(source: source, dest: dest),
         ) &&
         ok;
+    if (assets.padTokensFile.isNotEmpty) {
+      ok =
+          await _extractOne(
+            modelDir: modelDir,
+            stagedRelative: assets.tEmbedderSource,
+            derivedRelative: assets.padTokensFile,
+            extract: ({required File source, required File dest}) =>
+                extractPadTokens(source: source, dest: dest),
+          ) &&
+          ok;
+    }
     return ok;
   }
 

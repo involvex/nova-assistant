@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.gpu.GpuDelegate
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -50,9 +49,6 @@ object DiffusionPipeline {
   private var unetMainInterpreters: List<Interpreter> = emptyList()
   private var unetFinalInterpreter: Interpreter? = null
   private var vaeInterpreter: Interpreter? = null
-  private val gpuDelegates = mutableListOf<GpuDelegate>()
-  /** GPU delegate disabled: JNI/R8 + peak VRAM with Gemma caused process kills. */
-  @Volatile private var tryGpuDelegate = false
 
   fun isModelLoaded(modelType: ModelType): Boolean {
     return loadedModelType == modelType
@@ -96,7 +92,7 @@ object DiffusionPipeline {
 
     loadedModelType = modelType
     onProgress("Model loaded", 100)
-    Log.i(TAG, "Model loaded: $modelType (gpu=${gpuDelegates.isNotEmpty()})")
+    Log.i(TAG, "Model loaded: $modelType")
   }
 
   fun unloadModel() {
@@ -104,14 +100,6 @@ object DiffusionPipeline {
     unetMainInterpreters.forEach { it.close() }
     unetFinalInterpreter?.close()
     vaeInterpreter?.close()
-    for (delegate in gpuDelegates) {
-      try {
-        delegate.close()
-      } catch (_: Throwable) {
-        // ignore
-      }
-    }
-    gpuDelegates.clear()
 
     textEncoderInterpreter = null
     unetMainInterpreters = emptyList()
@@ -129,6 +117,7 @@ object DiffusionPipeline {
    * backstop for mid-run failures.
    */
   private fun generateZImage(
+    context: Context,
     config: GenerationConfig,
     modelDir: File,
     prompt: String,
@@ -178,28 +167,52 @@ object DiffusionPipeline {
         e,
       )
     }
+    val padTokens = try {
+      PadTokensLoader.load(File(modelDir, "pad_tokens.safetensors"))
+    } catch (e: IllegalStateException) {
+      throw IllegalStateException(
+        "Z-Image pad_tokens unreadable: ${e.message}. Reinstall extra assets from Settings.",
+        e,
+      )
+    } catch (e: IllegalArgumentException) {
+      throw IllegalStateException(
+        "Z-Image pad_tokens unreadable: ${e.message}. Reinstall extra assets from Settings.",
+        e,
+      )
+    }
 
     val embedFile = File(modelDir, "embed_tokens.safetensors")
     // Build marker: bump when the Z-Image path changes so a logcat line
     // proves which code actually ran on the device.
-    Log.d(TAG, "ZIMG-DIAG4 steps=${config.steps} guidance=${config.guidanceScale} size=${config.size}")
+    // DIAG11 = DIAG9 + RoPE cos/sin into LiteRT x/mask (were wrongly zeros/ones).
+    Log.d(TAG, "ZIMG-DIAG11 steps=${config.steps} guidance=${config.guidanceScale} size=${config.size}")
     val graphSizes = modelDir.listFiles()
       ?.filter { it.isFile && it.extension == "tflite" }
       ?.sortedBy { it.name }
       ?.joinToString(", ") { it.name + "=" + it.length() }
     Log.d(TAG, "ZIMG files: $graphSizes")
-    val graphs = ZImageTfliteGraphs(modelDir)
-    // Zero-probes: the previous run showed qwen_enc exploding to std 5e10
-    // and embx to std 419 on valid inputs. Feeding zeros separates a broken
-    // graph file/conversion (still explodes: weights or kernels are bad,
-    // independent of any host input) from input-triggered divergence
-    // (zeros come back at bias scale, so the host inputs are the trigger).
+
+    // Header dump: confirms BF16 + [151936,2560] before 778 MB mmap
+    val embedHeader = SafetensorsHeaderCheck.parseHeader(File(modelDir, "embed_tokens.safetensors"))
+    val embedEntry = embedHeader.tensors["embed_tokens"]
+    Log.d(
+      TAG,
+      "ZIMG embed_tokens header: dtype=${embedEntry?.dtype} shape=${embedEntry?.shape} " +
+        "dataStart=${embedHeader.dataStart} fileLen=${File(modelDir, "embed_tokens.safetensors").length()}",
+    )
+
+    val graphs = ZImageTfliteGraphs(modelDir, context)
+    // Zero-probe still useful: CompiledModel GPU/CPU must keep zeros near zero.
+    // A healthy encoder returns ~O(1) features on real embeds; the broken
+    // Interpreter path returned std ~5e10.
     val qwenZero = graphs.qwenEnc(
       FloatArray(ZImageHostLoop.EMBED_SEQUENCE_TOKENS * ZImageHostLoop.EMBED_DIM),
     )
-    Log.d(TAG, "ZIMG " + ZImagePipeline.tensorStats("qwenZero", qwenZero))
-    val embxZero = graphs.embx(FloatArray(ZImagePipeline.X_IMG_SIZE))
-    Log.d(TAG, "ZIMG " + ZImagePipeline.tensorStats("embxZero", embxZero))
+    Log.d(
+      TAG,
+      "ZIMG " + ZImagePipeline.tensorStats("qwenZero", qwenZero) +
+        " accel=${graphs.acceleratorOf("qwen_enc.tflite")}",
+    )
     try {
       val rgb = ZImagePipeline.generate(
         graphs = graphs,
@@ -223,6 +236,7 @@ object DiffusionPipeline {
           rows
         },
         weights = tWeights,
+        padTokens = padTokens,
         req = ZImagePipeline.Request(
           prompt = prompt,
           steps = config.steps,
@@ -294,25 +308,15 @@ object DiffusionPipeline {
       }
     }
 
+    // FLUX stub path only. Z-Image uses LiteRT CompiledModel in
+    // ZImageTfliteGraphs (GPU FP32 / CPU) — classic GpuDelegate + Interpreter
+    // exploded int8 qwen_enc to 1e12 on this device.
     val options = Interpreter.Options().apply {
-      // Keep thread count modest — each thread holds activation buffers.
       setNumThreads(2)
-      // Diffusion graphs fail XNNPack reshape (node prepare errors). Force
-      // the reference kernels; GPU is already off for OOM/JNI reasons.
       try {
         setUseXNNPACK(false)
       } catch (t: Throwable) {
         Log.w(TAG, "setUseXNNPACK(false) unavailable: ${t.message}")
-      }
-      if (tryGpuDelegate) {
-        try {
-          val delegate = GpuDelegate()
-          addDelegate(delegate)
-          gpuDelegates.add(delegate)
-        } catch (t: Throwable) {
-          tryGpuDelegate = false
-          Log.w(TAG, "GPU delegate unavailable, using CPU: ${t.message}")
-        }
       }
     }
 
@@ -346,7 +350,7 @@ object DiffusionPipeline {
     // is clamped below. Returns ahead of the latent pre-allocation below,
     // which only the generic SD-style path consumes.
     if (config.modelType == ModelType.Z_IMAGE_TURBO) {
-      return generateZImage(config, modelDir, promptText, onProgress)
+      return generateZImage(context, config, modelDir, promptText, onProgress)
     }
 
     onProgress("Preparing latents", 5)

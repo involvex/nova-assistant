@@ -49,9 +49,9 @@ enum DiffusionModel {
   String get runnerNotReadyMessage => switch (this) {
     DiffusionModel.zImageTurbo =>
       'Z-Image Turbo weights are installed, but extra assets are missing. '
-          'The Qwen3 tokenizer, the embed_tokens matrix, and the t_embedder '
-          'MLP come from the base checkpoint — download them from Settings '
-          'to enable image generation. Chat is unaffected.',
+          'The Qwen3 tokenizer, embed_tokens, t_embedder MLP, and learned '
+          'pad tokens come from the base checkpoint — download them from '
+          'Settings to enable image generation. Chat is unaffected.',
     DiffusionModel.flux2Klein =>
       'FLUX.2-klein weights are installed, but Nova cannot run them yet. '
           'The on-device diffusion runner is not wired for this LiteRT graph set.',
@@ -84,9 +84,9 @@ enum ImageSize {
 /// - embed_tokens [151936,2560] lives inside
 ///   text_encoder/model-00001-of-00003.safetensors — the host only needs the
 ///   778 MB bf16 matrix (389 MB int8), stored locally as [embedTokensFile].
-/// - t_embedder MLP (mlp.0 [1024,256] + mlp.2 [256,1024], ~2 MB fp32) lives
-///   inside transformer/diffusion_pytorch_model-00001-of-00003.safetensors,
-///   stored locally as [tEmbedderFile].
+/// - t_embedder MLP (mlp.0 [1024,256] + mlp.2 [256,1024], ~2 MB fp32) and
+///   learned `cap_pad_token` / `x_pad_token` ([1,3840] F32) live inside
+///   transformer/diffusion_pytorch_model-00001-of-00003.safetensors.
 class DiffusionExtraAssets {
   const DiffusionExtraAssets({
     required this.tokenizerRepoId,
@@ -97,6 +97,7 @@ class DiffusionExtraAssets {
     required this.tEmbedderRepoId,
     required this.tEmbedderSource,
     required this.tEmbedderFile,
+    this.padTokensFile = 'pad_tokens.safetensors',
     this.expectedSizes = const <String, int>{},
     this.expectedSha256 = const <String, String>{},
   });
@@ -119,6 +120,10 @@ class DiffusionExtraAssets {
 
   /// Local destination (relative to the model dir) for the extracted MLP.
   final String tEmbedderFile;
+
+  /// Local destination for learned `cap_pad_token` / `x_pad_token`
+  /// (same upstream shard as [tEmbedderSource]).
+  final String padTokensFile;
 
   /// Exact byte sizes keyed by local relative path (staged shards,
   /// tokenizer files, derived files). Zero or absent entries are skipped.
@@ -149,6 +154,10 @@ class DiffusionExtraAssets {
       return false;
     }
     if (!(await File('${modelDir.path}/$tEmbedderFile').exists())) {
+      return false;
+    }
+    if (padTokensFile.isNotEmpty &&
+        !(await File('${modelDir.path}/$padTokensFile').exists())) {
       return false;
     }
     return true;
@@ -215,6 +224,7 @@ extension DiffusionModelExtensions on DiffusionModel {
       tEmbedderRepoId: '',
       tEmbedderSource: '',
       tEmbedderFile: 't_embedder.safetensors',
+      padTokensFile: '',
     ),
   };
 

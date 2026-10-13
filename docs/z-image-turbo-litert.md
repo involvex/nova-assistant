@@ -60,6 +60,7 @@ from the diffusers reference.
 | Tokenizer | `Tongyi-MAI/Z-Image-Turbo` `tokenizer/` | ~11 MB | BPE ids for `embed_tokens` |
 | `embed_tokens` | `text_encoder/model-00001-of-00003.safetensors` | `[151936,2560]` bf16 = 778 MB (389 MB int8) | `inputs_embeds[1,64,2560]` |
 | `t_embedder` MLP | `transformer/diffusion_pytorch_model-00001-of-00003.safetensors` | **~2 MB fp32** | the `pos[1,256]` input |
+| `cap_pad_token` / `x_pad_token` | same transformer shard | `[1,3840]` F32 each (~30 KB) | learned DiT pad after `z_embc` / image pad |
 
 These do **not** ship with the graphs, so Nova acquires them at install time
 from the base checkpoint. The tokenizer (~11 MB) downloads directly; the two
@@ -80,12 +81,20 @@ this and validates dtype/shape *before* transferring the large range;
 | `t_embedder.mlp.2.weight` | F32 | `[256, 1024]` |
 | `t_embedder.mlp.2.bias` | F32 | `[256]` |
 
+Pad tokens (same shard):
+
+| Tensor | dtype | shape |
+|---|---|---|
+| `cap_pad_token` | F32 | `[1, 3840]` |
+| `x_pad_token` | F32 | `[1, 3840]` |
+
 `DiffusionModel.inferenceReady` is `true` for Z-Image Turbo. Readiness is
 still enforced per-device and in three independent places, so a partial
 install fails closed **before** mmap'ing the 3.5 GB text encoder:
 
 1. `ModelManager.findDiffusionModelPath` — the `.tflite` graphs are present.
-2. `ModelManager.hasExtraAssets` — tokenizer + both derived tensors exist.
+2. `ModelManager.hasExtraAssets` — tokenizer + derived tensors exist
+   (including `pad_tokens.safetensors`).
 3. `SafetensorsHeaderCheck.checkDerivedAssets` (native) — the derived tensors
    parse and have the expected shape/dtype, so a truncated or tampered file is
    rejected at the door rather than mid-denoise.
@@ -128,8 +137,9 @@ tokenize(prompt)                      -> ids
 embed_tokens[ids]                     -> inputs_embeds (left-pad to 64)
 qwen_enc                              -> cap_feats[1,64,2560]
 take first n real rows, n <= 32
-pad context to multiple of 32 (repeat last row)   -> cap[32,2560]
+zero-pad to 32                        -> cap[32,2560]
 z_embc(cap)                           -> ctx[1,32,3840]
+overwrite pad rows with cap_pad_token -> ctx[1,32,3840]
 z_refc(ctx, x, mask)                  -> ctx[1,32,3840]
 
 per step, per branch (cond / uncond):
@@ -170,12 +180,13 @@ With `F=1, pF=1, pH=pW=2` this reduces to
   per-patch-meshed image even though every tensor shape is correct.
 - `unpatchify` is the exact inverse (`.permute(6, 0, 3, 1, 4, 2, 5)`).
 
-**Context padding** — `_pad_with_ids`: pad to a multiple of `SEQ_MULTI_OF = 32`
-by **repeating the last row**, pad positions `(0,0,0)`, pad mask `false` for
-real tokens and `true` for padding. Because the graphs hard-code 32 context
-tokens, the host must **truncate the prompt to <= 32 tokens**; a longer prompt
-would need `cap_len = 64` and would not fit the graph. With `n <= 32` the pad
-mask is all-`false`, which is consistent with the graphs baking it in.
+**Context padding** — Tongyi `transformer.py` pads sequences to a multiple of
+`SEQ_MULTI_OF = 32`, runs `cap_embedder` (`z_embc`), then overwrites pad
+positions with the learned `cap_pad_token` (`[1,3840]`). The host mirrors that:
+zero-pad real caption features to 32 rows, project with `z_embc`, then write
+`cap_pad_token` into rows `[n, 32)`. Repeating the last real row (an earlier
+host mistake) poisons attention and yields pink static. Because the graphs
+hard-code 32 context tokens, prompts longer than 32 tokens are truncated.
 
 **Text-encoder padding**: `qwen_enc` takes a fixed `[1,64,2560]` with no
 attention-mask input. The encoder is causal, so the host must **left-pad** —
@@ -252,6 +263,10 @@ noise_pred = -noise_pred
 **VAE denormalise** — `latents / scaling_factor + shift_factor` with
 `scaling_factor 0.3611`, `shift_factor 0.1159` (from the upstream VAE config;
 `latent_channels 16`, 8x downscale).
+
+**VAE → pixels** — AutoencoderKL decode is roughly `[-1, 1]`. Tongyi /
+diffusers map with `(image / 2 + 0.5).clamp(0, 1)` before uint8. Clamping
+negatives to 0 without that remap produces a solid black image.
 
 ## Two details that silently corrupt the image
 

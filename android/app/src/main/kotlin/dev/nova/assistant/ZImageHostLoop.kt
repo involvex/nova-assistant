@@ -30,10 +30,31 @@ object ZImageHostLoop {
   const val VAE_SCALING_FACTOR = 0.3611f
   const val VAE_SHIFT_FACTOR = 0.1159f
 
+  /** Tongyi / LiteRT RoPE (`axes_dims`, `axes_lens`, `rope_theta`). */
+  val ROPE_AXES_DIMS: IntArray = intArrayOf(32, 48, 48)
+  val ROPE_AXES_LENS: IntArray = intArrayOf(1536, 512, 512)
+  const val ROPE_THETA = 256.0
+  /** `sum(axes_dims) / 2` — complex half-width per token (= graph `x`/`mask` last dim). */
+  const val ROPE_FREQ_DIM = 64
+
   private const val BASE_SEQ_LEN = 256
   private const val MAX_SEQ_LEN = 4096
   private const val BASE_SHIFT = 0.5f
   private const val MAX_SHIFT = 1.15f
+
+  /**
+   * Split real cos/sin RoPE for one sequence, flat row-major `[tokens, 64]`.
+   * LiteRT graphs take these as the poorly-named `x` and `mask` inputs
+   * (`[1,1,N,64]`). HF card calls them `cc`/`cs`.
+   */
+  data class RopeCosSin(
+    val cos: FloatArray,
+    val sin: FloatArray,
+  ) {
+    init {
+      require(cos.size == sin.size) { "cos/sin length mismatch ${cos.size} vs ${sin.size}" }
+    }
+  }
 
   /**
    * Weights of `TimestepEmbedder`, row-major `[out, in]` to match the
@@ -163,31 +184,142 @@ object ZImageHostLoop {
     tokenCount + ((SEQ_MULTI_OF - tokenCount % SEQ_MULTI_OF) % SEQ_MULTI_OF)
 
   /**
-   * `_pad_with_ids`: pad to a multiple of 32 by repeating the last row.
+   * Pads feature rows to a multiple of 32.
    *
-   * The graphs hard-code 32 context tokens, so [maxTokens] truncates longer
-   * prompts rather than growing the sequence. Pad positions are `(0,0,0)` and
-   * the pad feature is the last real row; both are graph-internal, but the
-   * repeated row is produced here.
+   * When [padToken] is null, pad slots repeat the last real row (legacy /
+   * unit-test helper). Production must pass the learned `cap_pad_token` /
+   * `x_pad_token` — repeating the last row poisons attention and yields
+   * pink static (see Core AI / MLX Z-Image ports).
    */
   fun padContext(
     features: Array<FloatArray>,
     dim: Int,
     maxTokens: Int = CONTEXT_TOKENS,
+    padToken: FloatArray? = null,
   ): PaddedContext {
     require(features.isNotEmpty()) { "context features must not be empty" }
     require(features.all { it.size == dim }) { "every context row must have $dim values" }
+    if (padToken != null) {
+      require(padToken.size == dim) { "padToken must have $dim values" }
+    }
     val real = features.size.coerceAtMost(maxTokens)
     val total = paddedContextLength(real)
     val padded = Array(total) { FloatArray(dim) }
     val padMask = BooleanArray(total)
-    val last = features[real - 1]
+    val filler = padToken ?: features[real - 1]
     for (i in 0 until total) {
-      val source = if (i < real) features[i] else last
+      val source = if (i < real) features[i] else filler
       source.copyInto(padded[i])
       padMask[i] = i >= real
     }
     return PaddedContext(padded, padMask, total)
+  }
+
+  /**
+   * Overwrites pad rows in a flat `[rows, dim]` matrix with [padToken].
+   * Used after `z_embc` (model dim 3840) so pad slots never go through the
+   * projector as repeated real features.
+   */
+  fun applyLearnedPad(
+    flat: FloatArray,
+    rows: Int,
+    dim: Int,
+    realRows: Int,
+    padToken: FloatArray,
+  ): FloatArray {
+    require(flat.size == rows * dim) { "flat must be [$rows,$dim]" }
+    require(padToken.size == dim) { "padToken must have $dim values" }
+    require(realRows in 0..rows) { "realRows $realRows out of range for $rows" }
+    val out = flat.copyOf()
+    for (i in realRows until rows) {
+      padToken.copyInto(out, destinationOffset = i * dim)
+    }
+    return out
+  }
+
+  // ------------------------------------------------------------------- RoPE
+
+  /**
+   * Caption position ids `[T, 3]` — Tongyi `create_coordinate_grid` with
+   * `size=(T,1,1)`, `start=(1,0,0)` → rows `(1,0,0)…(T,0,0)`.
+   */
+  fun captionPosIds(tokenCount: Int): Array<IntArray> =
+    Array(tokenCount) { i -> intArrayOf(i + 1, 0, 0) }
+
+  /**
+   * Image patch position ids `[H*W, 3]` for `F=1`.
+   * Origin on axis 0 is `capPaddedLen + 1` (after the padded caption span).
+   */
+  fun imagePosIds(gridH: Int, gridW: Int, capPaddedLen: Int): Array<IntArray> {
+    val origin = capPaddedLen + 1
+    return Array(gridH * gridW) { i ->
+      val h = i / gridW
+      val w = i % gridW
+      intArrayOf(origin, h, w)
+    }
+  }
+
+  /**
+   * Precompute RoPE cos/sin for [posIds], matching diffusers `RopeEmbedder`:
+   * `freqs = 1/theta^(arange(0,d,2)/d)`, `polar(1, outer(t, freqs))`, concat axes.
+   * Output is flat `[T, 64]` cos and sin (LiteRT `x`/`mask`).
+   */
+  fun ropeCosSin(posIds: Array<IntArray>): RopeCosSin {
+    require(posIds.isNotEmpty()) { "posIds must not be empty" }
+    require(posIds.all { it.size == ROPE_AXES_DIMS.size }) {
+      "each pos id must have ${ROPE_AXES_DIMS.size} axes"
+    }
+    val tokens = posIds.size
+    val outCos = FloatArray(tokens * ROPE_FREQ_DIM)
+    val outSin = FloatArray(tokens * ROPE_FREQ_DIM)
+    var dimOffset = 0
+    for (axis in ROPE_AXES_DIMS.indices) {
+      val d = ROPE_AXES_DIMS[axis]
+      val end = ROPE_AXES_LENS[axis]
+      val half = d / 2
+      // Cache cos/sin table for this axis: [end, half]
+      val tableCos = Array(end) { FloatArray(half) }
+      val tableSin = Array(end) { FloatArray(half) }
+      for (f in 0 until half) {
+        // arange(0,d,2)/d == (2f)/d for f in 0..half-1
+        val freq = 1.0 / Math.pow(ROPE_THETA, (2.0 * f) / d)
+        for (t in 0 until end) {
+          val angle = t * freq
+          tableCos[t][f] = cos(angle).toFloat()
+          tableSin[t][f] = sin(angle).toFloat()
+        }
+      }
+      for (tok in 0 until tokens) {
+        val idx = posIds[tok][axis]
+        require(idx in 0 until end) {
+          "RoPE axis $axis index $idx out of range [0,$end)"
+        }
+        val base = tok * ROPE_FREQ_DIM + dimOffset
+        tableCos[idx].copyInto(outCos, destinationOffset = base)
+        tableSin[idx].copyInto(outSin, destinationOffset = base)
+      }
+      dimOffset += half
+    }
+    require(dimOffset == ROPE_FREQ_DIM) { "RoPE dim $dimOffset != $ROPE_FREQ_DIM" }
+    return RopeCosSin(outCos, outSin)
+  }
+
+  /** Fixed 256 px host RoPE: caption `[32,64]` + image `[256,64]` + unified `[288,64]`. */
+  fun fixed256Rope(
+    capTokens: Int = CONTEXT_TOKENS,
+    gridH: Int = 16,
+    gridW: Int = 16,
+  ): Triple<RopeCosSin, RopeCosSin, RopeCosSin> {
+    val cap = ropeCosSin(captionPosIds(capTokens))
+    val img = ropeCosSin(imagePosIds(gridH, gridW, capTokens))
+    val unifiedCos = FloatArray(img.cos.size + cap.cos.size)
+    val unifiedSin = FloatArray(img.sin.size + cap.sin.size)
+    // Unified order is [image, cap] — matches host concat.
+    img.cos.copyInto(unifiedCos, 0)
+    cap.cos.copyInto(unifiedCos, img.cos.size)
+    img.sin.copyInto(unifiedSin, 0)
+    cap.sin.copyInto(unifiedSin, img.sin.size)
+    return Triple(cap, img, RopeCosSin(unifiedCos, unifiedSin))
   }
 
   /**
@@ -352,11 +484,47 @@ object ZImageHostLoop {
   fun denormalizeLatents(latent: FloatArray): FloatArray =
     FloatArray(latent.size) { latent[it] / VAE_SCALING_FACTOR + VAE_SHIFT_FACTOR }
 
+  /**
+   * RMSNorm: Root Mean Square Layer Normalization used by Qwen2.5/Qwen3.
+   *
+   * Normalizes a flat `[rows, dim]` tensor to have RMS=1.0 per row.
+   * No learnable scale/shift (those are baked into subsequent layers).
+   *
+   * Formula: `x / sqrt(mean(x^2) + eps)` per row.
+   */
+  fun rmsNorm(flat: FloatArray, rows: Int, dim: Int, eps: Float = 1e-6f): FloatArray {
+    val out = FloatArray(flat.size)
+    for (r in 0 until rows) {
+      val base = r * dim
+      // Compute RMS for this row
+      var sumSq = 0.0
+      for (c in 0 until dim) {
+        val v = flat[base + c]
+        sumSq += v * v
+      }
+      val rms = kotlin.math.sqrt(sumSq / dim + eps).toFloat()
+      // Normalize
+      for (c in 0 until dim) {
+        out[base + c] = flat[base + c] / rms
+      }
+    }
+    return out
+  }
+
+  /**
+   * Maps AutoencoderKL decoder output from roughly `[-1, 1]` to `[0, 1]`.
+   *
+   * Tongyi / diffusers: `(image / 2 + 0.5).clamp(0, 1)`. Skipping this and
+   * clamping negatives to 0 yields a solid black frame.
+   */
+  fun vaeOutputToUnitRange(rgb: FloatArray): FloatArray =
+    FloatArray(rgb.size) { ((rgb[it] / 2f) + 0.5f).coerceIn(0f, 1f) }
+
   // ------------------------------------------------------------------- decode
 
   /**
-   * Pack `zvae`'s `[1,3,H,W]` output into ARGB_8888 pixels, row-major RGB.
-   * Values are clamped to `[0,1]` and scaled to 8 bits.
+   * Pack unit-range `[3,H,W]` CHW RGB into ARGB_8888 pixels.
+   * Call [vaeOutputToUnitRange] first when feeding raw `zvae` output.
    */
   fun chwToArgb(rgb: FloatArray, height: Int, width: Int): IntArray {
     val plane = height * width

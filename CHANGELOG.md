@@ -52,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   multi-GB base-checkpoint shards — a large cut in download time and phone
   storage. Falls back to locally staged shards when a server ignores
   `Range`.
+- Z-Image pad-token assets (`cap_pad_token`, `x_pad_token`) are extracted
+  with the other host tensors and loaded on Android via `PadTokensLoader`.
 
 ### Changed
 
@@ -59,6 +61,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Z-Image Turbo on-device generation now produces a coherent image (verified
+  end-to-end with prompt "a cute little cat" at 256 px / 8 steps /
+  guidance 0). The LiteRT transformer graphs expect RoPE cos/sin in the
+  `x` / `mask` slots as `[1,1,N,64]` — not ones/zeros — and the host loop
+  now feeds those tensors (DIAG11). Earlier placeholders yielded pink,
+  black, grey, or green static.
+- Caption / image pad rows use the published `cap_pad_token` and
+  `x_pad_token` tensors from the checkpoint (`PadTokensLoader`) instead of
+  zeros, which had collapsed conditioning into colour mush.
+- VAE decode remaps LiteRT output with `(x/2+0.5).clamp(0,1)` to match
+  `pipeline_z_image.py`, fixing the all-black frame after a successful
+  denoise.
+- Host-side RMSNorm aligns caption features with the reference scale before
+  the context embedder, replacing the grey-static regime from unnormalized
+  encoder outputs.
+- Android diffusion now depends on LiteRT (`com.google.ai.edge.litert`)
+  instead of shipping both LiteRT and `tensorflow-lite`, which broke release
+  builds with `checkReleaseDuplicateClasses`.
 - Z-Image Turbo no longer produced colour mush instead of an image. The spec
   forced `guidance_scale = 1.0`, but Z-Image Turbo is guidance-distilled and
   `pipeline_z_image.py`'s own example runs `guidance_scale = 0.0` (where
@@ -73,10 +93,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   misleading "Preparing latents" progress tick before dispatching to the
   host-loop path.
 - Installed diffusion models that still need their host assets (tokenizer,
-  `embed_tokens`, `t_embedder`) are no longer a dead end. Settings now shows
-  an "assets needed for generation" state with a one-tap download, and the
-  generation sheet offers the same action on that error. Previously the only
-  route was uninstalling and re-downloading the multi-GB graphs.
+  `embed_tokens`, `t_embedder`, pad tokens) are no longer a dead end.
+  Settings now shows an "assets needed for generation" state with a one-tap
+  download, and the generation sheet offers the same action on that error.
+  Previously the only route was uninstalling and re-downloading the
+  multi-GB graphs.
 
 ## [0.4.8] - 2026-09-22
 

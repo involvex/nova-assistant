@@ -4,18 +4,23 @@
 -keep class com.csdcorp.speech_to_text.** { *; }
 -keep class io.flutter.plugins.GeneratedPluginRegistrant { *; }
 
-# TFLite / GPU delegate: JNI native methods must keep original names or
-# System.loadLibrary fails with UnsatisfiedLinkError (see GpuDelegate).
+# LiteRT (replaces tensorflow-lite): JNI native methods must keep original
+# names or System.loadLibrary fails with UnsatisfiedLinkError.
 -keep class org.tensorflow.lite.** { *; }
 -keep class org.tensorflow.lite.gpu.** { *; }
+-keep class com.google.ai.edge.litert.** { *; }
 -keepclassmembers class org.tensorflow.lite.** {
     native <methods>;
 }
 -keepclassmembers class org.tensorflow.lite.gpu.** {
     native <methods>;
 }
+-keepclassmembers class com.google.ai.edge.litert.** {
+    native <methods>;
+}
 -dontwarn org.tensorflow.lite.**
 -dontwarn org.tensorflow.lite.gpu.**
+-dontwarn com.google.ai.edge.litert.**
 
 -dontwarn dev.fluttercommunity.plus.packageinfo.**
 -dontwarn com.mr.flutter.plugin.filepicker.**

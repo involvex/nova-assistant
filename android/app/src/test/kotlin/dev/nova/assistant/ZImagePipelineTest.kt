@@ -3,6 +3,7 @@ package dev.nova.assistant
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -95,10 +96,13 @@ class ZImagePipelineTest {
     override fun vae(latentChw: FloatArray): FloatArray {
       record("vae", latentChw.size)
       require(latentChw.size == 16 * 32 * 32) { "vae in" }
+      // Soft ~[-1,1] like AutoencoderKL (tanh) so unit-range remap keeps
+      // guidance/step differences instead of hard-clamping them away.
       val out = FloatArray(3 * 256 * 256)
       for (c in 0 until 3) {
         for (p in 0 until 256 * 256) {
-          out[c * 65536 + p] = latentChw[c * 1024 + p % 1024] * 0.01f + c
+          val v = latentChw[c * 1024 + p % 1024] * 0.05f + (c - 1) * 0.2f
+          out[c * 65536 + p] = kotlin.math.tanh(v.toDouble()).toFloat()
         }
       }
       return out
@@ -146,10 +150,16 @@ class ZImagePipelineTest {
     seed = 7L,
   )
 
+  /** Distinct learned pad vector so tests can assert overwrite after embc. */
+  private val padTokens = PadTokensLoader.PadTokens(
+    capPadToken = FloatArray(3840) { 0.42f },
+    xPadToken = FloatArray(3840) { 0.24f },
+  )
+
   @Test
   fun `full 256px run returns RGB CHW with expected call counts`() {
     val graphs = FakeGraphs()
-    val rgb = ZImagePipeline.generate(graphs, ::tokenize, ::rowsOf, weights, req)
+    val rgb = ZImagePipeline.generate(graphs, ::tokenize, ::rowsOf, weights, padTokens, req)
 
     assertEquals(3 * 256 * 256, rgb.size)
 
@@ -176,7 +186,9 @@ class ZImagePipelineTest {
   fun `guidance zero runs one DiT sweep and skips the uncond branch`() {
     val graphs = FakeGraphs()
     val steps = 3
-    ZImagePipeline.generate(graphs, ::tokenize, ::rowsOf, weights, req.copy(steps = steps, guidance = 0f))
+    ZImagePipeline.generate(
+      graphs, ::tokenize, ::rowsOf, weights, padTokens, req.copy(steps = steps, guidance = 0f),
+    )
 
     fun count(name: String) = graphs.calls.count { it == name }
     // `do_classifier_free_guidance == guidance_scale > 0`, so no uncond text
@@ -205,28 +217,39 @@ class ZImagePipelineTest {
 
   @Test
   fun `run is deterministic for a fixed seed`() {
-    val first = ZImagePipeline.generate(FakeGraphs(), ::tokenize, ::rowsOf, weights, req)
-    val second = ZImagePipeline.generate(FakeGraphs(), ::tokenize, ::rowsOf, weights, req)
+    val first = ZImagePipeline.generate(FakeGraphs(), ::tokenize, ::rowsOf, weights, padTokens, req)
+    val second = ZImagePipeline.generate(FakeGraphs(), ::tokenize, ::rowsOf, weights, padTokens, req)
     assertArrayEquals(first, second, 0f)
   }
 
   @Test
-  fun `guidance and steps change the output`() {
-    val base = ZImagePipeline.generate(FakeGraphs(), ::tokenize, ::rowsOf, weights, req)
-    val noGuidance = ZImagePipeline.generate(
-      FakeGraphs(), ::tokenize, ::rowsOf, weights, req.copy(guidance = 0f),
+  fun `guidance and steps change the DiT work`() {
+    val cfgGraphs = FakeGraphs()
+    ZImagePipeline.generate(
+      cfgGraphs, ::tokenize, ::rowsOf, weights, padTokens, req.copy(guidance = 7f),
     )
-    assertFalse(base.contentEquals(noGuidance))
-    val twoSteps = ZImagePipeline.generate(
-      FakeGraphs(), ::tokenize, ::rowsOf, weights, req.copy(steps = 2),
+    val distilledGraphs = FakeGraphs()
+    ZImagePipeline.generate(
+      distilledGraphs, ::tokenize, ::rowsOf, weights, padTokens, req.copy(guidance = 0f),
     )
-    assertFalse(base.contentEquals(twoSteps))
+    // CFG runs a second full DiT sweep; distilled does not.
+    assertEquals(2, cfgGraphs.calls.count { it == "final" })
+    assertEquals(1, distilledGraphs.calls.count { it == "final" })
+    val twoStepGraphs = FakeGraphs()
+    ZImagePipeline.generate(
+      twoStepGraphs, ::tokenize, ::rowsOf, weights, padTokens,
+      req.copy(steps = 2, guidance = 0f),
+    )
+    assertEquals(2, twoStepGraphs.calls.count { it == "final" })
+    assertEquals(1, twoStepGraphs.calls.count { it == "vae" })
   }
 
   @Test
   fun `empty prompt still builds a 32-row context`() {
     val graphs = FakeGraphs()
-    val ctx = ZImagePipeline.branchContext(graphs, ::tokenize, ::rowsOf, "")
+    val ctx = ZImagePipeline.branchContext(
+      graphs, ::tokenize, ::rowsOf, "", padTokens.capPadToken,
+    )
     assertEquals(32 * 3840, ctx.size)
     assertEquals(listOf(32 * 2560), graphs.inputSizes["embc"])
   }
@@ -244,7 +267,7 @@ class ZImagePipelineTest {
   fun `generate emits log lines at every stage`() {
     val lines = ArrayList<String>()
     ZImagePipeline.generate(
-      FakeGraphs(), ::tokenize, ::rowsOf, weights, req, onLog = { lines.add(it) },
+      FakeGraphs(), ::tokenize, ::rowsOf, weights, padTokens, req, onLog = { lines.add(it) },
     )
     assertTrue(lines.any { it.startsWith("condCtx:") })
     assertTrue(lines.any { it.startsWith("paddedIn:") })
@@ -264,6 +287,7 @@ class ZImagePipelineTest {
     assertTrue(lines.any { it.startsWith("condNoise0:") })
     assertTrue(lines.any { it.startsWith("step1/1 latent:") })
     assertTrue(lines.any { it.startsWith("denorm:") })
+    assertTrue(lines.any { it.startsWith("rgbRaw:") })
     assertTrue(lines.any { it.startsWith("rgb:") })
   }
 
@@ -272,23 +296,52 @@ class ZImagePipelineTest {
     val lines = ArrayList<String>()
     // Test tokenize yields 10 ids: 54 zero pad rows, 10 real rows echoed
     // back by FakeGraphs.qwenEnc.
-    ZImagePipeline.branchContext(FakeGraphs(), ::tokenize, ::rowsOf, "a cat", onLog = { lines.add(it) })
+    ZImagePipeline.branchContext(
+      FakeGraphs(), ::tokenize, ::rowsOf, "a cat", padTokens.capPadToken,
+      onLog = { lines.add(it) },
+    )
     assertTrue(lines.any { it.startsWith("paddedIn:") })
+    assertTrue(lines.any { it.startsWith("capFeatsRaw:") })
     val pad = lines.firstOrNull { it.startsWith("capFeatsPad:") }
     val real = lines.firstOrNull { it.startsWith("capFeatsReal:") }
-    assertTrue(pad != null && pad.contains("n=138240") && pad.contains("mean=0.0000") && pad.contains("std=0.0000"))
-    // Real rows are (r * 2560 + c) * 1e-4 for r in 0..9 (n=25600, mean ~1.28).
-    // Parsed with tolerance: float summation order must not decide the test.
-    val realMean = real?.let { Regex("mean=(-?[0-9.]+)").find(it)?.groupValues?.get(1)?.toDoubleOrNull() }
-    assertTrue(real != null && real.contains("n=25600") && realMean != null && realMean > 1.2 && realMean < 1.4)
+    assertNotNull(pad)
+    assertTrue("pad log missing n=138240: $pad", pad!!.contains("n=138240"))
+    assertTrue("pad log not zero: $pad", pad.contains("std=0.0000"))
+    assertNotNull(real)
+    assertTrue("real log missing n=25600: $real", real!!.contains("n=25600"))
+    // Raw FakeGraphs embeds are O(1e-4); after host RMSNorm max must leave that band.
+    val realMax = Regex("max=(-?[0-9.]+)").find(real)?.groupValues?.get(1)?.toDoubleOrNull()
+    assertNotNull(realMax)
+    assertTrue("expected RMSNorm'd real max, got $realMax in $real", realMax!! > 0.5)
+    assertTrue(lines.any { it.startsWith("ctxEmbcRaw:") })
+    assertTrue(lines.any { it.startsWith("capRopeCos:") })
   }
 
   @Test
   fun `branchContext with empty prompt logs pad region but no real region`() {
     val lines = ArrayList<String>()
-    ZImagePipeline.branchContext(FakeGraphs(), ::tokenize, ::rowsOf, "", onLog = { lines.add(it) })
+    ZImagePipeline.branchContext(
+      FakeGraphs(), ::tokenize, ::rowsOf, "", padTokens.capPadToken,
+      onLog = { lines.add(it) },
+    )
     assertTrue(lines.any { it.startsWith("capFeatsPad:") })
     assertTrue(lines.none { it.startsWith("capFeatsReal:") })
+  }
+
+  @Test
+  fun `branchContext overwrites pad rows with learned cap_pad_token`() {
+    // After embc, pad rows are set to 0.42; FakeGraphs.refc adds 0.25.
+    val graphs = FakeGraphs()
+    val ctx = ZImagePipeline.branchContext(
+      graphs, ::tokenize, ::rowsOf, "a cat", padTokens.capPadToken,
+    )
+    // tokenize yields 10 real ids → rows [10,32) must be pad+refc nudge.
+    val expected = 0.42f + 0.25f
+    for (row in 10 until 32) {
+      for (c in 0 until 3840) {
+        assertEquals(expected, ctx[row * 3840 + c], 0f)
+      }
+    }
   }
 
   @Test

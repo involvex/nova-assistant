@@ -144,7 +144,7 @@ class ImageGenerationService {
       return null;
     }
 
-    // Extra-assets gate (tokenizer + embed_tokens + t_embedder).
+    // Extra-assets gate (tokenizer + embed_tokens + t_embedder + pad_tokens).
     final hasAssets = hasExtraAssetsOverride != null
         ? await hasExtraAssetsOverride!(resolved)
         : await ModelManager.instance.hasExtraAssets(resolved);

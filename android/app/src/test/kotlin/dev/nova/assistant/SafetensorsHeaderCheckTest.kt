@@ -113,14 +113,15 @@ class SafetensorsHeaderCheckTest {
   }
 
   @Test
-  fun `derived check on empty dir fails with both files named`() {
+  fun `derived check on empty dir fails with all derived files named`() {
     val dir = temp.newFolder("empty-model")
     val result = SafetensorsHeaderCheck.checkDerivedAssets(dir)
     assertFalse(result.ok)
     val reasons = (result as SafetensorsHeaderCheck.CheckResult.Failed).reasons
-    assertEquals(2, reasons.size)
+    assertEquals(3, reasons.size)
     assertTrue(reasons.any { it.contains("embed_tokens.safetensors") })
     assertTrue(reasons.any { it.contains("t_embedder.safetensors") })
+    assertTrue(reasons.any { it.contains("pad_tokens.safetensors") })
   }
 
   @Test

@@ -1,10 +1,11 @@
 package dev.nova.assistant
 
+import android.content.Context
+import android.util.Log
+import com.google.ai.edge.litert.Accelerator
+import com.google.ai.edge.litert.CompiledModel
+import com.google.ai.edge.litert.Environment
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import org.tensorflow.lite.DataType
-import org.tensorflow.lite.Interpreter
 
 /**
  * Executable Z-Image graphs behind a seam the pipeline can test without
@@ -12,7 +13,8 @@ import org.tensorflow.lite.Interpreter
  * `docs/z-image-turbo-litert.md` (256 px fixed).
  *
  * Release methods bound peak RSS: the text encoder (3.5 GB), context graphs,
- * denoise graphs (6 x 908 MB files, mmap'd) and VAE are never held together.
+ * denoise graphs and VAE are never held together. DiT main chunks additionally
+ * use single-graph residency (only one `zc_main*` open at a time).
  */
 interface ZImageGraphs : AutoCloseable {
   /** `qwen_enc`: `[64,2560]` in → `[64,2560]` cap feats out. */
@@ -43,51 +45,69 @@ interface ZImageGraphs : AutoCloseable {
   fun releaseContextGraphs()
   fun releaseDenoiseGraphs()
   fun releaseVae()
+
+  /**
+   * Drop embx/refx before the DiT main loop. Their outputs are already in
+   * host tensors; keeping the GPU graphs resident while compiling `zc_main*`
+   * pushed MIUI LMK over ~5 GB RSS.
+   */
+  fun releaseImageEmbedGraphs() {}
 }
 
 /**
- * [ZImageGraphs] over real `.tflite` files. Interpreters open lazily per
- * phase; every input is checked against the runtime tensor shape before the
- * call so a converted-graph layout drift fails with a named mismatch instead
- * of a native abort deep in a multi-minute run.
+ * [ZImageGraphs] over real `.tflite` files via LiteRT [CompiledModel].
+ *
+ * Upstream peak footprint is **one** sub-1 GB graph at a time. Caching all six
+ * `zc_main*` (~908 MB each) + embx/refx on GPU FP32 got the process LMK'd
+ * (`Kill 'dev.nova.assistant' ... to free 5151604kB rss`). This implementation:
+ * - shares one [Environment] with compiler cache (re-open after release is cheap)
+ * - keeps only one `zc_main*` resident
+ * - releases embx/refx before the main loop
+ * - prefers GPU FP32, falls back to CPU on compile failure
  */
 class ZImageTfliteGraphs(
   private val modelDir: File,
-  private val open: (File) -> Interpreter = { file -> defaultOpen(file) },
+  context: Context? = null,
 ) : ZImageGraphs {
-  private val interpreters = HashMap<String, Interpreter>()
-
-  /**
-   * Direct [ByteBuffer] pool keyed by `"<graph>#in<slot>"` / `"<graph>#out0"`.
-   *
-   * `runForMultipleInputsOutputs` requires direct buffers, and this model's
-   * tensors are large: a 908 MB block takes 4 x 4.4 MB inputs plus a 4.4 MB
-   * output *per call*, and a run is 6 blocks + `z_refx` + `z_embx` + `zc_final`
-   * per step across 8 steps. Allocating fresh direct buffers every call leaves
-   * hundreds of MB uncollected — direct memory is only reclaimed on GC — which
-   * is what pushed PSS past MIUI's 6 GB third-party cap and got the process
-   * killed mid-generation. One buffer per slot keeps the working set flat.
-   */
-  private val pooled = HashMap<String, ByteBuffer>()
-
-  private fun pooledBuffer(key: String, floats: Int): ByteBuffer {
-    val need = floats * 4
-    val cached = pooled[key]
-    if (cached != null && cached.capacity() >= need) {
-      cached.clear()
-      return cached
-    }
-    val fresh = ByteBuffer.allocateDirect(need).order(ByteOrder.nativeOrder())
-    pooled[key] = fresh
-    return fresh
+  private val models = HashMap<String, CompiledModel>()
+  private val accelerators = HashMap<String, Accelerator>()
+  private val env: Environment = if (context != null) {
+    // Compiler cache: sequential residency re-opens mains every step; without
+    // a cache each 908 MB GPU compile costs ~40s on device.
+    Environment.create(context, enableCompilerCache = true)
+  } else {
+    Environment.create()
   }
 
-  private fun get(name: String): Interpreter {
-    return interpreters.getOrPut(name) {
+  private fun get(name: String): CompiledModel {
+    return models.getOrPut(name) {
       val file = File(modelDir, name)
       require(file.isFile) { "Missing graph file: ${file.absolutePath}" }
-      open(file)
+      openCompiled(file, name)
     }
+  }
+
+  private fun openCompiled(file: File, name: String): CompiledModel {
+    val preferCpu = name in CPU_PREFERRED
+    if (!preferCpu) {
+      try {
+        val model = CompiledModel.create(file.absolutePath, gpuFp32Options(), env)
+        accelerators[name] = Accelerator.GPU
+        Log.i(TAG, "Compiled $name on GPU FP32 (resident=${models.size + 1})")
+        return model
+      } catch (t: Throwable) {
+        Log.w(TAG, "GPU compile failed for $name, falling back to CPU: ${t.message}")
+      }
+    }
+    val model = CompiledModel.create(file.absolutePath, CompiledModel.Options(Accelerator.CPU), env)
+    accelerators[name] = Accelerator.CPU
+    Log.i(
+      TAG,
+      "Compiled $name on CPU" +
+        if (preferCpu) " (preferred)" else " (fallback)" +
+        " (resident=${models.size + 1})",
+    )
+    return model
   }
 
   private fun runGraph(
@@ -95,37 +115,41 @@ class ZImageTfliteGraphs(
     inputs: List<FloatArray>,
     docShapes: List<String>,
   ): FloatArray {
-    val interp = get(graphName)
-    require(interp.inputTensorCount == inputs.size) {
-      "$graphName: expected ${inputs.size} inputs $docShapes, " +
-        "graph takes ${interp.inputTensorCount}"
-    }
-    val buffers = inputs.mapIndexed { i, values ->
-      val shape = interp.getInputTensor(i).shape()
-      val want = shape.fold(1) { a, b -> a * b }
-      require(values.size == want) {
-        "$graphName input $i: got ${values.size} values, " +
-          "graph wants ${shape.contentToString()} ($want)"
+    val model = get(graphName)
+    val ins = model.createInputBuffers()
+    val outs = model.createOutputBuffers()
+    try {
+      require(ins.size == inputs.size) {
+        "$graphName: expected ${inputs.size} inputs $docShapes, " +
+          "graph takes ${ins.size}"
       }
-      require(interp.getInputTensor(i).dataType() == DataType.FLOAT32) {
-        "$graphName input $i must be FLOAT32"
+      inputs.forEachIndexed { i, values ->
+        try {
+          ins[i].writeFloat(values)
+        } catch (t: Throwable) {
+          throw IllegalArgumentException(
+            "$graphName input $i: writeFloat(${values.size}) failed " +
+              "(doc shape ${docShapes.getOrNull(i)}): ${t.message}",
+            t,
+          )
+        }
       }
-      val buffer = pooledBuffer("$graphName#in$i", want)
-      buffer.asFloatBuffer().put(values)
-      buffer.rewind()
-      buffer
-    }.toTypedArray()
-    val outShape = interp.getOutputTensor(0).shape()
-    require(interp.getOutputTensor(0).dataType() == DataType.FLOAT32) {
-      "$graphName output must be FLOAT32"
+      model.run(ins, outs)
+      return outs[0].readFloat()
+    } finally {
+      ins.forEach { buf ->
+        try {
+          buf.close()
+        } catch (_: Throwable) {
+        }
+      }
+      outs.forEach { buf ->
+        try {
+          buf.close()
+        } catch (_: Throwable) {
+        }
+      }
     }
-    val outCount = outShape.fold(1) { a, b -> a * b }
-    val outBuffer = pooledBuffer("$graphName#out0", outCount)
-    interp.runForMultipleInputsOutputs(buffers, mapOf(0 to outBuffer))
-    outBuffer.rewind()
-    val out = FloatArray(outCount)
-    outBuffer.asFloatBuffer().get(out)
-    return out
   }
 
   override fun qwenEnc(embeds: FloatArray): FloatArray =
@@ -135,16 +159,39 @@ class ZImageTfliteGraphs(
     runGraph("z_embx.tflite", listOf(img), listOf("[1,256,64]"))
 
   override fun refx(cap: FloatArray, x: FloatArray, mask: FloatArray, pos: FloatArray): FloatArray =
-    runGraph("z_refx.tflite", listOf(cap, x, mask, pos), listOf("[1,256,3840]", "[1,1,256,64]", "[1,1,256,64]", "[1,256]"))
+    runGraph(
+      "z_refx.tflite",
+      listOf(cap, x, mask, pos),
+      listOf("[1,256,3840]", "[1,1,256,64]", "[1,1,256,64]", "[1,256]"),
+    )
 
   override fun embc(cap: FloatArray): FloatArray =
     runGraph("z_embc.tflite", listOf(cap), listOf("[1,32,2560]"))
 
   override fun refc(cap: FloatArray, x: FloatArray, mask: FloatArray): FloatArray =
-    runGraph("z_refc.tflite", listOf(cap, x, mask), listOf("[1,32,3840]", "[1,1,32,64]", "[1,1,32,64]"))
+    runGraph(
+      "z_refc.tflite",
+      listOf(cap, x, mask),
+      listOf("[1,32,3840]", "[1,1,32,64]", "[1,1,32,64]"),
+    )
 
-  override fun mainBlock(index: Int, hidden: FloatArray, x: FloatArray, mask: FloatArray, pos: FloatArray): FloatArray {
+  override fun mainBlock(
+    index: Int,
+    hidden: FloatArray,
+    x: FloatArray,
+    mask: FloatArray,
+    pos: FloatArray,
+  ): FloatArray {
     require(index in 0..5) { "main block index must be 0..5, got $index" }
+    // Single-graph residency: drop every other DiT chunk before compiling this
+    // one. Upstream peak = one ~908 MB graph; holding 6× got LMK'd at 5.1 GB.
+    for (i in 0..5) {
+      if (i != index) release("zc_main$i.tflite")
+    }
+    if (index == 0) {
+      // embx/refx outputs already live in [hidden]'s image rows after concat.
+      releaseImageEmbedGraphs()
+    }
     return runGraph(
       "zc_main$index.tflite",
       listOf(hidden, x, mask, pos),
@@ -152,8 +199,11 @@ class ZImageTfliteGraphs(
     )
   }
 
-  override fun final(hidden: FloatArray, pos: FloatArray): FloatArray =
-    runGraph("zc_final.tflite", listOf(hidden, pos), listOf("[1,288,3840]", "[1,256]"))
+  override fun final(hidden: FloatArray, pos: FloatArray): FloatArray {
+    // Drop the last main chunk before the tiny final head.
+    for (i in 0..5) release("zc_main$i.tflite")
+    return runGraph("zc_final.tflite", listOf(hidden, pos), listOf("[1,288,3840]", "[1,256]"))
+  }
 
   override fun vae(latentChw: FloatArray): FloatArray =
     runGraph("zvae.tflite", listOf(latentChw), listOf("[1,16,32,32]"))
@@ -165,9 +215,13 @@ class ZImageTfliteGraphs(
     release("z_refc.tflite")
   }
 
-  override fun releaseDenoiseGraphs() {
+  override fun releaseImageEmbedGraphs() {
     release("z_embx.tflite")
     release("z_refx.tflite")
+  }
+
+  override fun releaseDenoiseGraphs() {
+    releaseImageEmbedGraphs()
     for (i in 0..5) release("zc_main$i.tflite")
     release("zc_final.tflite")
   }
@@ -175,33 +229,48 @@ class ZImageTfliteGraphs(
   override fun releaseVae() = release("zvae.tflite")
 
   override fun close() {
-    val names = interpreters.keys.toList()
+    val names = models.keys.toList()
     for (name in names) release(name)
-  }
-
-  private fun release(name: String) {
-    // Direct buffers are GC-managed but not promptly reclaimed, so drop the
-    // slots alongside the interpreter instead of waiting on a collection.
-    pooled.keys.filter { it.startsWith("$name#") }.forEach { pooled.remove(it) }
     try {
-      interpreters.remove(name)?.close()
+      env.close()
     } catch (_: Throwable) {
     }
   }
 
-  companion object {
-    private fun defaultOpen(file: File): Interpreter {
-      val options = Interpreter.Options().apply {
-        // Leave one core for the UI thread; the denoise sweep is compute-bound
-        // so this is the single biggest lever on generation wall time.
-        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        setNumThreads((cores - 1).coerceIn(2, 6))
-        try {
-          setUseXNNPACK(false)
-        } catch (_: Throwable) {
-        }
+  /** Which accelerator each open graph is running on (for logcat triage). */
+  fun acceleratorOf(name: String): Accelerator? = accelerators[name]
+
+  private fun release(name: String) {
+    val closed = models.remove(name)
+    if (closed != null) {
+      try {
+        closed.close()
+      } catch (_: Throwable) {
       }
-      return Interpreter(file, options)
+      Log.d(TAG, "Released $name (resident=${models.size})")
+    }
+    accelerators.remove(name)
+  }
+
+  companion object {
+    private const val TAG = "ZImageTfliteGraphs"
+
+    /**
+     * Prefer CPU: upstream Pixel 8a table shows these faster on CPU, and
+     * `zvae` fails classic TFLite OpenCL. Skip the GPU compile attempt.
+     */
+    private val CPU_PREFERRED = setOf(
+      "zvae.tflite",
+      "z_embc.tflite",
+      "zc_final.tflite",
+    )
+
+    private fun gpuFp32Options(): CompiledModel.Options {
+      return CompiledModel.Options(Accelerator.GPU).apply {
+        gpuOptions = CompiledModel.GpuOptions(
+          precision = CompiledModel.GpuOptions.Precision.FP32,
+        )
+      }
     }
   }
 }

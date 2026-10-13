@@ -24,10 +24,18 @@ object ZImagePipeline {
   const val UNIFIED_TOKENS = IMAGE_TOKENS + CONTEXT_TOKENS
   const val MAX_PROMPT_TOKENS = 32
 
-  /** `x`/`mask` element counts from the verified signatures (all zeros). */
-  const val X_IMG_SIZE = 256 * 64
-  const val X_FULL_SIZE = UNIFIED_TOKENS * 64
-  const val X_CTX_SIZE = CONTEXT_TOKENS * 64
+  /**
+   * LiteRT `x`/`mask` are RoPE cos/sin (`[1,1,N,64]`), not attention masks.
+   * Element counts match `ZImageHostLoop.ROPE_FREQ_DIM` × token count.
+   */
+  const val X_IMG_SIZE = 256 * ZImageHostLoop.ROPE_FREQ_DIM
+  const val X_FULL_SIZE = UNIFIED_TOKENS * ZImageHostLoop.ROPE_FREQ_DIM
+  const val X_CTX_SIZE = CONTEXT_TOKENS * ZImageHostLoop.ROPE_FREQ_DIM
+
+  /** Cached once: caption / image / unified RoPE for fixed 256 px. */
+  private val rope256: Triple<ZImageHostLoop.RopeCosSin, ZImageHostLoop.RopeCosSin, ZImageHostLoop.RopeCosSin> by lazy {
+    ZImageHostLoop.fixed256Rope()
+  }
 
   data class Request(
     val prompt: String,
@@ -47,6 +55,7 @@ object ZImagePipeline {
     tokenize: (String) -> IntArray,
     rowsOf: (IntArray) -> Array<FloatArray>,
     weights: ZImageHostLoop.TimestepEmbedderWeights,
+    padTokens: PadTokensLoader.PadTokens,
     req: Request,
     onProgress: (String, Int) -> Unit = { _, _ -> },
     onLog: (String) -> Unit = {},
@@ -54,13 +63,21 @@ object ZImagePipeline {
     require(req.steps >= 1) { "steps must be >= 1" }
 
     onProgress("Encoding prompt", 8)
-    val condCtx = branchContext(graphs, tokenize, rowsOf, req.prompt, onLog)
+    val condCtx = branchContext(
+      graphs, tokenize, rowsOf, req.prompt, padTokens.capPadToken, onLog,
+    )
     onLog(tensorStats("condCtx", condCtx))
     // `do_classifier_free_guidance == guidance_scale > 0` in pipeline_z_image.py.
     // Z-Image Turbo ships guidance-distilled, so guidance 0 must run the DiT
     // once: the uncond pass is a second full sweep of all 6 908 MB blocks.
     val useCfg = req.guidance > 0f
-    val uncondCtx = if (useCfg) branchContext(graphs, tokenize, rowsOf, req.uncondPrompt, onLog) else null
+    val uncondCtx = if (useCfg) {
+      branchContext(
+        graphs, tokenize, rowsOf, req.uncondPrompt, padTokens.capPadToken, onLog,
+      )
+    } else {
+      null
+    }
     graphs.releaseTextEncoder()
     graphs.releaseContextGraphs()
 
@@ -103,27 +120,40 @@ object ZImagePipeline {
     onProgress("Decoding image", 92)
     val denorm = ZImageHostLoop.denormalizeLatents(latent)
     onLog(tensorStats("denorm", denorm))
-    val rgb = graphs.vae(denorm)
-    onLog(tensorStats("rgb", rgb))
+    val rgbRaw = graphs.vae(denorm)
+    onLog(tensorStats("rgbRaw", rgbRaw))
     graphs.releaseVae()
-    require(rgb.size == 3 * SIZE_PX * SIZE_PX) {
-      "vae must return [3,256,256], got ${rgb.size} values"
+    require(rgbRaw.size == 3 * SIZE_PX * SIZE_PX) {
+      "vae must return [3,256,256], got ${rgbRaw.size} values"
     }
+    // AutoencoderKL emits ~[-1,1]; Tongyi maps with (x/2+0.5).clamp(0,1).
+    // Clamping negatives straight to 0 produced solid-black frames (DIAG8).
+    val rgb = ZImageHostLoop.vaeOutputToUnitRange(rgbRaw)
+    onLog(tensorStats("rgb", rgb))
     onProgress("Complete", 100)
     return rgb
   }
 
   /**
    * One text branch: ids → left-padded embeds → `qwen_enc` → first n real
-   * rows (n ≤ 32) → repeat-last-row pad to 32 → `z_embc` → `z_refc`.
+   * rows (n ≤ 32) → **zero-pad** to 32 → `z_embc` → overwrite pad rows with
+   * the learned [capPadToken] → `z_refc`.
+   *
+   * Matches Tongyi `transformer.py`: `cap_embedder` then
+   * `cap_feats[pad_mask] = self.cap_pad_token`. Repeating the last real row
+   * (old host) poisons attention and yields pink static.
    */
   fun branchContext(
     graphs: ZImageGraphs,
     tokenize: (String) -> IntArray,
     rowsOf: (IntArray) -> Array<FloatArray>,
     prompt: String,
+    capPadToken: FloatArray,
     onLog: (String) -> Unit = {},
   ): FloatArray {
+    require(capPadToken.size == ZImageHostLoop.MODEL_DIM) {
+      "capPadToken must be [${ZImageHostLoop.MODEL_DIM}], got ${capPadToken.size}"
+    }
     val ids = tokenize(prompt).take(MAX_PROMPT_TOKENS).toIntArray()
     // Empty prompts (the CFG uncond branch) encode as all-zero embeds.
     val inRows: Array<FloatArray> = if (ids.isEmpty()) {
@@ -137,7 +167,16 @@ object ZImagePipeline {
     }
     val paddedIn = flatten(leftPadTo(inRows, ZImageHostLoop.EMBED_SEQUENCE_TOKENS))
     onLog(tensorStats("paddedIn", paddedIn))
-    val capFeats = graphs.qwenEnc(paddedIn)
+    val capFeatsRaw = graphs.qwenEnc(paddedIn)
+    onLog(tensorStats("capFeatsRaw", capFeatsRaw))
+    // DIAG9: Apply RMSNorm to qwen_enc output. The graph may be outputting
+    // pre-normalization activations (std=46.8, max=7532 at DIAG8); RMSNorm
+    // brings it to std~1.0 as expected by downstream layers.
+    val capFeats = ZImageHostLoop.rmsNorm(
+      capFeatsRaw,
+      rows = ZImageHostLoop.EMBED_SEQUENCE_TOKENS,
+      dim = ZImageHostLoop.EMBED_DIM,
+    )
     onLog(tensorStats("capFeats", capFeats))
     require(capFeats.size == ZImageHostLoop.EMBED_SEQUENCE_TOKENS * ZImageHostLoop.EMBED_DIM) {
       "qwen_enc must return [64,2560], got ${capFeats.size} values"
@@ -162,19 +201,30 @@ object ZImagePipeline {
     if (real > 0) {
       onLog(tensorStats("capFeatsReal", flatten(firstReal)))
     }
-    val padded = ZImageHostLoop.padContext(
-      if (firstReal.isEmpty()) arrayOf(FloatArray(ZImageHostLoop.EMBED_DIM)) else firstReal,
-      ZImageHostLoop.EMBED_DIM,
-      CONTEXT_TOKENS,
-    )
-    require(padded.features.size == CONTEXT_TOKENS) {
-      "context must be $CONTEXT_TOKENS rows, got ${padded.features.size}"
+    // Zero-pad (not last-row repeat) so embc sees zeros in pad slots; the
+    // learned token is applied *after* the projector at model dim.
+    val zeroPadded = Array(CONTEXT_TOKENS) { FloatArray(ZImageHostLoop.EMBED_DIM) }
+    for (i in 0 until real) {
+      firstReal[i].copyInto(zeroPadded[i])
     }
-    val embc = graphs.embc(flatten(padded.features))
+    val embcRaw = graphs.embc(flatten(zeroPadded))
+    onLog(tensorStats("ctxEmbcRaw", embcRaw))
+    val embc = ZImageHostLoop.applyLearnedPad(
+      embcRaw,
+      CONTEXT_TOKENS,
+      ZImageHostLoop.MODEL_DIM,
+      real,
+      capPadToken,
+    )
     onLog(tensorStats("ctxEmbc", embc))
-    val x = FloatArray(X_CTX_SIZE)
-    val mask = FloatArray(X_CTX_SIZE)
-    return graphs.refc(embc, x, mask).also { onLog(tensorStats("ctxRefc", it)) }
+    // DIAG11: graph inputs named x/mask are RoPE cos/sin (HF: cc/cs), not zeros/ones.
+    val (capRope, _, _) = rope256
+    require(capRope.cos.size == X_CTX_SIZE) {
+      "cap RoPE size ${capRope.cos.size} != $X_CTX_SIZE"
+    }
+    onLog(tensorStats("capRopeCos", capRope.cos))
+    return graphs.refc(embc, capRope.cos, capRope.sin)
+      .also { onLog(tensorStats("ctxRefc", it)) }
   }
 
   /** One DiT pass for a branch at the current sigma → velocity `[16,32,32]`. */
@@ -197,13 +247,25 @@ object ZImagePipeline {
     )
     val imgT = graphs.embx(img)
     if (tag.isNotEmpty()) onLog(tensorStats(tag + "Embx", imgT))
-    val imgR = graphs.refx(imgT, FloatArray(X_IMG_SIZE), FloatArray(X_IMG_SIZE), pos)
-    if (tag.isNotEmpty()) onLog(tensorStats(tag + "Refx", imgR))
+    val (_, imgRope, unifiedRope) = rope256
+    require(imgRope.cos.size == X_IMG_SIZE) {
+      "img RoPE size ${imgRope.cos.size} != $X_IMG_SIZE"
+    }
+    require(unifiedRope.cos.size == X_FULL_SIZE) {
+      "unified RoPE size ${unifiedRope.cos.size} != $X_FULL_SIZE"
+    }
+    // DIAG11: RoPE cos→x, sin→mask (LiteRT signature names).
+    val imgR = graphs.refx(imgT, imgRope.cos, imgRope.sin, pos)
+    if (tag.isNotEmpty()) {
+      onLog(tensorStats(tag + "ImgRopeCos", imgRope.cos))
+      onLog(tensorStats(tag + "Refx", imgR))
+    }
     var hidden = concatRows(imgR, IMAGE_TOKENS, ctx, CONTEXT_TOKENS, ZImageHostLoop.MODEL_DIM)
-    val x = FloatArray(X_FULL_SIZE)
-    val mask = FloatArray(X_FULL_SIZE)
+    // Drop embx/refx before DiT chunks — outputs already live in [hidden].
+    // Holding them + zc_main* on GPU got LMK'd at ~5 GB RSS on MIUI.
+    graphs.releaseImageEmbedGraphs()
     for (block in 0..5) {
-      hidden = graphs.mainBlock(block, hidden, x, mask, pos)
+      hidden = graphs.mainBlock(block, hidden, unifiedRope.cos, unifiedRope.sin, pos)
       if (tag.isNotEmpty() && (block == 0 || block == 5)) {
         onLog(tensorStats(tag + "Main$block", hidden))
       }
@@ -273,8 +335,10 @@ object ZImagePipeline {
    *
    * A healthy run shows condCtx std well above 0 (conditioning present),
    * condNoise0 std of order 1 (the DiT actually responds), latent std
-   * shrinking across steps, and rgb spanning roughly [0,1]. Flat zeros or a
-   * std stuck at ~1.0 in `rgb` point at the stage that collapsed.
+   * shrinking across steps, `rgbRaw` roughly in [-1,1], and `rgb` in [0,1].
+   * Flat zeros or a std stuck at ~1.0 in `rgb` point at the stage that
+   * collapsed; solid black with `rgbRaw` mean ~0 usually meant the unit
+   * remap was skipped.
    */
   fun tensorStats(name: String, v: FloatArray): String {
     var min = Float.MAX_VALUE

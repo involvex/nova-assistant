@@ -95,10 +95,12 @@ dependencies {
     implementation("androidx.window:window:1.1.0")
     implementation("androidx.window:window-java:1.1.0")
 
-    // TFLite LiteRT for diffusion inference on device
-    implementation("org.tensorflow:tensorflow-lite:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
+    // LiteRT replaces org.tensorflow:tensorflow-lite — shipping both causes
+    // checkReleaseDuplicateClasses (same org.tensorflow.lite.* in both AARs).
+    // Z-Image uses CompiledModel + GPU FP32; FLUX stub still uses Interpreter
+    // from this same artifact (package org.tensorflow.lite stays).
+    implementation("com.google.ai.edge.litert:litert:2.3.0")
+    implementation("com.google.ai.edge.litert:litert-gpu:2.3.0")
 
     // JVM unit tests for the Z-Image Turbo host-loop math (no Android runtime).
     testImplementation("junit:junit:4.13.2")

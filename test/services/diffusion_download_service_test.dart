@@ -43,6 +43,7 @@ void main() {
       );
       expect(assets.tEmbedderRepoId, equals('Tongyi-MAI/Z-Image-Turbo'));
       expect(assets.tEmbedderFile, equals('t_embedder.safetensors'));
+      expect(assets.padTokensFile, equals('pad_tokens.safetensors'));
     });
 
     test('flux2Klein has empty tokenizer files', () {
@@ -78,6 +79,7 @@ void main() {
       bool includeTokenizer = true,
       bool includeEmbedTokens = true,
       bool includeTEmbedder = true,
+      bool includePadTokens = true,
     }) async {
       final dir = await Directory.systemTemp.createTemp('zimage_test_');
       final assets = DiffusionModel.zImageTurbo.extraAssets;
@@ -94,6 +96,9 @@ void main() {
       }
       if (includeTEmbedder) {
         await File('${dir.path}/${assets.tEmbedderFile}').writeAsString('t');
+      }
+      if (includePadTokens) {
+        await File('${dir.path}/${assets.padTokensFile}').writeAsString('pad');
       }
       return dir;
     }
@@ -139,6 +144,16 @@ void main() {
       }
     });
 
+    test('returns false when pad_tokens is missing', () async {
+      final dir = await createModelDir(includePadTokens: false);
+      try {
+        final assets = DiffusionModel.zImageTurbo.extraAssets;
+        expect(await assets.hasExtraAssets(dir), isFalse);
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
     test('returns false for an empty directory', () async {
       final dir = await Directory.systemTemp.createTemp('zimage_empty_');
       try {
@@ -164,6 +179,7 @@ void main() {
         tEmbedderRepoId: '',
         tEmbedderSource: '',
         tEmbedderFile: 't',
+        padTokensFile: '',
         expectedSizes: sizes,
         expectedSha256: hashes,
       );

@@ -82,7 +82,7 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 - [x] File/URL attachment, export, history search, timestamps, copy, reactions
 - [x] Onboarding + beginner/expert + model browser + import + selector
 - [x] Debug mode + HF token + external tool providers
-- [ ] Strip leftover debug `AGENT_DBG` instrumentation after soak verification
+- [x] Strip leftover debug `AGENT_DBG` instrumentation after soak verification
 - [ ] Optional crash reporting (opt-in only)
 
 ---
@@ -192,7 +192,7 @@ Human-readable docs also live in [`docs/`](docs/) (GitHub Pages).
 | Screen timeout during streaming | Open | Keep awake during generation |
 | Continuous dictation | Open | `record` package unused beyond STT |
 | Free-RAM gate before Gemma 4 | Open | Soft warning exists |
-| Strip `AGENT_DBG` | Open | Hygiene after soak |
+| Strip `AGENT_DBG` | ✅ Done | Hygiene after soak |
 | Desktop (Windows) scaffold | Open | Large platform lift |
 | Wake word | Open | Battery/privacy cost |
 | Custom tool creator UI | Open | After MCP HTTP soak |

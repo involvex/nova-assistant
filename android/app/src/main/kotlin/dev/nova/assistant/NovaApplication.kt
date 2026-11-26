@@ -29,47 +29,22 @@ class NovaApplication : Application() {
 
     private fun scrubOversizedFlutterPrefs() {
         val prefsFile = File(dataDir, "shared_prefs/$FLUTTER_PREFS.xml")
-        val size = if (prefsFile.exists()) prefsFile.length() else 0L
-        // #region agent log
-        Log.i(
-            TAG,
-            "AGENT_DBG session=7abc09 hyp=A scrub start size=$size path=${prefsFile.absolutePath}",
-        )
-        // #endregion
-        if (!prefsFile.exists() || size == 0L) return
+        if (!prefsFile.exists() || prefsFile.length() == 0L) return
 
         try {
-            var removed = false
             for (key in listOf(CONVERSATIONS_KEY, OLD_CHAT_KEY)) {
-                if (streamRemoveStringEntry(prefsFile, key)) {
-                    removed = true
-                    // #region agent log
-                    Log.i(TAG, "AGENT_DBG session=7abc09 hyp=A removed key=$key")
-                    // #endregion
-                }
+                streamRemoveStringEntry(prefsFile, key)
             }
 
             val after = prefsFile.length()
-            // #region agent log
-            Log.i(
-                TAG,
-                "AGENT_DBG session=7abc09 hyp=A scrub done removed=$removed sizeAfter=$after",
-            )
-            // #endregion
-
             if (after > MAX_SAFE_PREFS_BYTES) {
                 // Do not copyTo() a huge file (that also OOMs). Just replace.
                 prefsFile.delete()
                 prefsFile.writeText(EMPTY_PREFS_XML)
-                // #region agent log
-                Log.w(
-                    TAG,
-                    "AGENT_DBG session=7abc09 hyp=A wiped prefs after=$after",
-                )
-                // #endregion
+                Log.w(TAG, "Wiped oversized Flutter prefs (${after} bytes)")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "AGENT_DBG session=7abc09 hyp=A scrub failed", e)
+            Log.e(TAG, "Failed to scrub oversized Flutter prefs", e)
             try {
                 prefsFile.writeText(EMPTY_PREFS_XML)
             } catch (_: Exception) {

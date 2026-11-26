@@ -34,28 +34,13 @@ import 'package:nova_assistant/models/user_preferences.dart';
 import 'package:nova_assistant/theme/nova_palettes.dart';
 import 'package:nova_assistant/platform/overlay_service.dart';
 import 'package:nova_assistant/screens/overlay_chat_screen.dart';
-import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    // #region agent log
-    await AgentDebugLog.log(
-      hypothesisId: 'A',
-      location: 'main.dart:beforePrefs',
-      message: 'About to call SharedPreferences.getInstance',
-    );
-    // #endregion
     await SharedPreferences.getInstance();
-    // #region agent log
-    await AgentDebugLog.log(
-      hypothesisId: 'A',
-      location: 'main.dart:afterPrefs',
-      message: 'SharedPreferences.getInstance succeeded',
-    );
-    // #endregion
 
     await FlutterEdgeAi.initialize(
       inferenceEngines: const [LiteRtLmEngine(), MediaPipeEngine()],

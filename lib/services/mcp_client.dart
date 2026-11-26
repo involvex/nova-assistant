@@ -4,7 +4,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:nova_assistant/services/mcp_oauth.dart';
-import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/secure_prefs.dart';
 
 enum McpTransport { httpSse, streamableHttp, stdio }
@@ -209,21 +208,6 @@ class McpClient {
   Future<bool> connect() async {
     lastError = null;
     try {
-      await AgentDebugLog.log(
-        hypothesisId: 'H5',
-        location: 'mcp_client.dart:connect:start',
-        message: 'MCP connect attempt',
-        data: {
-          'name': config.name,
-          'url': config.url,
-          'transport': config.transport.name,
-          'hasCommand': config.command != null,
-          'command': config.command,
-          'hasAuth': config.authToken != null && config.authToken!.isNotEmpty,
-          'hasOAuth': config.hasOAuth,
-        },
-      );
-
       _resolvedToken = await _resolveAuthToken();
 
       switch (config.transport) {
@@ -237,12 +221,6 @@ class McpClient {
     } catch (e) {
       config.connected = false;
       lastError = e.toString();
-      await AgentDebugLog.log(
-        hypothesisId: 'H5',
-        location: 'mcp_client.dart:connect:error',
-        message: 'MCP connect threw',
-        data: {'name': config.name, 'error': e.toString()},
-      );
 
       return false;
     }
@@ -346,17 +324,6 @@ class McpClient {
     request.headers.set('Accept', 'text/event-stream');
     request.headers.set('Accept-Encoding', 'gzip');
     final response = await request.close();
-
-    await AgentDebugLog.log(
-      hypothesisId: 'H5',
-      location: 'mcp_client.dart:_connectHttpSse:response',
-      message: 'MCP HTTP/SSE response',
-      data: {
-        'url': config.url,
-        'statusCode': response.statusCode,
-        'contentType': response.headers.contentType?.toString(),
-      },
-    );
 
     if (response.statusCode == 405 || response.statusCode == 404) {
       lastError =

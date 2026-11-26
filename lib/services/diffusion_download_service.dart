@@ -53,15 +53,20 @@ class DiffusionDownloadService {
     int receivedBytes = 0;
     DateTime? lastProgressReport;
 
-    Future<void> reportProgress(int delta) async {
+    // UI + DownloadProgressService both share the throttle. Per-chunk
+    // persistence rewrote the prefs/JSON download list thousands of times
+    // on multi-GB Z-Image installs and starved the event loop.
+    Future<void> reportProgress(int delta, {bool force = false}) async {
       receivedBytes += delta;
       final now = DateTime.now();
-      if (onProgress != null &&
-          (lastProgressReport == null ||
-              now.difference(lastProgressReport!) >= _progressThrottle)) {
-        lastProgressReport = now;
-        onProgress(receivedBytes, totalBytes);
-      }
+      final shouldReport =
+          force ||
+          lastProgressReport == null ||
+          now.difference(lastProgressReport!) >= _progressThrottle;
+      if (!shouldReport) return;
+
+      lastProgressReport = now;
+      onProgress?.call(receivedBytes, totalBytes);
       await DownloadProgressService.instance.updateProgress(
         downloadId,
         receivedBytes,
@@ -83,7 +88,7 @@ class DiffusionDownloadService {
               (await existingFile.length()) >= repoFile.size!);
 
       if (alreadyComplete) {
-        await reportProgress(repoFile.size ?? 0);
+        await reportProgress(repoFile.size ?? 0, force: true);
         return;
       }
 
@@ -118,6 +123,9 @@ class DiffusionDownloadService {
           onProgress: reportProgress,
         );
       }
+      // Flush the last bytes of this file so settings progress is not stuck
+      // behind the 200ms throttle until the next chunk or completeDownload.
+      await reportProgress(0, force: true);
     }
 
     final semaphore = Semaphore(_maxConcurrentChunks);
@@ -390,15 +398,17 @@ class DiffusionDownloadService {
     int receivedBytes = 0;
     DateTime? lastProgressReport;
 
-    Future<void> reportProgress(int delta) async {
+    Future<void> reportProgress(int delta, {bool force = false}) async {
       receivedBytes += delta;
       final now = DateTime.now();
-      if (onProgress != null &&
-          (lastProgressReport == null ||
-              now.difference(lastProgressReport!) >= _progressThrottle)) {
-        lastProgressReport = now;
-        onProgress(receivedBytes, totalBytes);
-      }
+      final shouldReport =
+          force ||
+          lastProgressReport == null ||
+          now.difference(lastProgressReport!) >= _progressThrottle;
+      if (!shouldReport) return;
+
+      lastProgressReport = now;
+      onProgress?.call(receivedBytes, totalBytes);
       await DownloadProgressService.instance.updateProgress(
         downloadId,
         receivedBytes,
@@ -416,6 +426,7 @@ class DiffusionDownloadService {
         expectedSize: extraAssets.expectedSizes[job.local],
         onProgress: reportProgress,
       );
+      await reportProgress(0, force: true);
     }
 
     // Fail closed on tampered/truncated bytes while pins exist. Unpinned

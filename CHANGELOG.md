@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Strip leftover session `7abc09` `AGENT_DBG` ingest instrumentation from Dart
+  and the Android prefs scrub (scrub behavior unchanged).
+- Diffusion / Z-Image download progress now persists on the existing 200ms
+  throttle instead of rewriting the download list on every socket chunk.
 
 ## [0.4.9] - 2026-10-14
 

@@ -42,7 +42,6 @@ import 'package:nova_assistant/services/memory_service.dart';
 import 'package:nova_assistant/services/shizuku_service.dart';
 import 'package:nova_assistant/services/diffusion_download_service.dart';
 import 'package:nova_assistant/screens/prompt_presets_screen.dart';
-import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:nova_assistant/theme/nova_palettes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -2498,19 +2497,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() => _installStatus = 'Downloading ${model.displayName}...');
 
-    // #region agent log
-    await AgentDebugLog.log(
-      hypothesisId: 'H3-H4',
-      location: 'settings_screen.dart:_downloadModel:start',
-      message: 'Settings download tapped',
-      data: {
-        'model': model.name,
-        'url': url,
-        'expectedFile': ModelHuggingFaceURLs.fileNameFor(model),
-      },
-    );
-    // #endregion
-
     try {
       final installed = await ModelManager.instance.installFromNetwork(
         url: url,
@@ -2522,24 +2508,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
         },
       );
-
-      // #region agent log
-      final expected = ModelHuggingFaceURLs.fileNameFor(model);
-      await AgentDebugLog.log(
-        hypothesisId: 'H3-H4',
-        location: 'settings_screen.dart:_downloadModel:result',
-        message: 'Settings download finished',
-        data: {
-          'model': model.name,
-          'success': installed != null,
-          'fileName': installed?.fileName,
-          'prefsHasExpected': ModelManager.instance.isModelInstalled(expected),
-          'diskHasExpected': await ModelManager.instance.isInstalledOnDisk(
-            expected,
-          ),
-        },
-      );
-      // #endregion
 
       if (mounted) {
         setState(() => _installStatus = '');

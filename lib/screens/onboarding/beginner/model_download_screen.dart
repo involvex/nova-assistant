@@ -4,12 +4,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:nova_assistant/models/model_info.dart';
 import 'package:nova_assistant/models/user_preferences.dart';
-import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/model_manager.dart';
 import 'package:nova_assistant/services/model_orchestrator.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
 import 'package:nova_assistant/services/user_preferences_service.dart';
-import 'package:nova_assistant/utils/agent_debug_log.dart';
 
 class ModelDownloadScreen extends StatefulWidget {
   final VoidCallback onDownloadComplete;
@@ -59,20 +57,6 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
   Future<void> _resolveTargetAndCheck() async {
     final recommended = await PlatformAdaptationService.instance
         .recommendModelForDevice();
-    // #region agent log
-    await AgentDebugLog.log(
-      hypothesisId: 'E',
-      location: 'model_download_screen.dart:_resolveTargetAndCheck',
-      message: 'Onboarding model recommendation',
-      data: {
-        'recommended': recommended.displayName,
-        'sizeMB': recommended.sizeMB,
-        'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
-        'totalMemMb': MemoryDiagnosticsService.instance.lastTotalMemMb,
-      },
-      runId: 'post-fix',
-    );
-    // #endregion
 
     if (!mounted) return;
     setState(() {
@@ -127,7 +111,6 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
 
     try {
       final url = ModelHuggingFaceURLs.urlFor(_targetModel);
-      final expected = ModelHuggingFaceURLs.fileNameFor(_targetModel);
       final result = await ModelManager.instance.installFromNetwork(
         url: url,
         modelType: _targetModel.modelType,
@@ -138,22 +121,6 @@ class _ModelDownloadScreenState extends State<ModelDownloadScreen> {
           }
         },
       );
-
-      // #region agent log
-      await AgentDebugLog.log(
-        hypothesisId: 'H2-H4',
-        location: 'model_download_screen.dart:_downloadModel:result',
-        message: 'Onboarding download finished',
-        data: {
-          'success': result != null,
-          'fileName': result?.fileName,
-          'expected': expected,
-          'prefsOk': ModelManager.instance.isModelInstalled(expected),
-          'diskOk': await ModelManager.instance.isInstalledOnDisk(expected),
-        },
-        runId: 'post-fix',
-      );
-      // #endregion
 
       if (!mounted) return;
 

@@ -40,7 +40,6 @@ import 'package:nova_assistant/services/memory_diagnostics_service.dart';
 import 'package:nova_assistant/services/platform_adaptation_service.dart';
 import 'package:nova_assistant/services/prompt_presets_service.dart';
 import 'package:nova_assistant/services/shizuku_service.dart';
-import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/ai/router/routing_candidates.dart';
 import 'package:nova_assistant/utils/availability_check_gate.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
@@ -1484,17 +1483,6 @@ class _AssistantScreenState extends State<AssistantScreen>
     ModelOrchestrator.instance.invalidateSessionForReplay(
       _messages.where((m) => !m.isStreaming).toList(),
     );
-    // #region agent log
-    unawaited(
-      AgentDebugLog.log(
-        hypothesisId: 'A',
-        location: 'assistant_screen.dart:_editUserMessage',
-        message: 'Edit truncated UI history; session invalidated',
-        data: {'remaining': _messages.length, 'newQueryLen': result.length},
-        runId: 'post-fix',
-      ),
-    );
-    // #endregion
     _inputController.text = result;
     unawaited(_sendMessage());
   }

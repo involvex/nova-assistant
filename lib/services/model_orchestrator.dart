@@ -31,7 +31,6 @@ import 'package:nova_assistant/services/platform_adaptation_service.dart';
 import 'package:nova_assistant/services/remote_inference_client.dart';
 import 'package:nova_assistant/services/remote_inference_config.dart';
 import 'package:nova_assistant/utils/alarm_time_parser.dart';
-import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/generation_safety.dart';
 import 'package:nova_assistant/utils/message_limits.dart';
 import 'package:nova_assistant/utils/image_gen_intent_parser.dart';
@@ -502,19 +501,6 @@ class ModelOrchestrator {
     _pendingReplay = List<ChatMessage>.from(messages);
     _activeChat = null;
     _lastChatSessionKey = null;
-    // #region agent log
-    _debugLog(
-      hypothesisId: 'A',
-      location: 'model_orchestrator.dart:invalidateSessionForReplay',
-      message: 'Invalidated chat session for UI history mutation',
-      data: {
-        'replayCount': _pendingReplay.length,
-        'replayChars': _pendingReplay.fold<int>(0, (n, m) => n + m.text.length),
-        'model': _activeModelType?.name,
-      },
-      runId: 'post-fix',
-    );
-    // #endregion
   }
 
   Future<void> applyCompactedReplay(List<ChatMessage> retained) async {
@@ -570,22 +556,6 @@ class ModelOrchestrator {
     _activeChat = null;
     _lastChatSessionKey = null;
     setPendingReplayMessages(retained);
-    // #region agent log
-    _debugLog(
-      hypothesisId: 'A',
-      location: 'model_orchestrator.dart:_autoCompactForBudget',
-      message: 'Auto-compacted live chat due to budget overflow',
-      data: {
-        'estimatedTokens': preflight.estimatedTokens,
-        'kvLimit': preflight.kvLimit,
-        'usageRatio': preflight.usageRatio.toStringAsFixed(3),
-        'keptPairs': historyKeepPairs,
-        'retainedTurns': retained.length,
-        'model': model.name,
-      },
-      runId: 'post-fix',
-    );
-    // #endregion
     _statusController.add(
       'Context near limit (${(preflight.usageRatio * 100).round()}%) — '
       'auto-compacting chat history.',
@@ -1093,17 +1063,6 @@ class ModelOrchestrator {
 
     if (_isReleasing) {
       debugPrint('Release already in progress, awaiting…');
-      // #region agent log
-      _debugLog(
-        hypothesisId: 'H6',
-        location: 'model_orchestrator.dart:_releaseIdleResources:await',
-        message: 'Awaiting in-progress release',
-        data: {
-          'activeModelType': _activeModelType?.name,
-          'isStreaming': _isStreaming,
-        },
-      );
-      // #endregion
       await _releaseCompleter?.future;
 
       return;
@@ -1121,35 +1080,13 @@ class ModelOrchestrator {
     if (_isStreaming) {
       debugPrint('Deferring idle release until stream ends');
       _pendingIdleRelease = true;
-      // #region agent log
-      _debugLog(
-        hypothesisId: 'H6',
-        location: 'model_orchestrator.dart:_releaseIdleResources:defer',
-        message: 'Idle release deferred while streaming',
-        data: {'activeModelType': _activeModelType?.name, 'isStreaming': true},
-      );
-      // #endregion
 
       return;
     }
 
     _isReleasing = true;
     _releaseCompleter = Completer<void>();
-    final releaseStarted = DateTime.now().millisecondsSinceEpoch;
     _pendingIdleRelease = false;
-
-    // #region agent log
-    _debugLog(
-      hypothesisId: 'H6',
-      location: 'model_orchestrator.dart:_releaseIdleResources:start',
-      message: 'Idle release started',
-      data: {
-        'activeModelType': _activeModelType?.name,
-        'hasActiveModel': _activeModel != null,
-        'flutterHasActive': FlutterEdgeAi.hasActiveModel(),
-      },
-    );
-    // #endregion
 
     try {
       _activeChat = null;
@@ -1167,18 +1104,6 @@ class ModelOrchestrator {
       _activeModelSupportsImage = false;
       await _clearActiveInferenceIdentity();
       _stopModelKeepAlive();
-
-      // #region agent log
-      _debugLog(
-        hypothesisId: 'H6',
-        location: 'model_orchestrator.dart:_releaseIdleResources:done',
-        message: 'Idle release finished',
-        data: {
-          'elapsedMs': DateTime.now().millisecondsSinceEpoch - releaseStarted,
-          'flutterHasActive': FlutterEdgeAi.hasActiveModel(),
-        },
-      );
-      // #endregion
 
       _statusController.add('Idle — model released to save battery');
     } catch (e) {
@@ -1454,25 +1379,6 @@ class ModelOrchestrator {
       _inferenceLock!.complete();
     }
     _inferenceLock = null;
-  }
-
-  void _debugLog({
-    required String hypothesisId,
-    required String location,
-    required String message,
-    Map<String, Object?> data = const {},
-    String runId = 'pre-fix',
-  }) {
-    if (!_debugMode) return;
-    unawaited(
-      AgentDebugLog.log(
-        hypothesisId: hypothesisId,
-        location: location,
-        message: message,
-        data: data,
-        runId: runId,
-      ),
-    );
   }
 
   bool _shouldPassTools(NovaModel model, List<Tool> tools) {
@@ -1770,19 +1676,6 @@ class ModelOrchestrator {
     var ramBlock = await PlatformAdaptationService.instance.checkCanLoadModel(
       modelToLoad,
     );
-    // #region agent log
-    _debugLog(
-      hypothesisId: 'C',
-      location: 'model_orchestrator.dart:_getOrCreateModel:ramGate',
-      message: 'RAM gate decision',
-      data: {
-        'requested': model.displayName,
-        'blocked': ramBlock != null,
-        'blockMsg': ramBlock,
-        'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
-      },
-    );
-    // #endregion
     if (ramBlock != null) {
       final pinned =
           _preferredModelOverride != null ||
@@ -1805,21 +1698,6 @@ class ModelOrchestrator {
         needsVision: screenshot != null && screenshot.isNotEmpty,
       );
       if (fallback != null) {
-        // #region agent log
-        _debugLog(
-          hypothesisId: 'C',
-          location: 'model_orchestrator.dart:_getOrCreateModel:fallback',
-          message: 'RAM gate fallback',
-          data: {
-            'from': modelToLoad.displayName,
-            'to': fallback.displayName,
-            'fileName': ModelHuggingFaceURLs.fileNameFor(fallback),
-            'onDisk': await ModelManager.instance.isInstalledOnDisk(
-              ModelHuggingFaceURLs.fileNameFor(fallback),
-            ),
-          },
-        );
-        // #endregion
         _statusController.add(
           'Low free RAM — using ${fallback.displayName} instead of '
           '${modelToLoad.displayName}',
@@ -1876,21 +1754,6 @@ class ModelOrchestrator {
       final existsOnDisk = await ModelManager.instance.isInstalledOnDisk(
         fileName,
       );
-      final prefsInstalled = ModelManager.instance.isModelInstalled(fileName);
-
-      // #region agent log
-      _debugLog(
-        hypothesisId: 'H2-H4',
-        location: 'model_orchestrator.dart:_getOrCreateModel:check',
-        message: 'Model availability check before load',
-        data: {
-          'model': modelToLoad.name,
-          'fileName': fileName,
-          'existsOnDisk': existsOnDisk,
-          'prefsInstalled': prefsInstalled,
-        },
-      );
-      // #endregion
 
       if (existsOnDisk) {
         _statusController.add(
@@ -1919,17 +1782,6 @@ class ModelOrchestrator {
             await MemoryDiagnosticsService.instance.readTotalMemMb();
             final backend = PlatformAdaptationService.instance
                 .preferredBackendFor(modelToLoad);
-            _debugLog(
-              hypothesisId: 'F',
-              location: 'model_orchestrator.dart:_getOrCreateModel:backend',
-              message: 'Preferred backend for load',
-              data: {
-                'model': modelToLoad.name,
-                'backend': backend.name,
-                'totalMemMb': MemoryDiagnosticsService.instance.lastTotalMemMb,
-              },
-              runId: 'post-fix',
-            );
             _activeModel = await _loadActiveModelWithTimeout(
               modelToLoad: modelToLoad,
               supportImage: supportImage,
@@ -2163,18 +2015,6 @@ class ModelOrchestrator {
         .recommendModelForDevice();
     if (selector.primaryHeavy != recommended) {
       selector.primaryHeavy = recommended;
-      // #region agent log
-      _debugLog(
-        hypothesisId: 'E',
-        location: 'model_orchestrator.dart:applyRamAwareModelDefaults',
-        message: 'Adjusted Auto primaryHeavy for free RAM',
-        data: {
-          'primaryHeavy': recommended.displayName,
-          'availMemMb': MemoryDiagnosticsService.instance.lastAvailMemMb,
-        },
-        runId: 'post-fix',
-      );
-      // #endregion
     }
   }
 
@@ -2372,20 +2212,6 @@ class ModelOrchestrator {
         'availMemMb=$preLoadAvail totalMemMb=$total '
         'pssMb=${mem.lastPssMb}',
       );
-      // #region agent log
-      _debugLog(
-        hypothesisId: 'F',
-        location: 'model_orchestrator.dart:_processWithCustomModel:load',
-        message: 'Loading custom model after register',
-        data: {
-          'fileName': customModel.fileName,
-          'backend': backend.name,
-          'totalMemMb': total,
-          'hasActive': FlutterEdgeAi.hasActiveModel(),
-        },
-        runId: 'post-fix',
-      );
-      // #endregion
       inferenceModel = await _loadActiveModelWithTimeout(
         maxTokens: effectiveMaxTokens,
         timeout: const Duration(seconds: 120),
@@ -3507,13 +3333,11 @@ class ModelOrchestrator {
         );
       }
 
-      var visionForced = false;
       final needsVision = screenshot != null || hasImageAttachments;
       if (needsVision && !model.hasVision) {
         final vision = await _installedVisionModel();
         if (vision != null) {
           model = vision;
-          visionForced = true;
           _statusController.add(
             'Auto-switched to ${model.displayName} for image input',
           );
@@ -3532,9 +3356,7 @@ class ModelOrchestrator {
       }
 
       if (needsVision) {
-        final before = model;
         model = await _resolveVisionModelForRam(model);
-        if (model != before) visionForced = true;
 
         // Free warm Gemma / projection leftovers before vision decode+infer.
         if (_activeModelType != null && _activeModelType != model) {
@@ -3547,23 +3369,6 @@ class ModelOrchestrator {
           } catch (_) {}
         }
       }
-      // #region agent log
-      _debugLog(
-        hypothesisId: 'E',
-        location: 'model_orchestrator.dart:processMessage:modelResolved',
-        message: 'Resolved inference model for turn',
-        data: {
-          'model': model.name,
-          'forcePrimary': forcePrimaryModel,
-          'preferred': _preferredModelOverride?.name,
-          'dirty': _modelOverrideDirty,
-          'primaryHeavy': selector.primaryHeavy.name,
-          'visionForced': visionForced,
-          'needsVision': needsVision,
-        },
-        runId: 'post-fix',
-      );
-      // #endregion
 
       if (tools.isNotEmpty) {
         model = await _maybeEscalateForTools(model: model, tools: tools);
@@ -3644,36 +3449,6 @@ class ModelOrchestrator {
         _activeChat = null;
       }
       final wasNull = _activeChat == null;
-      final pendingCount = _pendingReplay.length;
-      // #region agent log
-      _debugLog(
-        hypothesisId: 'A',
-        location: 'model_orchestrator.dart:processMessage:chatPrep',
-        message: 'Chat session prep before create/replay',
-        data: {
-          'wasNull': wasNull,
-          'pendingReplay': pendingCount,
-          'model': model.name,
-          'queryLen': query.length,
-          'tools': tools.length,
-          'chatTools': chatTools.length,
-          'kvLimit': _tokenLimitFor(model),
-          'systemPromptLen': systemInstruction.length,
-          'textToolPrompt': textToolPrompt,
-          'adultMode': _adultModeEnabled,
-          'sessionKeyChanged': wasNull && _lastChatSessionKey != sessionKey,
-          'computedOverhead': MessageLimits.computedOverheadFor(
-            model,
-            systemPromptChars: systemInstruction.length,
-            toolsCount: chatTools.length,
-            textToolPrompt: textToolPrompt,
-            hasRag: ragContext.trim().isNotEmpty,
-            hasAttachments: attachmentContext.trim().isNotEmpty,
-          ),
-        },
-        runId: 'post-fix',
-      );
-      // #endregion
       if (wasNull) {
         _isLoadingModel = true;
         _statusController.add('Preparing chat session...');
@@ -3718,19 +3493,6 @@ class ModelOrchestrator {
           // prompt is already over-budget.
           _lastReplaySource = List<ChatMessage>.from(_pendingReplay);
           _pendingReplay = const [];
-          _debugLog(
-            hypothesisId: 'A',
-            location: 'model_orchestrator.dart:processMessage:reinject',
-            message: 'Reinjecting history into new chat session',
-            data: {
-              'replayMessages': replay.length,
-              'budget': budget,
-              'rawBudget': rawBudget,
-              'emptyTexts': replay.where((m) => m.text.trim().isEmpty).length,
-            },
-            runId: 'post-fix',
-          );
-          // #endregion
           if (replay.isNotEmpty) {
             try {
               await _activeChat!.clearHistory(replayHistory: replay);
@@ -4216,20 +3978,6 @@ class ModelOrchestrator {
           );
         }
 
-        // #region agent log
-        _debugLog(
-          hypothesisId: 'B',
-          location: 'model_orchestrator.dart:processMessage:streamError',
-          message: 'Inference stream failed — dropping dead session',
-          data: {
-            'error': streamError.toString(),
-            'model': model.name,
-            'partialLen': fullResponse.length,
-            'isTokenOverflow': isTokenOverflow,
-          },
-          runId: 'post-fix',
-        );
-        // #endregion
         inferenceStopwatch.stop();
         final hint = isTokenOverflow
             ? 'The prompt (screenshot + tools/context) exceeded the model '
@@ -4295,20 +4043,6 @@ class ModelOrchestrator {
                 'Edit/regenerate may have left a stale session — try once more, '
                 'or Settings → Reset inference.'
           : fullResponse;
-      // #region agent log
-      if (fullResponse.trim().isEmpty) {
-        _debugLog(
-          hypothesisId: 'C',
-          location: 'model_orchestrator.dart:processMessage:emptyReply',
-          message: 'Model finished with empty text',
-          data: {'model': model.name, 'toolRounds': toolRounds},
-          runId: 'post-fix',
-        );
-        // Drop polluted session so the next turn recreates cleanly.
-        _activeChat = null;
-        _lastChatSessionKey = null;
-      }
-      // #endregion
       yield InferenceResult(
         text: reply,
         model: model,
@@ -4519,21 +4253,6 @@ class ModelOrchestrator {
       await ScreenshotService.instance.requestCapture();
       Uint8List? imageBytes = await ScreenshotService.instance
           .getLatestScreenshot();
-      // #region agent log
-      _debugLog(
-        hypothesisId: 'H12',
-        location: 'model_orchestrator.dart:_sendToolResponse',
-        message: 'take_screenshot after requestCapture+getLatest',
-        data: {
-          'toolSuccess': toolResult['success'],
-          'toolHasScreenshot': toolResult['hasScreenshot'],
-          'toolBytes': toolResult['bytes'],
-          'channelBytes': imageBytes?.length ?? 0,
-          'supportsImage': _activeModelSupportsImage,
-        },
-        runId: 'post-fix',
-      );
-      // #endregion
 
       final data = toolResult['data'];
       if ((imageBytes == null || imageBytes.isEmpty) && data != null) {
@@ -4556,15 +4275,6 @@ class ModelOrchestrator {
           isUser: true,
         );
         await _activeChat!.addQuery(imageMessage);
-        // #region agent log
-        _debugLog(
-          hypothesisId: 'H8',
-          location: 'model_orchestrator.dart:_sendToolResponse',
-          message: 'vision image attached to chat',
-          data: {'imageBytes': visionBytes.length},
-          runId: 'post-fix',
-        );
-        // #endregion
       }
 
       final toolResponseMessage = Message.toolResponse(

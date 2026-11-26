@@ -13,7 +13,6 @@ import 'package:nova_assistant/models/diffusion_model_info.dart';
 import 'package:nova_assistant/models/uncensored_model_catalog.dart';
 import 'package:nova_assistant/services/diffusion_download_service.dart';
 import 'package:nova_assistant/services/zimage_tensor_extraction.dart';
-import 'package:nova_assistant/utils/agent_debug_log.dart';
 import 'package:nova_assistant/utils/secure_prefs.dart';
 
 class InstalledModel {
@@ -230,18 +229,6 @@ class ModelManager {
       final uri = Uri.parse(url);
       final fileName = p.basename(uri.path);
 
-      // #region agent log
-      unawaited(
-        AgentDebugLog.log(
-          hypothesisId: 'H1-H3',
-          location: 'model_manager.dart:installFromNetwork:start',
-          message: 'installFromNetwork started',
-          data: {'url': url, 'fileName': fileName, 'modelType': modelType.name},
-          runId: 'post-fix',
-        ),
-      );
-      // #endregion
-
       final dir = await getApplicationDocumentsDirectory();
       final fileOnDisk = File('${dir.path}/$fileName');
       final modelsDir = Directory('${dir.path}/models');
@@ -263,23 +250,6 @@ class ModelManager {
         final fileSize = await File(modelPath).length();
         final canonicalName =
             _findCanonicalName(fileName, modelType) ?? fileName;
-
-        // #region agent log
-        unawaited(
-          AgentDebugLog.log(
-            hypothesisId: 'H1',
-            location: 'model_manager.dart:installFromNetwork:foundOnDisk',
-            message: 'Early disk path with deferInstall=true',
-            data: {
-              'modelPath': modelPath,
-              'fileSize': fileSize,
-              'canonicalName': canonicalName,
-              'fileOnDiskExists': await fileOnDisk.exists(),
-            },
-            runId: 'post-fix',
-          ),
-        );
-        // #endregion
 
         onProgress?.call(90);
         _statusController.add('Registering model found on disk...');
@@ -320,17 +290,6 @@ class ModelManager {
           'Download blocked: HuggingFace token required for gated models. '
           'Add your HF token in Settings.',
         );
-        // #region agent log
-        unawaited(
-          AgentDebugLog.log(
-            hypothesisId: 'F',
-            location: 'model_manager.dart:installFromNetwork:noToken',
-            message: 'Blocked gated download without HF token',
-            data: {'fileName': fileName, 'url': url},
-            runId: 'post-fix',
-          ),
-        );
-        // #endregion
 
         return null;
       }
@@ -348,23 +307,6 @@ class ModelManager {
           request.headers.set('Authorization', 'Bearer $hfToken');
         }
         final response = await request.close();
-
-        // #region agent log
-        unawaited(
-          AgentDebugLog.log(
-            hypothesisId: 'F',
-            location: 'model_manager.dart:installFromNetwork:http',
-            message: 'Download HTTP response',
-            data: {
-              'fileName': fileName,
-              'statusCode': response.statusCode,
-              'contentLength': response.contentLength,
-              'hasToken': hfToken != null && hfToken.isNotEmpty,
-            },
-            runId: 'post-fix',
-          ),
-        );
-        // #endregion
 
         if (response.statusCode == 401 || response.statusCode == 403) {
           _statusController.add(
@@ -407,21 +349,6 @@ class ModelManager {
           _statusController.add(
             'Download incomplete: expected $totalBytes bytes, got $receivedBytes',
           );
-          // #region agent log
-          unawaited(
-            AgentDebugLog.log(
-              hypothesisId: 'F',
-              location: 'model_manager.dart:installFromNetwork:incomplete',
-              message: 'Download incomplete',
-              data: {
-                'fileName': fileName,
-                'expected': totalBytes,
-                'received': receivedBytes,
-              },
-              runId: 'post-fix',
-            ),
-          );
-          // #endregion
           try {
             await tempFile.delete();
           } catch (e) {
@@ -470,24 +397,6 @@ class ModelManager {
         onProgress?.call(100);
       }
 
-      // #region agent log
-      unawaited(
-        AgentDebugLog.log(
-          hypothesisId: 'H3',
-          location: 'model_manager.dart:installFromNetwork:done',
-          message: 'installFromNetwork finished',
-          data: {
-            'success': installed != null,
-            'installedFileName': installed?.fileName,
-            'installedSize': installed?.fileSizeBytes,
-            'prefsCount': _installedModels.length,
-            'prefsNames': _installedModels.map((m) => m.fileName).toList(),
-          },
-          runId: 'post-fix',
-        ),
-      );
-      // #endregion
-
       // Clean up temp file
       try {
         await tempFile.delete();
@@ -503,17 +412,6 @@ class ModelManager {
     } catch (e) {
       _statusController.add('Install failed: $e');
       debugPrint('ModelManager: installFromNetwork failed: $e');
-      // #region agent log
-      unawaited(
-        AgentDebugLog.log(
-          hypothesisId: 'F',
-          location: 'model_manager.dart:installFromNetwork:error',
-          message: 'installFromNetwork exception',
-          data: {'error': e.toString()},
-          runId: 'post-fix',
-        ),
-      );
-      // #endregion
       return null;
     }
   }
@@ -791,23 +689,6 @@ class ModelManager {
           _findCanonicalName(specName, modelType) ??
           cleanedName;
       canonicalPath = '${docsDir.path}/$canonicalName';
-
-      // #region agent log
-      unawaited(
-        AgentDebugLog.log(
-          hypothesisId: 'H2-H4',
-          location: 'model_manager.dart:installFromFile:canonical',
-          message: 'Resolved canonical install name',
-          data: {
-            'sourceFileName': fileName,
-            'cleanedName': cleanedName,
-            'canonicalName': canonicalName,
-            'modelType': modelType.name,
-          },
-          runId: 'post-fix',
-        ),
-      );
-      // #endregion
 
       bool copied = false;
       if (!await File(canonicalPath).exists()) {
@@ -1489,17 +1370,6 @@ class ModelManager {
         );
         await _saveToPrefs();
 
-        // #region agent log
-        unawaited(
-          AgentDebugLog.log(
-            hypothesisId: 'H2-H4',
-            location: 'model_manager.dart:_repairMisnamedTempDownloads',
-            message: 'Repaired misnamed temp download',
-            data: {'from': name, 'to': canonical, 'size': size},
-            runId: 'post-fix',
-          ),
-        );
-        // #endregion
       }
     } catch (e) {
       debugPrint('ModelManager: _repairMisnamedTempDownloads failed: $e');

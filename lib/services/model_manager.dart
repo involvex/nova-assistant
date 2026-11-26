@@ -1369,7 +1369,6 @@ class ModelManager {
           ),
         );
         await _saveToPrefs();
-
       }
     } catch (e) {
       debugPrint('ModelManager: _repairMisnamedTempDownloads failed: $e');
